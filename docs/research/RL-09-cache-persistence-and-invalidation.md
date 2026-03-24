@@ -1,0 +1,65 @@
+# RL-09 Cache Persistence and Invalidation
+
+Status: Open
+Priority: P0
+Owner: TBD
+Last Updated: TBD
+
+## Core Question
+- How do we store index/cache state across runs, and when must that state be invalidated?
+
+## Why This Matters
+- Incremental speed depends on persistent cache reuse.
+- Bad invalidation logic turns a fast indexer into a wrong indexer.
+
+## Current Assumptions
+- Cache should persist at least:
+  - last scan XID
+  - node cache
+  - inode cache
+  - directory cache
+- Cache must be versioned and tied to a specific volume identity.
+
+## Known Facts
+- Repeated scans are the main target optimization.
+- Any uncertainty in scan consistency or identity must invalidate reuse conservatively.
+
+## Unknowns / Open Questions
+- What is the canonical volume identity for cache binding?
+- How should cache entries be versioned across parser changes?
+- What invalidates cache:
+  - unclean shutdown
+  - incompatible macOS/APFS version
+  - missing checkpoint continuity
+  - block reuse uncertainty
+- What on-disk cache format is best?
+- How do we make cache writes crash-safe?
+
+## Risks if We Get This Wrong
+- Stale results survive across runs.
+- Cache corruption after process crash.
+- Hidden incompatibility after software updates.
+
+## Planned Experiments / Demos
+1. Kill process during cache write and verify recovery behavior.
+2. Reboot between scans and verify continuity assumptions.
+3. Resize/modify volume and test cache binding behavior.
+4. Roll back to an earlier snapshot and test invalidation.
+
+## Evidence Log
+- [TBD] Cache key design notes.
+- [TBD] Crash-safety notes.
+- [TBD] Invalidation trigger notes.
+
+## Interim Decisions
+- Prefer conservative invalidation over aggressive reuse.
+
+## Exit Criteria
+- Cache schema defined.
+- Invalidation rules documented and tested.
+- Crash-safe persistence strategy chosen.
+
+## Related Logs
+- RL-04 Node Identity, Cache Keys, and OID Reuse
+- RL-05 Subtree Reuse Correctness
+- RL-10 Validation Corpus and Oracle
