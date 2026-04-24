@@ -1,256 +1,240 @@
-# **APFS High-Performance Filesystem Indexing (WizTree-like)**
+# APFS High-Performance Filesystem Indexing (WizTree-like)
 
-## Design / Technical Spec
+## Research-Grounded Technical Spec
 
----
+This document defines the current intended target for the project.
+It is intentionally narrower than the original concept note.
 
-## **1. Problem Statement**
+The repo's current research state does not yet justify a broad claim like
+"fast raw APFS indexing on normal live Macs with safe incremental reuse."
+The first defensible target is a correct, narrow parser mode that can be
+validated rigorously and expanded later.
 
-We want to build a **high-performance disk indexing tool** (WizTree-like) for APFS that can:
+## 1. Project Goal
 
-- Scan very large filesystems (millions of files)
-- Produce a full directory tree with aggregate sizes
-- Run repeatedly with **minimal incremental cost**
-- Maintain **correctness and completeness**
+Long-term goal:
 
-### Challenge
+- Build a WizTree-like indexer for APFS
+- Reduce repeat-scan cost by exploiting APFS structure where that is proven safe
+- Remain explicit about correctness, support boundaries, and fallback behavior
 
-Unlike NTFS, APFS does **not expose a flat metadata table** (e.g., MFT). Instead:
+Current v1 goal:
 
-- Metadata is stored across **multiple copy-on-write B-trees**
-- Filesystem state is represented as an **object graph (via OIDs)**
-- Traversal requires **tree walking + object resolution**
+- Parse one APFS volume
+- At one coherent filesystem state
+- Reconstruct a correct directory namespace
+- Report `logical size` as the canonical file and directory metric
+- Validate all results against a stable oracle
 
-This prevents a simple, linear, single-pass scan.
+## 2. Why The Scope Is Narrower
 
----
+APFS does not expose an NTFS-style flat metadata table.
+Instead, the parser must handle:
 
-## **2. Motivation**
+- checkpoint selection
+- object-map resolution
+- heterogeneous file-system records
+- copy-on-write versioning
+- format and deployment variability across modern macOS systems
 
-Existing approaches on macOS:
+Research completed so far supports a narrow full-scan target before a broader
+incremental engine.
 
-- System APIs (`readdir`, `getattrlistbulk`)
-	- Stable, supported
-	- But still require full traversal each run
+The following ideas remain unproven enough that they are not part of the v1
+contract:
 
-Goal:
+- `node_cache[oid]` as a safe persistent identity model
+- `unchanged node => unchanged subtree` as an implementation guarantee
+- exact physical/exclusive/shared accounting across clones, compression, sparse
+  files, and snapshots
+- raw parsing as the default mode on live, common-user startup disks
+- Finder-like merged `/` semantics from raw single-volume parsing
 
-> Achieve **near-WizTree performance on repeat scans** by exploiting APFS’s structural properties.
+## 3. V1 Product Contract
 
-Key observation:
+### 3.1 Supported Output
 
-- APFS is **copy-on-write (CoW)** and **transactional**
-- Unchanged data retains **identical object IDs (OIDs) and block addresses**
+V1 raw mode aims to produce:
 
-This enables **incremental traversal via structural caching**
+- a complete path tree for one APFS volume
+- stable parent/child relationships for that volume's namespace
+- per-file `logical size`
+- per-directory aggregates derived from `logical size`
 
----
+### 3.2 Deliberately Excluded From V1
 
-## **3. Key Insight**
+The following are not part of the initial correctness contract:
 
-APFS behaves like a **persistent tree structure**:
+- safe persistent incremental reuse across runs
+- exact "size on disk" reconciliation on clone-heavy or snapshot-heavy data
+- exclusive/shared byte attribution
+- merged system/data/firmlink/cryptex view of the macOS boot root
+- best-effort parsing of unsupported or weakly understood APFS variants
 
-- Changes rewrite only:
-	- Modified leaf nodes
-	- Their ancestor nodes up to the root
-- Unchanged subtrees remain **bitwise identical**
+### 3.3 Supported Raw-Mode Environment
 
-Therefore:
+The initial raw-mode target is:
 
-> If a B-tree node is unchanged, its entire subtree is unchanged.
+- offline images, or
+- explicitly stable APFS views, or
+- tightly controlled lab volumes that are simple enough to validate
 
----
+The initial raw-mode target is not:
 
-## **4. System Model**
+- "whatever the user is currently booted from"
+- every FileVault or hardware-backed encryption configuration
+- every live mounted startup-disk scenario
 
-### Core Structures
+If the environment falls outside the tested raw-mode allowlist, the product
+should fall back to safer supported APIs rather than guessing.
 
-- **Object Map (OMAP)**
-  Maps `OID -> physical block address`
+## 4. Support Boundary And Fallback
 
-- **FS Tree (B-tree)**
-  Contains:
-	- Inodes
-	- Directory entries (name -> inode)
-	- Extents
+### 4.1 Raw Mode Allowlist
 
-- **Checkpoint / Transaction (XID)**
-  Represents a consistent snapshot of the filesystem
+Raw mode should only be considered when all of the following hold:
 
----
+- the volume/container layout is in the tested support matrix
+- a coherent filesystem state can be identified
+- required feature bits and tree layouts are recognized
+- the relevant object maps can be resolved without ambiguity
+- the requested product mode is "single APFS volume" rather than "user-visible
+  merged root"
 
-## **5. High-Level Pipeline**
+### 4.2 Fallback Triggers
 
-### Full Scan (baseline)
+Raw mode should fail closed and fall back when any of the following is true:
 
-```
-read container superblock
--> resolve latest checkpoint (XID)
--> initialize OMAP resolver
--> load FS tree root
--> traverse FS B-tree
-    -> extract inodes + dir entries
--> reconstruct directory hierarchy
--> compute aggregates (sizes)
--> persist cache state
-```
+- checkpoint selection is ambiguous or malformed
+- object resolution yields unexpected object type/subtype results
+- unsupported incompatible feature flags are present
+- the environment depends on unsupported encryption, snapshot, or volume-group
+  semantics
+- the volume is outside the validated compatibility matrix
+- the product request requires merged-root semantics rather than raw
+  single-volume semantics
 
----
+### 4.3 Fallback Modes
 
-## **6. Incremental Scan Strategy**
+Fallback strategy should be explicit:
 
-### Stored State
+- POSIX traversal for maximum support
+- bulk attribute APIs where they improve performance safely
+- snapshot-assisted workflows only where supported and operationally realistic
 
-Persist across runs:
+## 5. Full-Scan Model For V1
 
-- `last_scan_xid`
-- `node_cache` (B-tree nodes)
-- `inode_cache`
-- `dir_cache`
+The current baseline raw pipeline is:
 
----
-
-### Incremental Algorithm
-
-```
-current_xid = get_latest_xid()
-
-if current_xid == last_scan_xid:
-    return cached results
-
-walk FS tree:
-    for each node:
-        if node unchanged (same OID + block addr):
-            reuse cached subtree
-            skip traversal
-        else:
-            recurse into children
-
-update affected inodes and directories only
-
-persist updated caches
-```
-
----
-
-## **7. Cache Design**
-
-### 7.1 Node Cache (critical)
-
-Keyed by OID:
-
-```
-node_cache[oid] = {
-    block_addr,
-    parsed_records,
-    subtree_summary (optional),
-}
+```text
+read container superblock copy at block 0
+-> locate checkpoint descriptor area
+-> select latest valid checkpoint
+-> load checkpoint state
+-> resolve container OMAP and target volume superblock
+-> resolve volume OMAP and FS tree root
+-> traverse required trees/records for one volume
+-> reconstruct namespace
+-> compute logical-size aggregates
+-> compare output to oracle
 ```
 
-Purpose:
+This is a full reparse model.
+V1 does not assume persistent cache reuse across runs.
 
-- Skip entire subtrees if unchanged
+## 6. Minimum Parser Surface
 
----
+The v1 parser is expected to answer the following questions correctly:
 
-### 7.2 Inode Cache
+- which checkpoint / transaction defines the scan
+- which OMAP is authoritative for each object being resolved
+- which tree roots must be loaded to enumerate one volume
+- which record families are required for namespace reconstruction
+- which additional fields are required for `logical size`
 
-```
-inode_cache[oid] = {
-    size,
-    metadata,
-    last_seen_xid,
-}
-```
+Research still needs to close the exact minimum required-record matrix.
+That matrix, not intuition, should define the parser surface.
 
----
+## 7. Correctness Standard
 
-### 7.3 Directory Cache
+The parser is only considered correct when:
 
-```
-dir_cache[parent_oid] = [
-    (name, child_oid)
-]
-```
+- it reads from one coherent filesystem state
+- namespace output matches the selected oracle
+- file and directory `logical size` output matches the selected oracle
+- known edge cases are covered by a repeatable mutation corpus
+- unsupported states trigger fallback rather than silent best-effort behavior
 
----
+Correctness for full scans and correctness for incremental reuse are separate
+gates.
 
-### 7.4 Optional: Subtree Hash
+## 8. Incremental Scanning Status
 
-```
-node_hash = hash(records + child_oids)
-```
+Incremental scanning remains a research track, not a v1 promise.
 
-Used to:
+Before any persistent incremental design is encoded into the main spec, the
+repo still needs proof for:
 
-- Validate reuse beyond block address comparison
+- safe cache identity
+- OID and block reuse behavior under churn
+- subtree reuse conditions under APFS-specific tree updates
+- conservative invalidation rules
+- validation against a fresh full-parse oracle
 
----
+No current design in this repo should assume that `oid` alone is a safe cache
+key or that an unchanged node automatically implies a reusable subtree summary.
 
-## **8. Traversal Model**
+## 9. Size Semantics
 
-### Storage-level traversal
+The canonical v1 metric is:
 
-- **B-tree walk (DFS)**
-- Driven by node structure, not directory hierarchy
+- `logical size`
 
-### Logical traversal (post-processing)
+The following remain future modes pending more evidence:
 
-- Build directory tree from:
-	- inode map
-	- directory entry map
+- allocated size
+- exclusive size
+- shared size
+- snapshot-retained attribution
 
----
+If later modes are added, they must be clearly labeled and must not be implied
+to reconcile with all APFS and macOS tools simultaneously unless proven.
 
-## **9. Correctness Guarantees**
+## 10. Namespace Semantics
 
-To ensure exactness:
+The initial parser target is:
 
-- Always read from a **single checkpoint (XID)**
-- Never mix objects across transactions
-- Invalidate cache if:
-	- Checkpoint chain is inconsistent
-	- Volume was not cleanly unmounted
-- Treat unchanged node ⇒ unchanged subtree (guaranteed by CoW)
+- one raw APFS volume
 
----
+The initial parser target is not:
 
-## **10. Performance Characteristics**
+- the Finder-visible boot-root view assembled from system/data volume groups,
+  firmlinks, snapshots, and related presentation layers
 
-### Initial scan
+If the product later grows a "boot-root" or "OS-visible namespace" mode, that
+should be specified as a separate semantic mode with its own oracle and support
+matrix.
 
-- Comparable to full B-tree traversal
-- Slower than NTFS MFT scan due to:
-	- Non-linear reads
-	- Object indirection
+## 11. Validation Requirement
 
-### Incremental scans
+Every research or implementation step should end in durable evidence:
 
-- Complexity:
-  ```
-  O(changed_nodes × log N)
-  ```
-- Typically:
-	- Very fast if filesystem churn is low
-	- Skips majority of tree
+- source review notes for external claims
+- experiment notes for probes and mutations
+- explicit links back into the affected `RL-*` logs
 
----
+Performance claims are non-goals until correctness and support boundaries are
+stable.
 
-## **11. Limitations / Non-Goals**
+## 12. Near-Term Roadmap
 
-- No direct equivalent to NTFS linear scan
-- Raw APFS parsing:
-	- Complex
-	- Sensitive to format changes
-- Snapshot handling:
-	- Out of scope initially (optional extension)
+Near-term work should prioritize:
 
----
+1. support-boundary and fallback definition
+2. checkpoint / OMAP / root-discovery contract
+3. required-record matrix for namespace + logical size
+4. experiment and oracle infrastructure
+5. small controlled APFS probes
 
-## **12. Future Enhancements**
-
-- Parallel subtree traversal
-- Persistent on-disk cache (memory-mapped)
-- Snapshot-aware indexing
-- Extent-level dedup accounting
-- Hybrid mode (API + raw parsing fallback)
+Only after those are stable should the project move cache design, subtree
+reuse, and repeat-scan performance back to the center of the spec.

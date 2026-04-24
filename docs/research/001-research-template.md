@@ -1,9 +1,13 @@
 # <Research Log Title>
 
+Use this template for `RL-*` files only.
+`RL-*` files are distilled synthesis, not raw evidence dumps.
+
 Status: Open
 Priority: P0
 Owner: TBD
 Last Updated: TBD
+Primary Classification: TBD
 
 ## Core Question
 - 
@@ -31,8 +35,8 @@ Last Updated: TBD
 3. 
 
 ## Evidence Log
-- [Date] 
-- [Date] 
+- [Date] `SR-###` or `EX-###`: what changed and why it matters.
+- [Date] `SR-###` or `EX-###`: what was ruled out or narrowed.
 
 ## Interim Decisions
 - None yet.
@@ -43,4 +47,4 @@ Last Updated: TBD
 - 
 
 ## Related Logs
--
+- 

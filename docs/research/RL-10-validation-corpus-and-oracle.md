@@ -20,16 +20,22 @@ Last Updated: TBD
   - POSIX traversal for namespace
   - system tools for sizes
   - snapshots for stable comparison
+- Negative and inconclusive results should be preserved as first-class evidence,
+  not discarded.
 
 ## Known Facts
 - Full correctness and incremental correctness are separate problems.
 - Many edge cases will only appear under targeted demos.
+- "The oracle" is not one thing; validation must be feature-specific and scoped
+  to the exact product mode under test.
 
 ## Unknowns / Open Questions
 - What is the best oracle for each output metric?
 - How do we compare against user-visible namespace on modern macOS?
 - What test corpus is needed to cover APFS edge behavior?
 - How do we detect silent incremental bugs?
+- What minimum artifact set should every experiment save so that future work can
+  reuse it?
 
 ## Risks if We Get This Wrong
 - Shipping a parser that appears to work on happy-path volumes only.
@@ -54,9 +60,51 @@ Last Updated: TBD
 - [TBD] Initial corpus definition.
 - [TBD] Oracle comparison method.
 - [TBD] Incremental diffing framework notes.
+- [2026-04-24] The research documentation schema was split into `RL-*`, `SR-*`,
+  and `EX-*` artifacts, with experiments required to record environment, oracle,
+  expected outcomes, observed results, and what the result rules out.
 
 ## Interim Decisions
 - Every optimization must be validated against a fresh full-scan oracle.
+- Namespace, size, incremental behavior, and boot-root semantics may require
+  different oracles.
+- Raw outputs belong in `artifacts/`, while distilled conclusions belong in the
+  experiment `README.md` and then back in the relevant `RL-*` logs.
+
+## Oracle Matrix
+
+- `Raw single-volume namespace`:
+  POSIX/API traversal of the same chosen volume or stable mounted view.
+- `Logical size`:
+  public file metadata APIs and tools that report logical size for the chosen
+  files and directories.
+- `Allocated size`:
+  public metadata APIs only for explicitly scoped cases; do not generalize to
+  clone-, compression-, or snapshot-heavy semantics without proof.
+- `Incremental correctness`:
+  compare incremental output against a fresh full reparse of the same selected
+  state.
+- `Boot-root or merged namespace semantics`:
+  only use a user-visible macOS root oracle when that exact semantic mode is the
+  question under test.
+
+## Artifact Policy
+
+Every `EX-*` note should save at least:
+
+- environment manifest
+- oracle definition
+- exact setup and probe steps
+- expected A/B observations
+- observed results
+- artifact list
+- interpretation
+- what the result rules out
+- impact on related `RL-*` logs
+- next exact step
+
+Negative and inconclusive results remain valid evidence if they narrow the
+design space.
 
 ## Exit Criteria
 - Automated regression suite exists.

@@ -17,11 +17,15 @@ Last Updated: TBD
 - APFS checkpoints represent consistent transactional states.
 - A scan should anchor itself to one XID and resolve all objects relative to that XID.
 - If checkpoint selection is ambiguous or inconsistent, cache reuse must be disabled.
+- Block 0 should be treated as a locator for checkpoint metadata, not as an
+  unconditional source of current state.
 
 ## Known Facts
 - APFS is copy-on-write and transactional.
 - Superblock/checkpoint structures determine current filesystem state.
 - A "latest" state exists, but the exact selection rules need to be confirmed.
+- Apple and third-party parsers converge on "latest valid checkpoint" rather
+  than "block 0 is current."
 
 ## Unknowns / Open Questions
 - What is the exact algorithm for selecting the latest valid checkpoint?
@@ -30,6 +34,8 @@ Last Updated: TBD
 - Can we safely raw-read a mounted volume while writes continue?
 - Are there edge cases where "latest" visible metadata is not the correct scan root?
 - Should we prefer a mounted snapshot over raw latest checkpoint for live scanning?
+- Which checkpoint layouts or failure modes should be immediate fallback
+  conditions in v1?
 
 ## Risks if We Get This Wrong
 - Silent corruption in index results.
@@ -47,10 +53,14 @@ Last Updated: TBD
 - [TBD] Initial checkpoint parsing notes.
 - [TBD] Mounted-volume consistency observations.
 - [TBD] Crash-recovery observations.
+- [2026-04-24] `SR-002` defined the current entry contract: use block 0 only to
+  locate the checkpoint descriptor area, then choose the valid `nx_superblock_t`
+  with the highest `xid` and reject malformed checkpoint state.
 
 ## Interim Decisions
 - A scan must never intentionally mix transactions.
 - If consistency cannot be proven, fall back to safer supported methods.
+- Checkpoint selection should be documented as an algorithm, not a heuristic.
 
 ## Exit Criteria
 - Defined algorithm for selecting scan XID.

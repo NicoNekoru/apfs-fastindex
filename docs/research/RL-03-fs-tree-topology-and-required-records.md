@@ -15,10 +15,17 @@ Last Updated: TBD
 ## Current Assumptions
 - The FS tree contains enough metadata to reconstruct namespace and file metadata.
 - Inodes, directory entries, and possibly extents are the minimum critical record families.
+- The required tree set is mode-specific; namespace + logical size should be
+  narrower than physical/shared accounting or boot-root synthesis.
 
 ## Known Facts
 - APFS metadata is distributed across B-trees rather than a single flat table.
 - Files, directories, and extents are represented as separate record types.
+- Root discovery begins from the chosen checkpoint and flows through container
+  OMAP, volume superblock, volume OMAP, and then the file-system root tree.
+- Volume metadata also exposes additional roots such as extent-reference and
+  snapshot metadata trees, but they may not all be required for every product
+  mode.
 
 ## Unknowns / Open Questions
 - What exact root objects must be discovered from volume metadata?
@@ -29,6 +36,7 @@ Last Updated: TBD
   - clone/shared extent accounting
 - Are there relevant side trees beyond the obvious FS tree path?
 - Which records can safely be ignored in v1?
+- What explicit required-tree matrix should the repo use for each product mode?
 
 ## Risks if We Get This Wrong
 - Missing files.
@@ -52,9 +60,14 @@ Last Updated: TBD
 - [TBD] Record taxonomy notes.
 - [TBD] Root discovery notes.
 - [TBD] Minimal parser set notes.
+- [2026-04-24] `SR-002` proposed a mode-specific root contract: for raw
+  single-volume namespace + logical size, the first critical chain is checkpoint
+  -> container OMAP -> volume superblock -> volume OMAP -> file-system root tree.
 
 ## Interim Decisions
 - Separate "required for namespace" from "required for accounting."
+- Define required trees and required records by product mode, not one universal
+  parser surface.
 
 ## Exit Criteria
 - A required-record matrix exists for each product mode.
