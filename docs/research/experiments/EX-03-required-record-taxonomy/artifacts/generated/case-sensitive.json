@@ -1,0 +1,605 @@
+{
+  "fs_name": "Case-sensitive APFS",
+  "logs": [
+    {
+      "extra": {},
+      "snapshot": [
+        {
+          "inode": 2,
+          "nlink": 2,
+          "path": ".",
+          "type": "dir"
+        }
+      ],
+      "step": "initial",
+      "summary": {
+        "file_count": 0,
+        "hard_link_paths": [],
+        "naive_logical_total": 0,
+        "sparse_candidates": [],
+        "symlink_count": 0,
+        "unique_inode_logical_total": 0
+      }
+    },
+    {
+      "extra": {},
+      "snapshot": [
+        {
+          "inode": 2,
+          "nlink": 5,
+          "path": ".",
+          "type": "dir"
+        },
+        {
+          "inode": 17,
+          "nlink": 2,
+          "path": "dst",
+          "type": "dir"
+        },
+        {
+          "inode": 16,
+          "nlink": 2,
+          "path": "src",
+          "type": "dir"
+        }
+      ],
+      "step": "create src and dst directories",
+      "summary": {
+        "file_count": 0,
+        "hard_link_paths": [],
+        "naive_logical_total": 0,
+        "sparse_candidates": [],
+        "symlink_count": 0,
+        "unique_inode_logical_total": 0
+      }
+    },
+    {
+      "extra": {},
+      "snapshot": [
+        {
+          "inode": 2,
+          "nlink": 5,
+          "path": ".",
+          "type": "dir"
+        },
+        {
+          "inode": 17,
+          "nlink": 2,
+          "path": "dst",
+          "type": "dir"
+        },
+        {
+          "inode": 16,
+          "nlink": 3,
+          "path": "src",
+          "type": "dir"
+        },
+        {
+          "allocated_bytes": 4096,
+          "inode": 20,
+          "logical_size": 6,
+          "nlink": 1,
+          "path": "src/base.txt",
+          "type": "file"
+        }
+      ],
+      "step": "create src/base.txt",
+      "summary": {
+        "file_count": 1,
+        "hard_link_paths": [],
+        "naive_logical_total": 6,
+        "sparse_candidates": [],
+        "symlink_count": 0,
+        "unique_inode_logical_total": 6
+      }
+    },
+    {
+      "extra": {},
+      "snapshot": [
+        {
+          "inode": 2,
+          "nlink": 5,
+          "path": ".",
+          "type": "dir"
+        },
+        {
+          "inode": 17,
+          "nlink": 2,
+          "path": "dst",
+          "type": "dir"
+        },
+        {
+          "inode": 16,
+          "nlink": 3,
+          "path": "src",
+          "type": "dir"
+        },
+        {
+          "allocated_bytes": 4096,
+          "inode": 20,
+          "logical_size": 6,
+          "nlink": 1,
+          "path": "src/renamed.txt",
+          "type": "file"
+        }
+      ],
+      "step": "rename src/base.txt -> src/renamed.txt",
+      "summary": {
+        "file_count": 1,
+        "hard_link_paths": [],
+        "naive_logical_total": 6,
+        "sparse_candidates": [],
+        "symlink_count": 0,
+        "unique_inode_logical_total": 6
+      }
+    },
+    {
+      "extra": {},
+      "snapshot": [
+        {
+          "inode": 2,
+          "nlink": 5,
+          "path": ".",
+          "type": "dir"
+        },
+        {
+          "inode": 17,
+          "nlink": 3,
+          "path": "dst",
+          "type": "dir"
+        },
+        {
+          "allocated_bytes": 4096,
+          "inode": 20,
+          "logical_size": 6,
+          "nlink": 1,
+          "path": "dst/moved.txt",
+          "type": "file"
+        },
+        {
+          "inode": 16,
+          "nlink": 2,
+          "path": "src",
+          "type": "dir"
+        }
+      ],
+      "step": "move src/renamed.txt -> dst/moved.txt",
+      "summary": {
+        "file_count": 1,
+        "hard_link_paths": [],
+        "naive_logical_total": 6,
+        "sparse_candidates": [],
+        "symlink_count": 0,
+        "unique_inode_logical_total": 6
+      }
+    },
+    {
+      "extra": {},
+      "snapshot": [
+        {
+          "inode": 2,
+          "nlink": 5,
+          "path": ".",
+          "type": "dir"
+        },
+        {
+          "inode": 17,
+          "nlink": 4,
+          "path": "dst",
+          "type": "dir"
+        },
+        {
+          "allocated_bytes": 4096,
+          "inode": 20,
+          "logical_size": 6,
+          "nlink": 2,
+          "path": "dst/hard.txt",
+          "type": "file"
+        },
+        {
+          "allocated_bytes": 4096,
+          "inode": 20,
+          "logical_size": 6,
+          "nlink": 2,
+          "path": "dst/moved.txt",
+          "type": "file"
+        },
+        {
+          "inode": 16,
+          "nlink": 2,
+          "path": "src",
+          "type": "dir"
+        }
+      ],
+      "step": "create hard link dst/hard.txt",
+      "summary": {
+        "file_count": 2,
+        "hard_link_paths": [
+          "dst/hard.txt",
+          "dst/moved.txt"
+        ],
+        "naive_logical_total": 12,
+        "sparse_candidates": [],
+        "symlink_count": 0,
+        "unique_inode_logical_total": 6
+      }
+    },
+    {
+      "extra": {},
+      "snapshot": [
+        {
+          "inode": 2,
+          "nlink": 5,
+          "path": ".",
+          "type": "dir"
+        },
+        {
+          "inode": 17,
+          "nlink": 5,
+          "path": "dst",
+          "type": "dir"
+        },
+        {
+          "allocated_bytes": 4096,
+          "inode": 20,
+          "logical_size": 6,
+          "nlink": 2,
+          "path": "dst/hard.txt",
+          "type": "file"
+        },
+        {
+          "allocated_bytes": 4096,
+          "inode": 20,
+          "logical_size": 6,
+          "nlink": 2,
+          "path": "dst/moved.txt",
+          "type": "file"
+        },
+        {
+          "allocated_bytes": 32768,
+          "inode": 23,
+          "logical_size": 1048576,
+          "nlink": 1,
+          "path": "dst/sparse.bin",
+          "type": "file"
+        },
+        {
+          "inode": 16,
+          "nlink": 2,
+          "path": "src",
+          "type": "dir"
+        }
+      ],
+      "step": "create sparse file dst/sparse.bin",
+      "summary": {
+        "file_count": 3,
+        "hard_link_paths": [
+          "dst/hard.txt",
+          "dst/moved.txt"
+        ],
+        "naive_logical_total": 1048588,
+        "sparse_candidates": [
+          "dst/sparse.bin"
+        ],
+        "symlink_count": 0,
+        "unique_inode_logical_total": 1048582
+      }
+    },
+    {
+      "extra": {
+        "cp_returncode": 0,
+        "cp_stderr": ""
+      },
+      "snapshot": [
+        {
+          "inode": 2,
+          "nlink": 5,
+          "path": ".",
+          "type": "dir"
+        },
+        {
+          "inode": 17,
+          "nlink": 6,
+          "path": "dst",
+          "type": "dir"
+        },
+        {
+          "allocated_bytes": 4096,
+          "inode": 24,
+          "logical_size": 6,
+          "nlink": 1,
+          "path": "dst/clone.txt",
+          "type": "file"
+        },
+        {
+          "allocated_bytes": 4096,
+          "inode": 20,
+          "logical_size": 6,
+          "nlink": 2,
+          "path": "dst/hard.txt",
+          "type": "file"
+        },
+        {
+          "allocated_bytes": 4096,
+          "inode": 20,
+          "logical_size": 6,
+          "nlink": 2,
+          "path": "dst/moved.txt",
+          "type": "file"
+        },
+        {
+          "allocated_bytes": 32768,
+          "inode": 23,
+          "logical_size": 1048576,
+          "nlink": 1,
+          "path": "dst/sparse.bin",
+          "type": "file"
+        },
+        {
+          "inode": 16,
+          "nlink": 2,
+          "path": "src",
+          "type": "dir"
+        }
+      ],
+      "step": "clone dst/moved.txt -> dst/clone.txt",
+      "summary": {
+        "file_count": 4,
+        "hard_link_paths": [
+          "dst/hard.txt",
+          "dst/moved.txt"
+        ],
+        "naive_logical_total": 1048594,
+        "sparse_candidates": [
+          "dst/sparse.bin"
+        ],
+        "symlink_count": 0,
+        "unique_inode_logical_total": 1048588
+      }
+    },
+    {
+      "extra": {},
+      "snapshot": [
+        {
+          "inode": 2,
+          "nlink": 5,
+          "path": ".",
+          "type": "dir"
+        },
+        {
+          "inode": 17,
+          "nlink": 6,
+          "path": "dst",
+          "type": "dir"
+        },
+        {
+          "allocated_bytes": 4096,
+          "inode": 24,
+          "logical_size": 6,
+          "nlink": 1,
+          "path": "dst/clone.txt",
+          "type": "file"
+        },
+        {
+          "allocated_bytes": 4096,
+          "inode": 20,
+          "logical_size": 11,
+          "nlink": 2,
+          "path": "dst/hard.txt",
+          "type": "file"
+        },
+        {
+          "allocated_bytes": 4096,
+          "inode": 20,
+          "logical_size": 11,
+          "nlink": 2,
+          "path": "dst/moved.txt",
+          "type": "file"
+        },
+        {
+          "allocated_bytes": 32768,
+          "inode": 23,
+          "logical_size": 1048576,
+          "nlink": 1,
+          "path": "dst/sparse.bin",
+          "type": "file"
+        },
+        {
+          "inode": 16,
+          "nlink": 2,
+          "path": "src",
+          "type": "dir"
+        }
+      ],
+      "step": "append to dst/moved.txt",
+      "summary": {
+        "file_count": 4,
+        "hard_link_paths": [
+          "dst/hard.txt",
+          "dst/moved.txt"
+        ],
+        "naive_logical_total": 1048604,
+        "sparse_candidates": [
+          "dst/sparse.bin"
+        ],
+        "symlink_count": 0,
+        "unique_inode_logical_total": 1048593
+      }
+    },
+    {
+      "extra": {},
+      "snapshot": [
+        {
+          "inode": 2,
+          "nlink": 5,
+          "path": ".",
+          "type": "dir"
+        },
+        {
+          "inode": 17,
+          "nlink": 7,
+          "path": "dst",
+          "type": "dir"
+        },
+        {
+          "allocated_bytes": 4096,
+          "inode": 24,
+          "logical_size": 6,
+          "nlink": 1,
+          "path": "dst/clone.txt",
+          "type": "file"
+        },
+        {
+          "allocated_bytes": 4096,
+          "inode": 20,
+          "logical_size": 11,
+          "nlink": 2,
+          "path": "dst/hard.txt",
+          "type": "file"
+        },
+        {
+          "allocated_bytes": 0,
+          "inode": 26,
+          "logical_size": 9,
+          "nlink": 1,
+          "path": "dst/link.txt",
+          "type": "symlink"
+        },
+        {
+          "allocated_bytes": 4096,
+          "inode": 20,
+          "logical_size": 11,
+          "nlink": 2,
+          "path": "dst/moved.txt",
+          "type": "file"
+        },
+        {
+          "allocated_bytes": 32768,
+          "inode": 23,
+          "logical_size": 1048576,
+          "nlink": 1,
+          "path": "dst/sparse.bin",
+          "type": "file"
+        },
+        {
+          "inode": 16,
+          "nlink": 2,
+          "path": "src",
+          "type": "dir"
+        }
+      ],
+      "step": "create symlink dst/link.txt",
+      "summary": {
+        "file_count": 4,
+        "hard_link_paths": [
+          "dst/hard.txt",
+          "dst/moved.txt"
+        ],
+        "naive_logical_total": 1048604,
+        "sparse_candidates": [
+          "dst/sparse.bin"
+        ],
+        "symlink_count": 1,
+        "unique_inode_logical_total": 1048593
+      }
+    },
+    {
+      "extra": {
+        "case_a_created": true,
+        "case_b_created": true,
+        "case_b_error": null
+      },
+      "snapshot": [
+        {
+          "inode": 2,
+          "nlink": 7,
+          "path": ".",
+          "type": "dir"
+        },
+        {
+          "allocated_bytes": 4096,
+          "inode": 27,
+          "logical_size": 2,
+          "nlink": 1,
+          "path": "CaseName.txt",
+          "type": "file"
+        },
+        {
+          "allocated_bytes": 4096,
+          "inode": 28,
+          "logical_size": 2,
+          "nlink": 1,
+          "path": "casename.txt",
+          "type": "file"
+        },
+        {
+          "inode": 17,
+          "nlink": 7,
+          "path": "dst",
+          "type": "dir"
+        },
+        {
+          "allocated_bytes": 4096,
+          "inode": 24,
+          "logical_size": 6,
+          "nlink": 1,
+          "path": "dst/clone.txt",
+          "type": "file"
+        },
+        {
+          "allocated_bytes": 4096,
+          "inode": 20,
+          "logical_size": 11,
+          "nlink": 2,
+          "path": "dst/hard.txt",
+          "type": "file"
+        },
+        {
+          "allocated_bytes": 0,
+          "inode": 26,
+          "logical_size": 9,
+          "nlink": 1,
+          "path": "dst/link.txt",
+          "type": "symlink"
+        },
+        {
+          "allocated_bytes": 4096,
+          "inode": 20,
+          "logical_size": 11,
+          "nlink": 2,
+          "path": "dst/moved.txt",
+          "type": "file"
+        },
+        {
+          "allocated_bytes": 32768,
+          "inode": 23,
+          "logical_size": 1048576,
+          "nlink": 1,
+          "path": "dst/sparse.bin",
+          "type": "file"
+        },
+        {
+          "inode": 16,
+          "nlink": 2,
+          "path": "src",
+          "type": "dir"
+        }
+      ],
+      "step": "case probe",
+      "summary": {
+        "file_count": 6,
+        "hard_link_paths": [
+          "dst/hard.txt",
+          "dst/moved.txt"
+        ],
+        "naive_logical_total": 1048608,
+        "sparse_candidates": [
+          "dst/sparse.bin"
+        ],
+        "symlink_count": 1,
+        "unique_inode_logical_total": 1048597
+      }
+    }
+  ],
+  "volume_label": "EX03CS"
+}

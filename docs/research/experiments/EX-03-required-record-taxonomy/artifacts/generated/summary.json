@@ -1,0 +1,68 @@
+{
+  "case_insensitive_case_probe": {
+    "case_a_created": true,
+    "case_b_created": false,
+    "case_b_error": "FileExistsError: [Errno 17] File exists: '/tmp/apfsfi-ex03ci-954dtu3t/mnt/casename.txt'"
+  },
+  "case_insensitive_clone_step": {
+    "cp_returncode": 0,
+    "cp_stderr": ""
+  },
+  "case_insensitive_hardlink_summary": {
+    "file_count": 2,
+    "hard_link_paths": [
+      "dst/hard.txt",
+      "dst/moved.txt"
+    ],
+    "naive_logical_total": 12,
+    "sparse_candidates": [],
+    "symlink_count": 0,
+    "unique_inode_logical_total": 6
+  },
+  "case_insensitive_sparse_summary": {
+    "file_count": 3,
+    "hard_link_paths": [
+      "dst/hard.txt",
+      "dst/moved.txt"
+    ],
+    "naive_logical_total": 1048588,
+    "sparse_candidates": [
+      "dst/sparse.bin"
+    ],
+    "symlink_count": 0,
+    "unique_inode_logical_total": 1048582
+  },
+  "case_sensitive_case_probe": {
+    "case_a_created": true,
+    "case_b_created": true,
+    "case_b_error": null
+  },
+  "case_sensitive_clone_step": {
+    "cp_returncode": 0,
+    "cp_stderr": ""
+  },
+  "case_sensitive_hardlink_summary": {
+    "file_count": 2,
+    "hard_link_paths": [
+      "dst/hard.txt",
+      "dst/moved.txt"
+    ],
+    "naive_logical_total": 12,
+    "sparse_candidates": [],
+    "symlink_count": 0,
+    "unique_inode_logical_total": 6
+  },
+  "case_sensitive_sparse_summary": {
+    "file_count": 3,
+    "hard_link_paths": [
+      "dst/hard.txt",
+      "dst/moved.txt"
+    ],
+    "naive_logical_total": 1048588,
+    "sparse_candidates": [
+      "dst/sparse.bin"
+    ],
+    "symlink_count": 0,
+    "unique_inode_logical_total": 1048582
+  }
+}

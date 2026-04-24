@@ -60,6 +60,9 @@ Last Updated: TBD
 - [2026-04-24] `SR-001` narrowed the initial raw-mode target to offline or
   explicitly stable single-volume contexts and identified live startup-disk raw
   parsing as a support-boundary question rather than a default assumption.
+- [2026-04-24] `EX-01` found that the startup container on this machine blocked
+  unprivileged raw reads of `/dev/rdisk3`, while a mounted image-backed APFS lab
+  volume remained probeable. That supports a narrow initial raw-mode allowlist.
 
 ## Interim Decisions
 - Deployment constraints are first-class product constraints, not implementation
@@ -67,6 +70,8 @@ Last Updated: TBD
 - Initial raw mode should target isolated, validated APFS environments first.
 - Live common-user startup-disk support should default to fallback unless
   experiments prove a narrower safe path.
+- Image-backed APFS volumes are valid early research targets because they let us
+  probe raw semantics without assuming startup-disk viability.
 
 ## Exit Criteria
 - Supported environment matrix.

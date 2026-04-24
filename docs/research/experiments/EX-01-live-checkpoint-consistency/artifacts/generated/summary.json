@@ -1,0 +1,21 @@
+{
+  "final_highest_xid": 10,
+  "initial_highest_xid": 2,
+  "operation_count": 8,
+  "startup_raw_access": {
+    "error": "PermissionError: [Errno 1] Operation not permitted: '/dev/rdisk3'",
+    "path": "/dev/rdisk3",
+    "success": false
+  },
+  "unique_highest_xids": [
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10
+  ]
+}

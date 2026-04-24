@@ -147,7 +147,7 @@ Gate D: broader product semantics and optimization
 - RL-11 Snapshots, Volume Groups, and Firmlinks
 - RL-12 Performance Model and Optimization
 
-## Active Experiments
+## Current Experiment Tracks
 
 - `EX-01` live checkpoint consistency and runtime boundary
 - `EX-03` required-record taxonomy for narrow v1

@@ -63,11 +63,16 @@ Last Updated: TBD
 - [2026-04-24] `SR-002` proposed a mode-specific root contract: for raw
   single-volume namespace + logical size, the first critical chain is checkpoint
   -> container OMAP -> volume superblock -> volume OMAP -> file-system root tree.
+- [2026-04-24] `EX-03` produced the first source-backed required-record matrix:
+  `DIR_REC` + `INODE` + logical-size-bearing inode fields for narrow v1, with
+  `SIBLING_LINK` / `SIBLING_MAP` required when hard links are in scope.
 
 ## Interim Decisions
 - Separate "required for namespace" from "required for accounting."
 - Define required trees and required records by product mode, not one universal
   parser surface.
+- Treat extent-reference and broader physical/shared-accounting machinery as
+  outside the first namespace + logical-size parser target.
 
 ## Exit Criteria
 - A required-record matrix exists for each product mode.

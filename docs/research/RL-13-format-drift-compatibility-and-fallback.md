@@ -61,6 +61,10 @@ Last Updated: TBD
 - [2026-04-24] `SR-002` identified root-discovery and resolver-level hard-stop
   conditions such as malformed checkpoints, unsupported checkpoint layouts, and
   unexpected object type/subtype results during OMAP and root traversal.
+- [2026-04-24] `EX-01` added a runtime hard-stop data point: the live startup
+  container on this host was not raw-readable without elevated privilege, while
+  a mounted APFS image-backed lab container was probeable and showed a moving
+  latest checkpoint under write churn.
 
 ## Interim Decisions
 - Compatibility boundaries must be explicit, not implied.

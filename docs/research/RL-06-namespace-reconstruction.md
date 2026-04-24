@@ -44,9 +44,15 @@ Last Updated: TBD
 - [TBD] Directory-entry schema notes.
 - [TBD] Unicode/name handling notes.
 - [TBD] Hard-link observations.
+- [2026-04-24] `EX-03` showed that rename and move preserve inode identity while
+  changing path placement, that hard links immediately separate path identity
+  from inode identity, and that case-sensitive versus case-insensitive APFS
+  volumes diverge in visible name behavior.
 
 ## Interim Decisions
 - Keep namespace reconstruction separate from storage traversal logic.
+- Hard-link handling and case semantics belong in the core namespace design, not
+  in a later polish pass.
 
 ## Exit Criteria
 - Exact reconstruction algorithm for paths and parent-child graph.

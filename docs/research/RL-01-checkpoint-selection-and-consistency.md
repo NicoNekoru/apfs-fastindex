@@ -56,11 +56,16 @@ Last Updated: TBD
 - [2026-04-24] `SR-002` defined the current entry contract: use block 0 only to
   locate the checkpoint descriptor area, then choose the valid `nx_superblock_t`
   with the highest `xid` and reject malformed checkpoint state.
+- [2026-04-24] `EX-01` showed that on a mounted APFS lab image the highest
+  visible checkpoint `xid` moved from `2` to `10` across eight forced-sync
+  mutations, confirming that "latest" is a moving target during live writes.
 
 ## Interim Decisions
 - A scan must never intentionally mix transactions.
 - If consistency cannot be proven, fall back to safer supported methods.
 - Checkpoint selection should be documented as an algorithm, not a heuristic.
+- Live raw scanning must pin a chosen state; it cannot treat "latest while the
+  volume keeps changing" as a valid correctness model.
 
 ## Exit Criteria
 - Defined algorithm for selecting scan XID.

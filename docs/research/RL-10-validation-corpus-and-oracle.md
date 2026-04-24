@@ -63,6 +63,11 @@ Last Updated: TBD
 - [2026-04-24] The research documentation schema was split into `RL-*`, `SR-*`,
   and `EX-*` artifacts, with experiments required to record environment, oracle,
   expected outcomes, observed results, and what the result rules out.
+- [2026-04-24] `EX-01` combined a mounted-view oracle with direct raw checkpoint
+  observation, which is the pattern future live-state probes should follow.
+- [2026-04-24] `EX-03` established a reusable mutation corpus covering rename,
+  move, hard link, sparse file, clone, symlink, and case behavior across both
+  case-insensitive and case-sensitive APFS volumes.
 
 ## Interim Decisions
 - Every optimization must be validated against a fresh full-scan oracle.

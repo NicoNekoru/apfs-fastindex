@@ -48,9 +48,16 @@ Last Updated: TBD
 - [TBD] Logical vs physical comparison notes.
 - [TBD] Clone accounting notes.
 - [TBD] Compression notes.
+- [2026-04-24] `EX-03` reinforced `logical size` as the correct v1 metric:
+  sparse files diverged sharply between logical and allocated bytes, while hard
+  links showed that naive path-summed logical totals and unique-inode logical
+  totals already differ.
 
 ## Interim Decisions
 - v1 may need to distinguish "logical size" mode from "physical accounting" mode.
+- V1 should standardize on `logical size` first and treat hard-link aggregation
+  policy as an explicit design question rather than an accidental implementation
+  detail.
 
 ## Exit Criteria
 - Defined product-facing size semantics.
