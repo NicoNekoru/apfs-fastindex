@@ -65,12 +65,22 @@ Last Updated: TBD
   container on this host was not raw-readable without elevated privilege, while
   a mounted APFS image-backed lab container was probeable and showed a moving
   latest checkpoint under write churn.
+- [2026-04-24] `contracts/narrow-v1-parser-contract.md` carried those source and probe
+  results into the implementation boundary: raw mode stops on unsupported
+  checkpoint layout, ambiguous OMAP context, unexpected object typing, or
+  environments that require unsupported encryption, snapshot, or boot-root
+  semantics.
+- [2026-04-24] `EX-03` confirmed that a detached image-backed APFS container is
+  inside the current allowlist: in that environment the raw walk matched the
+  mounted oracle exactly for the narrow v1 fields.
 
 ## Interim Decisions
 - Compatibility boundaries must be explicit, not implied.
 - V1 raw mode should prefer an allowlist over a broad claim of general APFS
   support.
 - Unsupported states should trigger fallback, not degraded best-effort parsing.
+- The first parser prototype should encode its hard-stop list directly from the
+  narrow parser contract rather than infer it ad hoc at runtime.
 
 ## Exit Criteria
 - Supported-version matrix exists.

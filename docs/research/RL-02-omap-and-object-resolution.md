@@ -52,11 +52,17 @@ Last Updated: TBD
   `OMAP context + oid + scan-state context`, and tied root discovery to
   container-then-volume OMAP resolution rather than a global `oid -> paddr`
   model.
+- [2026-04-24] `contracts/narrow-v1-parser-contract.md` turned that into an
+  implementation rule set: resolver input must include OMAP context and chosen
+  scan state, and resolved objects must pass checksum, header, and type/subtype
+  validation before use.
 
 ## Interim Decisions
 - Do not assume `OID` alone is a sufficient cache identity until proven.
 - The first parser should define resolver inputs explicitly before any persistent
   cache design is attempted.
+- V1 resolver validation must fail closed on checksum, OID, XID, or expected
+  type mismatches.
 
 ## Exit Criteria
 - Documented resolver contract: input, output, validation steps.

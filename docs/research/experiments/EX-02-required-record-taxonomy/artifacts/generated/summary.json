@@ -2,7 +2,7 @@
   "case_insensitive_case_probe": {
     "case_a_created": true,
     "case_b_created": false,
-    "case_b_error": "FileExistsError: [Errno 17] File exists: '/tmp/apfsfi-ex03ci-954dtu3t/mnt/casename.txt'"
+    "case_b_error": "FileExistsError: [Errno 17] File exists: '/tmp/apfsfi-ex02ci-iy4hnfb0/mnt/casename.txt'"
   },
   "case_insensitive_clone_step": {
     "cp_returncode": 0,

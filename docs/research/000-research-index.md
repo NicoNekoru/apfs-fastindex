@@ -106,6 +106,9 @@ for the exact question being tested.
 - `RL-*` files: distilled rolling synthesis
 - `sources/`: external source reviews
 - `experiments/`: controlled probes and their artifacts
+- implementation-facing docs:
+  - `contracts/narrow-v1-parser-contract.md`
+  - `plans/first-raw-parser-prototype-plan.md`
 - templates:
   - `001-research-template.md`
   - `002-source-review-template.md`
@@ -150,7 +153,8 @@ Gate D: broader product semantics and optimization
 ## Current Experiment Tracks
 
 - `EX-01` live checkpoint consistency and runtime boundary
-- `EX-03` required-record taxonomy for narrow v1
+- `EX-02` required-record taxonomy for narrow v1
+- `EX-03` pinned-state raw-vs-oracle proof loop
 
 ## Research Tracks
 

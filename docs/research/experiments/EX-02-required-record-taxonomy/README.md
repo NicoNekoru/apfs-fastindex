@@ -1,6 +1,6 @@
-# EX-03 Required-record taxonomy for narrow v1
+# EX-02 Required-record taxonomy for narrow v1
 
-ID: EX-03
+ID: EX-02
 Title: Required-record taxonomy for narrow v1
 Date: 2026-04-24
 Owner: GPT-5.4
@@ -81,7 +81,7 @@ The best current required-record matrix is:
 ## Setup
 
 - Added a reproducible probe script:
-  `artifacts/probe_ex03.py`
+  `artifacts/probe_ex02.py`
 - The script creates fresh case-insensitive and case-sensitive APFS images and
   runs the same mutation corpus against both.
 
@@ -197,7 +197,7 @@ This matrix combines the mutation corpus with current external evidence from
 
 ## Artifacts Saved
 
-- `artifacts/probe_ex03.py`
+- `artifacts/probe_ex02.py`
 - `artifacts/generated/case-insensitive.json`
 - `artifacts/generated/case-sensitive.json`
 - `artifacts/generated/summary.json`

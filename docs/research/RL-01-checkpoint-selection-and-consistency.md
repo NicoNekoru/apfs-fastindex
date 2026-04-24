@@ -59,6 +59,13 @@ Last Updated: TBD
 - [2026-04-24] `EX-01` showed that on a mounted APFS lab image the highest
   visible checkpoint `xid` moved from `2` to `10` across eight forced-sync
   mutations, confirming that "latest" is a moving target during live writes.
+- [2026-04-24] `contracts/narrow-v1-parser-contract.md` formalized the v1 rule that a
+  parser run must pin one chosen scan state for its full lifetime and must not
+  treat a drifting live latest checkpoint as valid input.
+- [2026-04-24] `EX-03` implemented that rule in practice: the mounted oracle was
+  captured first, the image was detached to pin the raw state, and the detached
+  image's highest visible checkpoint `xid` was `14` for the successful raw
+  versus oracle comparison.
 
 ## Interim Decisions
 - A scan must never intentionally mix transactions.
@@ -66,6 +73,8 @@ Last Updated: TBD
 - Checkpoint selection should be documented as an algorithm, not a heuristic.
 - Live raw scanning must pin a chosen state; it cannot treat "latest while the
   volume keeps changing" as a valid correctness model.
+- The first parser prototype should only target raw sources that can be pinned
+  to one coherent state.
 
 ## Exit Criteria
 - Defined algorithm for selecting scan XID.

@@ -1,0 +1,73 @@
+{
+  "entries": [
+    {
+      "inode": 2,
+      "nlink": 5,
+      "path": ".",
+      "type": "dir"
+    },
+    {
+      "inode": 17,
+      "nlink": 7,
+      "path": "dst",
+      "type": "dir"
+    },
+    {
+      "inode": 24,
+      "logical_size": 6,
+      "nlink": 1,
+      "path": "dst/clone.txt",
+      "symlink_target": null,
+      "type": "file"
+    },
+    {
+      "inode": 20,
+      "logical_size": 11,
+      "nlink": 2,
+      "path": "dst/hard.txt",
+      "symlink_target": null,
+      "type": "file"
+    },
+    {
+      "inode": 26,
+      "logical_size": 9,
+      "nlink": 1,
+      "path": "dst/link.txt",
+      "symlink_target": "moved.txt",
+      "type": "symlink"
+    },
+    {
+      "inode": 20,
+      "logical_size": 11,
+      "nlink": 2,
+      "path": "dst/moved.txt",
+      "symlink_target": null,
+      "type": "file"
+    },
+    {
+      "inode": 23,
+      "logical_size": 1048576,
+      "nlink": 1,
+      "path": "dst/sparse.bin",
+      "symlink_target": null,
+      "type": "file"
+    },
+    {
+      "inode": 16,
+      "nlink": 2,
+      "path": "src",
+      "type": "dir"
+    }
+  ],
+  "summary": {
+    "entry_count": 8,
+    "file_count": 4,
+    "hard_link_paths": [
+      "dst/hard.txt",
+      "dst/moved.txt"
+    ],
+    "naive_logical_total": 1048604,
+    "symlink_count": 1,
+    "unique_inode_logical_total": 1048593
+  }
+}

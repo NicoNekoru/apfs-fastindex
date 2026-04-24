@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run EX-03: required-record taxonomy for namespace and logical size."""
+"""Run EX-02: required-record taxonomy for namespace and logical size."""
 
 from __future__ import annotations
 
@@ -289,8 +289,8 @@ def run_case(volume_label: str, fs_name: str) -> dict:
 
 
 def main() -> None:
-    ci = run_case("EX03CI", "APFS")
-    cs = run_case("EX03CS", "Case-sensitive APFS")
+    ci = run_case("EX02CI", "APFS")
+    cs = run_case("EX02CS", "Case-sensitive APFS")
 
     summary = {
         "case_insensitive_case_probe": ci["logs"][-1]["extra"],

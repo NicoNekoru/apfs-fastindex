@@ -1,0 +1,48 @@
+{
+  "device": "/dev/rdisk5",
+  "entries": [
+    {
+      "file_id": 17,
+      "path": "dst",
+      "type": "dir"
+    },
+    {
+      "file_id": 24,
+      "logical_size": 6,
+      "path": "dst/clone.txt",
+      "type": "file"
+    },
+    {
+      "file_id": 20,
+      "logical_size": 11,
+      "path": "dst/hard.txt",
+      "type": "file"
+    },
+    {
+      "file_id": 26,
+      "logical_size": 9,
+      "path": "dst/link.txt",
+      "symlink_target": "moved.txt",
+      "type": "symlink"
+    },
+    {
+      "file_id": 20,
+      "logical_size": 11,
+      "path": "dst/moved.txt",
+      "type": "file"
+    },
+    {
+      "file_id": 23,
+      "logical_size": 1048576,
+      "path": "dst/sparse.bin",
+      "type": "file"
+    },
+    {
+      "file_id": 16,
+      "path": "src",
+      "type": "dir"
+    }
+  ],
+  "entry_count": 7,
+  "volume": "EX03Proof"
+}

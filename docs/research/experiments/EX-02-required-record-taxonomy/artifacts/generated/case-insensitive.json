@@ -1,5 +1,5 @@
 {
-  "fs_name": "Case-sensitive APFS",
+  "fs_name": "APFS",
   "logs": [
     {
       "extra": {},
@@ -506,13 +506,13 @@
     {
       "extra": {
         "case_a_created": true,
-        "case_b_created": true,
-        "case_b_error": null
+        "case_b_created": false,
+        "case_b_error": "FileExistsError: [Errno 17] File exists: '/tmp/apfsfi-ex02ci-iy4hnfb0/mnt/casename.txt'"
       },
       "snapshot": [
         {
           "inode": 2,
-          "nlink": 7,
+          "nlink": 6,
           "path": ".",
           "type": "dir"
         },
@@ -522,14 +522,6 @@
           "logical_size": 2,
           "nlink": 1,
           "path": "CaseName.txt",
-          "type": "file"
-        },
-        {
-          "allocated_bytes": 4096,
-          "inode": 28,
-          "logical_size": 2,
-          "nlink": 1,
-          "path": "casename.txt",
           "type": "file"
         },
         {
@@ -587,19 +579,19 @@
       ],
       "step": "case probe",
       "summary": {
-        "file_count": 6,
+        "file_count": 5,
         "hard_link_paths": [
           "dst/hard.txt",
           "dst/moved.txt"
         ],
-        "naive_logical_total": 1048608,
+        "naive_logical_total": 1048606,
         "sparse_candidates": [
           "dst/sparse.bin"
         ],
         "symlink_count": 1,
-        "unique_inode_logical_total": 1048597
+        "unique_inode_logical_total": 1048595
       }
     }
   ],
-  "volume_label": "EX03CS"
+  "volume_label": "EX02CI"
 }

@@ -1,0 +1,29 @@
+{
+  "matched": true,
+  "mismatch_count": 0,
+  "missing_paths": [],
+  "oracle_summary": {
+    "entry_count": 8,
+    "file_count": 4,
+    "hard_link_paths": [
+      "dst/hard.txt",
+      "dst/moved.txt"
+    ],
+    "naive_logical_total": 1048604,
+    "symlink_count": 1,
+    "unique_inode_logical_total": 1048593
+  },
+  "pinned_highest_xid": 14,
+  "raw_summary": {
+    "entry_count": 7,
+    "file_count": 4,
+    "hard_link_paths": [
+      "dst/hard.txt",
+      "dst/moved.txt"
+    ],
+    "naive_logical_total": 1048604,
+    "symlink_count": 1,
+    "unique_inode_logical_total": 1048593
+  },
+  "unexpected_paths": []
+}

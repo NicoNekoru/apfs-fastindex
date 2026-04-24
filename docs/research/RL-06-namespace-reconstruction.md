@@ -44,15 +44,25 @@ Last Updated: TBD
 - [TBD] Directory-entry schema notes.
 - [TBD] Unicode/name handling notes.
 - [TBD] Hard-link observations.
-- [2026-04-24] `EX-03` showed that rename and move preserve inode identity while
+- [2026-04-24] `EX-02` showed that rename and move preserve inode identity while
   changing path placement, that hard links immediately separate path identity
   from inode identity, and that case-sensitive versus case-insensitive APFS
   volumes diverge in visible name behavior.
+- [2026-04-24] `contracts/narrow-v1-parser-contract.md` fixed the current v1 namespace
+  policy: directory membership comes from directory records, hard links surface
+  shared file identity, symlinks are emitted as symlink nodes and are not
+  traversed, and case behavior follows the volume mode.
+- [2026-04-24] `EX-03` proved that this namespace policy is achievable on a
+  pinned raw state in the tested allowlist: raw output matched the mounted
+  oracle for path set, entry type, shared file identity across hard links, and
+  symlink target fidelity.
 
 ## Interim Decisions
 - Keep namespace reconstruction separate from storage traversal logic.
 - Hard-link handling and case semantics belong in the core namespace design, not
   in a later polish pass.
+- V1 namespace correctness requires both a path graph and stable file identity;
+  the parser must not collapse those into one concept.
 
 ## Exit Criteria
 - Exact reconstruction algorithm for paths and parent-child graph.

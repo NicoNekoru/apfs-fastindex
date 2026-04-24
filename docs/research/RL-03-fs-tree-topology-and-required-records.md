@@ -63,9 +63,15 @@ Last Updated: TBD
 - [2026-04-24] `SR-002` proposed a mode-specific root contract: for raw
   single-volume namespace + logical size, the first critical chain is checkpoint
   -> container OMAP -> volume superblock -> volume OMAP -> file-system root tree.
-- [2026-04-24] `EX-03` produced the first source-backed required-record matrix:
+- [2026-04-24] `EX-02` produced the first source-backed required-record matrix:
   `DIR_REC` + `INODE` + logical-size-bearing inode fields for narrow v1, with
   `SIBLING_LINK` / `SIBLING_MAP` required when hard links are in scope.
+- [2026-04-24] `contracts/narrow-v1-parser-contract.md` consolidated the current v1
+  required-tree and required-record set, including symlink-bearing metadata as a
+  bounded follow-up gap rather than a reason to widen scope.
+- [2026-04-24] `EX-03` closed that remaining gap inside the tested image-backed
+  allowlist: the raw walker matched the mounted oracle for hard links, sparse
+  files, clones, and symlink target fidelity with zero path or field mismatches.
 
 ## Interim Decisions
 - Separate "required for namespace" from "required for accounting."
@@ -73,6 +79,10 @@ Last Updated: TBD
   parser surface.
 - Treat extent-reference and broader physical/shared-accounting machinery as
   outside the first namespace + logical-size parser target.
+- The first parser prototype should target only the record families needed to
+  satisfy the narrow v1 contract.
+- In the tested narrow-v1 allowlist, symlink target extraction can now be
+  treated as part of the active parser surface rather than a speculative add-on.
 
 ## Exit Criteria
 - A required-record matrix exists for each product mode.

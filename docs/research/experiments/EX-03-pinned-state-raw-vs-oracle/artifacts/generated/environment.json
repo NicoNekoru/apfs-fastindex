@@ -1,0 +1,8 @@
+{
+  "go_version": "go version go1.26.1 darwin/arm64",
+  "raw_walk_module": {
+    "go_mod": "module rawwalk\n\ngo 1.26\n\nrequire github.com/blacktop/go-apfs v1.0.27\n\nrequire (\n\tgithub.com/VividCortex/ewma v1.2.0 // indirect\n\tgithub.com/acarl005/stripansi v0.0.0-20180116102854-5a71ef0e047d // indirect\n\tgithub.com/apex/log v1.9.0 // indirect\n\tgithub.com/blacktop/lzfse-cgo v1.1.20 // indirect\n\tgithub.com/dustin/go-humanize v1.0.1 // indirect\n\tgithub.com/fatih/color v1.18.0 // indirect\n\tgithub.com/mattn/go-colorable v0.1.14 // indirect\n\tgithub.com/mattn/go-isatty v0.0.20 // indirect\n\tgithub.com/mattn/go-runewidth v0.0.16 // indirect\n\tgithub.com/pkg/errors v0.9.1 // indirect\n\tgithub.com/rivo/uniseg v0.4.7 // indirect\n\tgithub.com/vbauerster/mpb/v7 v7.5.3 // indirect\n\tgolang.org/x/sys v0.32.0 // indirect\n)\n",
+    "path": "/Users/kai/Projects/apfs-fastindex/docs/research/experiments/EX-03-pinned-state-raw-vs-oracle/artifacts/rawwalk"
+  },
+  "sw_vers": "ProductName:\t\tmacOS\nProductVersion:\t\t26.3.1\nProductVersionExtra:\t(a)\nBuildVersion:\t\t25D771280a\n"
+}

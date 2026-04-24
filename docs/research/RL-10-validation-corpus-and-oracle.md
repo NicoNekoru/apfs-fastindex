@@ -65,9 +65,14 @@ Last Updated: TBD
   expected outcomes, observed results, and what the result rules out.
 - [2026-04-24] `EX-01` combined a mounted-view oracle with direct raw checkpoint
   observation, which is the pattern future live-state probes should follow.
-- [2026-04-24] `EX-03` established a reusable mutation corpus covering rename,
+- [2026-04-24] `EX-02` established a reusable mutation corpus covering rename,
   move, hard link, sparse file, clone, symlink, and case behavior across both
   case-insensitive and case-sensitive APFS volumes.
+- [2026-04-24] `contracts/narrow-v1-parser-contract.md` fixed the first proof target:
+  compare raw output and mounted-view oracle for one chosen state on one volume,
+  matching path, entry type, stable file identity, and `logical size`.
+- [2026-04-24] `EX-03` implemented that proof target directly with a reusable
+  loop: mounted oracle -> detach to pin state -> raw walk -> normalized diff.
 
 ## Interim Decisions
 - Every optimization must be validated against a fresh full-scan oracle.
@@ -75,6 +80,8 @@ Last Updated: TBD
   different oracles.
 - Raw outputs belong in `artifacts/`, while distilled conclusions belong in the
   experiment `README.md` and then back in the relevant `RL-*` logs.
+- The current narrow-v1 regression pattern is now explicit and runnable, not a
+  future TODO.
 
 ## Oracle Matrix
 

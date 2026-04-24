@@ -48,16 +48,25 @@ Last Updated: TBD
 - [TBD] Logical vs physical comparison notes.
 - [TBD] Clone accounting notes.
 - [TBD] Compression notes.
-- [2026-04-24] `EX-03` reinforced `logical size` as the correct v1 metric:
+- [2026-04-24] `EX-02` reinforced `logical size` as the correct v1 metric:
   sparse files diverged sharply between logical and allocated bytes, while hard
   links showed that naive path-summed logical totals and unique-inode logical
   totals already differ.
+- [2026-04-24] `contracts/narrow-v1-parser-contract.md` set the current v1 aggregate
+  rule: canonical directory `logical size` is unique-inode logical total within
+  the aggregate root, even though sibling sums may then be non-additive in the
+  presence of hard links.
+- [2026-04-24] `EX-03` matched raw and oracle `logical size` output exactly for
+  the tested corpus, including sparse-file size, cloned-file size, and hard-link
+  aggregate summaries.
 
 ## Interim Decisions
 - v1 may need to distinguish "logical size" mode from "physical accounting" mode.
 - V1 should standardize on `logical size` first and treat hard-link aggregation
   policy as an explicit design question rather than an accidental implementation
   detail.
+- The current v1 decision is to avoid obvious hard-link overcounting in
+  directory aggregates, even at the cost of strict additive child sums.
 
 ## Exit Criteria
 - Defined product-facing size semantics.
