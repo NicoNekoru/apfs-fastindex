@@ -73,6 +73,12 @@ Last Updated: 2026-04-26
 - [2026-04-26] Hypothesis: `EX-13` should compare native field dumps to a
   same-run mounted/POSIX namespace oracle before any Rust output is promoted to
   product namespace rows.
+- [2026-04-26] Observation: Python `EX-13` reconstructed the proof fixture path
+  set from raw `DIR_REC`/`INODE`/`XATTR`/sibling records with `0` missing paths,
+  `0` unexpected paths, and `0` path/type/file-identity mismatches across `8`
+  mounted/POSIX entries. This supports the namespace relationship model, but the
+  experiment did not validate the full namespace+logical-size contract because
+  sparse dstream size mismatched.
 
 ## Interim Decisions
 - Keep namespace reconstruction separate from storage traversal logic.
@@ -86,6 +92,8 @@ Last Updated: 2026-04-26
 - Native namespace reconstruction must remain a two-step proof: first validate
   record-body fields in `EX-13`, then assemble product rows and aggregates. A
   family-count dump alone is not namespace evidence.
+- Path reconstruction evidence may continue in Python, but Rust product rows
+  remain blocked until the same field dump also matches logical-size inputs.
 
 ## Exit Criteria
 - Exact reconstruction algorithm for paths and parent-child graph.

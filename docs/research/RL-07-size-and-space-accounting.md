@@ -87,6 +87,11 @@ Last Updated: 2026-04-26
 - [2026-04-26] Hypothesis: `EX-13` should validate ordinary logical-size rows
   against public `st_size` for uncompressed fixture files, while `EX-09` remains
   responsible for compression precedence and allocated/shared/exclusive metrics.
+- [2026-04-26] Observation: Python `EX-13` matched ordinary non-sparse file and
+  symlink logical sizes but failed the sparse-file logical-size row. Public
+  `st_size` for `dst/sparse.bin` was `1048576`, while the Python-decoded inode
+  dstream size was `4503599627370496`. This localizes the next size blocker to
+  xfield/dstream body decoding, not physical/shared accounting.
 
 ## Interim Decisions
 - v1 may need to distinguish "logical size" mode from "physical accounting" mode.
@@ -110,6 +115,9 @@ Last Updated: 2026-04-26
 - The native record-body oracle should pass ordinary logical-size cases without
   settling compression or physical accounting. Any compressed-size mismatch
   should refine `EX-09`, not broaden `EX-13` into an accounting probe.
+- Sparse logical size cannot be promoted into Rust from the current Python
+  parser. Resolve APFS xfield alignment/layout first, then rerun `EX-13`; keep
+  `EX-09` dependent on corrected dstream/xattr extraction.
 
 ## Exit Criteria
 - Defined product-facing size semantics.

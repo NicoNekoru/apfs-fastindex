@@ -105,6 +105,13 @@ Last Updated: 2026-04-26
   body fields under the `EX-12` validated OMAP/root context and compare them to
   same-run mounted/POSIX and cross-tool observers before product namespace rows
   are emitted.
+- [2026-04-26] Observation: `EX-13` executed as a Python raw-byte record-body
+  probe. It decoded `53` FS-tree records with family counts matching `EX-10`
+  (`inode=12`, `dir_rec=13`, `dstream_id=6`, `xattr=9`, `sibling_link=2`,
+  `sibling_map=2`, `file_extent=9`) and reconstructed all `8` mounted paths with
+  no path/type/file-identity mismatches. Verdict remained
+  `body_field_mismatch` because sparse-file inode dstream size decoded
+  incorrectly.
 
 ## Interim Decisions
 - Separate "required for namespace" from "required for accounting."
@@ -124,6 +131,9 @@ Last Updated: 2026-04-26
 - Native FS-record parsing can now advance to a body-field dumper. Product
   namespace entry emission remains blocked until `EX-13` validates the body
   fields needed for namespace and ordinary logical-size rows.
+- Keep the next body-field work in Python. The record-family surface is stable
+  enough for experiments, but sparse xfield/dstream layout is not stable enough
+  to encode in Rust.
 
 ## Exit Criteria
 - A required-record matrix exists for each product mode.

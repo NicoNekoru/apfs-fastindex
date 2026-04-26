@@ -130,6 +130,12 @@ Last Updated: 2026-04-26
   against a same-run mounted/POSIX namespace and ordinary logical-size oracle,
   with any third-party APFS observer preserving the `selected_xid` caveat from
   `EX-12`.
+- [2026-04-26] Observation: `EX-13` executed as a Python-first probe and produced
+  a valid negative oracle result: `body_field_mismatch`. The same-run mounted
+  oracle and Python raw parser agreed on path set and identity but disagreed on
+  sparse-file logical size. This is reusable evidence because it saves the raw
+  body dump, mounted oracle, cross-tool observer, comparison, and summary under
+  `EX-13` artifacts.
 
 ## Interim Decisions
 - Every optimization must be validated against a fresh full-scan oracle.
@@ -155,6 +161,9 @@ Last Updated: 2026-04-26
 - Record-family counts are not a namespace oracle. The next validation unit is a
   raw FS-record body dump with enough fields to explain path, type, file
   identity, symlink target, hard-link grouping, and ordinary logical size.
+- Negative body-field oracle results are sufficient to block Rust work. A Python
+  probe that reconstructs paths but mismatches sparse logical size should be
+  treated as an unresolved parser contract, not as a partial product success.
 
 ## Oracle Matrix
 
@@ -195,6 +204,9 @@ Last Updated: 2026-04-26
   same-run mounted/POSIX namespace and logical-size facts validate native
   `DIR_REC`, `INODE`, `XATTR`, `SIBLING_LINK`, `SIBLING_MAP`, and dstream field
   dumps only when the selected scan state is declared.
+- `Python-first parser experiments`:
+  body-field uncertainty should be resolved in Python artifacts before the Rust
+  implementation surface is widened.
 - `Compression logical-size precedence`:
   public logical-size APIs must be compared to each raw candidate size source
   rather than collapsed into a global size pass/fail.

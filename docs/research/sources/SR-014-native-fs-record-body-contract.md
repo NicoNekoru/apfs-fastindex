@@ -134,6 +134,6 @@ rows?
   mounted/POSIX oracle and preserve `selected_xid` discipline from `EX-12`.
 - `RL-13`: malformed variable-length fields, unknown flags, unsupported xattr
   stream forms, and mode-incompatible record families are hard-stop conditions.
-- Exact next step: design `EX-13` as a native FS-record body oracle plan that
-  dumps these fields under the `EX-12` validated OMAP/root context and compares
-  them to mounted/POSIX and `go-apfs` evidence generated from the same fixture.
+- Exact next step: `EX-13` executed as a Python-first raw-byte probe and produced
+  `body_field_mismatch` on sparse-file dstream size. Resolve inode xfield data
+  alignment/layout in Python before any Rust record-body implementation.

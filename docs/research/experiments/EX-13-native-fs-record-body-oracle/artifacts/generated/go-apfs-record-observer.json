@@ -1,0 +1,238 @@
+{
+  "device": "/dev/rdisk5",
+  "entries": [
+    {
+      "file_id": 17,
+      "path": "dst",
+      "type": "dir"
+    },
+    {
+      "file_id": 24,
+      "logical_size": 6,
+      "path": "dst/clone.txt",
+      "type": "file"
+    },
+    {
+      "file_id": 20,
+      "logical_size": 11,
+      "path": "dst/hard.txt",
+      "type": "file"
+    },
+    {
+      "file_id": 26,
+      "logical_size": 9,
+      "path": "dst/link.txt",
+      "symlink_target": "moved.txt",
+      "type": "symlink"
+    },
+    {
+      "file_id": 20,
+      "logical_size": 11,
+      "path": "dst/moved.txt",
+      "type": "file"
+    },
+    {
+      "file_id": 23,
+      "logical_size": 1048576,
+      "path": "dst/sparse.bin",
+      "type": "file"
+    },
+    {
+      "file_id": 16,
+      "path": "src",
+      "type": "dir"
+    }
+  ],
+  "node_summaries": [
+    {
+      "checksum": 11617927108291227259,
+      "domain": "volume_omap",
+      "is_leaf": true,
+      "key_count": 53,
+      "logical_size_total": 1048902,
+      "max_file_id": 28,
+      "min_file_id": 1,
+      "name_count": 22,
+      "name_sample": [
+        ".fseventsd",
+        "00000000056dd30e",
+        "00000000056dd30f",
+        "clone.txt",
+        "com.apple.fs.symlink",
+        "com.apple.provenance",
+        "com.apple.provenance",
+        "com.apple.provenance",
+        "com.apple.provenance",
+        "com.apple.provenance",
+        "com.apple.provenance",
+        "com.apple.system.Security",
+        "dst",
+        "fseventsd-uuid",
+        "hard.txt",
+        "link.txt",
+        "moved.txt",
+        "private-dir",
+        "purgeable-drecs-fixed",
+        "root"
+      ],
+      "node_key": "volume_omap|1028|12|427|11617927108291227259|OBJECT_TYPE_BTREE|OBJECT_TYPE_FSTREE|aaa3059f8be9a43aee72aa6d339e1792ae2b68e3763271ed73f21a91955287ec",
+      "object_xid": 12,
+      "oid": 1028,
+      "paddr": 427,
+      "record_counts": {
+        "APFS_TYPE_DIR_REC": 13,
+        "APFS_TYPE_DSTREAM_ID": 6,
+        "APFS_TYPE_FILE_EXTENT": 9,
+        "APFS_TYPE_INODE": 12,
+        "APFS_TYPE_SIBLING_LINK": 2,
+        "APFS_TYPE_SIBLING_MAP": 2,
+        "APFS_TYPE_XATTR": 9
+      },
+      "role": "fs_root_tree",
+      "subtype": "OBJECT_TYPE_FSTREE",
+      "summary_hash": "cf9f70568f3399dfd7f81ac70d95eca57dda396043cb44c42603e7a0940745c7",
+      "type": "OBJECT_TYPE_BTREE"
+    }
+  ],
+  "nodes": [
+    {
+      "checksum": 11617927108291227259,
+      "content_hash": "aaa3059f8be9a43aee72aa6d339e1792ae2b68e3763271ed73f21a91955287ec",
+      "domain": "volume_omap",
+      "flags": "OBJ_VIRTUAL",
+      "is_leaf": true,
+      "is_root": true,
+      "key_count": 53,
+      "object_xid": 12,
+      "oid": 1028,
+      "paddr": 427,
+      "role": "fs_root_tree",
+      "subtype": "OBJECT_TYPE_FSTREE",
+      "type": "OBJECT_TYPE_BTREE"
+    }
+  ],
+  "record_groups": [
+    {
+      "file_id": 2,
+      "link_count": 3,
+      "names": [
+        ".fseventsd",
+        "dst",
+        "purgeable-drecs-fixed",
+        "src"
+      ],
+      "record_types": [
+        "APFS_TYPE_DIR_REC",
+        "APFS_TYPE_DIR_REC",
+        "APFS_TYPE_DIR_REC",
+        "APFS_TYPE_INODE",
+        "APFS_TYPE_XATTR"
+      ]
+    },
+    {
+      "file_id": 16,
+      "names": [
+        "com.apple.provenance"
+      ],
+      "record_types": [
+        "APFS_TYPE_INODE",
+        "APFS_TYPE_XATTR"
+      ]
+    },
+    {
+      "file_id": 17,
+      "link_count": 5,
+      "names": [
+        "clone.txt",
+        "com.apple.provenance",
+        "hard.txt",
+        "link.txt",
+        "moved.txt",
+        "sparse.bin"
+      ],
+      "record_types": [
+        "APFS_TYPE_DIR_REC",
+        "APFS_TYPE_DIR_REC",
+        "APFS_TYPE_DIR_REC",
+        "APFS_TYPE_DIR_REC",
+        "APFS_TYPE_DIR_REC",
+        "APFS_TYPE_INODE",
+        "APFS_TYPE_XATTR"
+      ]
+    },
+    {
+      "file_id": 20,
+      "link_count": 2,
+      "logical_size": 11,
+      "names": [
+        "com.apple.provenance"
+      ],
+      "record_types": [
+        "APFS_TYPE_DSTREAM_ID",
+        "APFS_TYPE_FILE_EXTENT",
+        "APFS_TYPE_INODE",
+        "APFS_TYPE_SIBLING_LINK",
+        "APFS_TYPE_SIBLING_LINK",
+        "APFS_TYPE_XATTR"
+      ]
+    },
+    {
+      "file_id": 23,
+      "link_count": 1,
+      "logical_size": 1048576,
+      "names": [
+        "com.apple.provenance"
+      ],
+      "record_types": [
+        "APFS_TYPE_DSTREAM_ID",
+        "APFS_TYPE_FILE_EXTENT",
+        "APFS_TYPE_FILE_EXTENT",
+        "APFS_TYPE_FILE_EXTENT",
+        "APFS_TYPE_FILE_EXTENT",
+        "APFS_TYPE_INODE",
+        "APFS_TYPE_XATTR"
+      ]
+    },
+    {
+      "file_id": 24,
+      "link_count": 1,
+      "logical_size": 6,
+      "names": [
+        "com.apple.provenance"
+      ],
+      "record_types": [
+        "APFS_TYPE_INODE",
+        "APFS_TYPE_XATTR"
+      ]
+    },
+    {
+      "file_id": 26,
+      "link_count": 1,
+      "names": [
+        "com.apple.fs.symlink",
+        "com.apple.provenance"
+      ],
+      "record_types": [
+        "APFS_TYPE_INODE",
+        "APFS_TYPE_XATTR",
+        "APFS_TYPE_XATTR"
+      ]
+    }
+  ],
+  "root_tree": {
+    "checksum": 11617927108291227259,
+    "content_hash": "aaa3059f8be9a43aee72aa6d339e1792ae2b68e3763271ed73f21a91955287ec",
+    "domain": "volume_omap",
+    "flags": "OBJ_VIRTUAL",
+    "is_leaf": true,
+    "is_root": true,
+    "key_count": 53,
+    "object_xid": 12,
+    "oid": 1028,
+    "paddr": 427,
+    "role": "fs_root_tree",
+    "subtype": "OBJECT_TYPE_FSTREE",
+    "type": "OBJECT_TYPE_BTREE"
+  },
+  "volume": "SKELPROOF"
+}

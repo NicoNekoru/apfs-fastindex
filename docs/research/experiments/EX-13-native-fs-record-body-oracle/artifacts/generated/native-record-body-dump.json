@@ -1,0 +1,1681 @@
+{
+  "block_size": 4096,
+  "family_counts": {
+    "dir_rec": 13,
+    "dstream_id": 6,
+    "file_extent": 9,
+    "inode": 12,
+    "sibling_link": 2,
+    "sibling_map": 2,
+    "xattr": 9
+  },
+  "nodes": [
+    {
+      "is_leaf": true,
+      "is_root": true,
+      "level": 0,
+      "nkeys": 53,
+      "paddr": 433
+    }
+  ],
+  "reconstructed_entries": [
+    {
+      "file_id": 2,
+      "path": ".",
+      "type": "dir"
+    },
+    {
+      "file_id": 17,
+      "path": "dst",
+      "type": "dir"
+    },
+    {
+      "file_id": 24,
+      "logical_size": 6,
+      "path": "dst/clone.txt",
+      "type": "file"
+    },
+    {
+      "file_id": 20,
+      "logical_size": 11,
+      "path": "dst/hard.txt",
+      "type": "file"
+    },
+    {
+      "file_id": 26,
+      "logical_size": 9,
+      "path": "dst/link.txt",
+      "symlink_target": "moved.txt",
+      "type": "symlink"
+    },
+    {
+      "file_id": 20,
+      "logical_size": 11,
+      "path": "dst/moved.txt",
+      "type": "file"
+    },
+    {
+      "file_id": 23,
+      "logical_size": 4503599627370496,
+      "path": "dst/sparse.bin",
+      "type": "file"
+    },
+    {
+      "file_id": 16,
+      "path": "src",
+      "type": "dir"
+    }
+  ],
+  "records": [
+    {
+      "entry_index": 0,
+      "family": "dir_rec",
+      "key": {
+        "kind": "named",
+        "name": "private-dir",
+        "name_bytes_hex": "707269766174652d64697200",
+        "name_len": 12,
+        "raw_key_form": "hashed"
+      },
+      "key_len": 24,
+      "node_paddr": 433,
+      "object_id": 1,
+      "raw_type": 9,
+      "validation_notes": [],
+      "value": {
+        "date_added": 1777197481345082309,
+        "entry_type": 4,
+        "file_id": 3,
+        "flags": 4,
+        "kind": "dir_rec",
+        "sibling_id": null,
+        "xfields": []
+      },
+      "value_len": 18
+    },
+    {
+      "entry_index": 1,
+      "family": "dir_rec",
+      "key": {
+        "kind": "named",
+        "name": "root",
+        "name_bytes_hex": "726f6f7400",
+        "name_len": 5,
+        "raw_key_form": "hashed"
+      },
+      "key_len": 17,
+      "node_paddr": 433,
+      "object_id": 1,
+      "raw_type": 9,
+      "validation_notes": [],
+      "value": {
+        "date_added": 1777197481345079059,
+        "entry_type": 4,
+        "file_id": 2,
+        "flags": 4,
+        "kind": "dir_rec",
+        "sibling_id": null,
+        "xfields": []
+      },
+      "value_len": 18
+    },
+    {
+      "entry_index": 2,
+      "family": "inode",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 433,
+      "object_id": 2,
+      "raw_type": 3,
+      "validation_notes": [],
+      "value": {
+        "bsd_flags": 0,
+        "dstream": null,
+        "group": 20,
+        "has_uncompressed_size": false,
+        "inode_name": "root",
+        "internal_flags": 32768,
+        "kind": "inode",
+        "mode": 16877,
+        "nchildren_or_nlink": 3,
+        "owner": 501,
+        "parent_id": 1,
+        "private_id": 2,
+        "sparse_bytes": null,
+        "uncompressed_size": 0,
+        "xfields": [
+          {
+            "interpreted": {
+              "kind": "utf8",
+              "note": null,
+              "value": "root"
+            },
+            "layout": "unpacked_metadata_end",
+            "value_hex": "726f6f7400",
+            "x_flags": 2,
+            "x_size": 5,
+            "x_type": 4
+          }
+        ]
+      },
+      "value_len": 108
+    },
+    {
+      "entry_index": 3,
+      "family": "xattr",
+      "key": {
+        "kind": "named",
+        "name": "purgeable-drecs-fixed",
+        "name_bytes_hex": "707572676561626c652d64726563732d666978656400",
+        "name_len": 22,
+        "raw_key_form": "xattr"
+      },
+      "key_len": 32,
+      "node_paddr": 433,
+      "object_id": 2,
+      "raw_type": 4,
+      "validation_notes": [],
+      "value": {
+        "dstream": null,
+        "flags": 2,
+        "is_embedded": true,
+        "is_stream": false,
+        "kind": "xattr",
+        "payload_hex": "02000000",
+        "payload_utf8": "\u0002\u0000\u0000",
+        "stream_object_id": null,
+        "xdata_len": 4
+      },
+      "value_len": 8
+    },
+    {
+      "entry_index": 4,
+      "family": "dir_rec",
+      "key": {
+        "kind": "named",
+        "name": "dst",
+        "name_bytes_hex": "64737400",
+        "name_len": 4,
+        "raw_key_form": "hashed"
+      },
+      "key_len": 16,
+      "node_paddr": 433,
+      "object_id": 2,
+      "raw_type": 9,
+      "validation_notes": [],
+      "value": {
+        "date_added": 1777197482269665897,
+        "entry_type": 4,
+        "file_id": 17,
+        "flags": 4,
+        "kind": "dir_rec",
+        "sibling_id": null,
+        "xfields": []
+      },
+      "value_len": 18
+    },
+    {
+      "entry_index": 5,
+      "family": "dir_rec",
+      "key": {
+        "kind": "named",
+        "name": ".fseventsd",
+        "name_bytes_hex": "2e66736576656e74736400",
+        "name_len": 11,
+        "raw_key_form": "hashed"
+      },
+      "key_len": 23,
+      "node_paddr": 433,
+      "object_id": 2,
+      "raw_type": 9,
+      "validation_notes": [],
+      "value": {
+        "date_added": 1777197482316415050,
+        "entry_type": 4,
+        "file_id": 18,
+        "flags": 4,
+        "kind": "dir_rec",
+        "sibling_id": null,
+        "xfields": []
+      },
+      "value_len": 18
+    },
+    {
+      "entry_index": 6,
+      "family": "dir_rec",
+      "key": {
+        "kind": "named",
+        "name": "src",
+        "name_bytes_hex": "73726300",
+        "name_len": 4,
+        "raw_key_form": "hashed"
+      },
+      "key_len": 16,
+      "node_paddr": 433,
+      "object_id": 2,
+      "raw_type": 9,
+      "validation_notes": [],
+      "value": {
+        "date_added": 1777197482269577605,
+        "entry_type": 4,
+        "file_id": 16,
+        "flags": 4,
+        "kind": "dir_rec",
+        "sibling_id": null,
+        "xfields": []
+      },
+      "value_len": 18
+    },
+    {
+      "entry_index": 7,
+      "family": "inode",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 433,
+      "object_id": 3,
+      "raw_type": 3,
+      "validation_notes": [],
+      "value": {
+        "bsd_flags": 0,
+        "dstream": null,
+        "group": 0,
+        "has_uncompressed_size": false,
+        "inode_name": "ate-dir\u0000\u0000\u0000\u0000",
+        "internal_flags": 32768,
+        "kind": "inode",
+        "mode": 16804,
+        "nchildren_or_nlink": 0,
+        "owner": 0,
+        "parent_id": 1,
+        "private_id": 3,
+        "sparse_bytes": null,
+        "uncompressed_size": 0,
+        "xfields": [
+          {
+            "interpreted": {
+              "kind": "utf8",
+              "note": null,
+              "value": "ate-dir\u0000\u0000\u0000\u0000"
+            },
+            "layout": "record_relative_aligned_metadata_end",
+            "value_hex": "6174652d6469720000000000",
+            "x_flags": 2,
+            "x_size": 12,
+            "x_type": 4
+          }
+        ]
+      },
+      "value_len": 116
+    },
+    {
+      "entry_index": 8,
+      "family": "inode",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 433,
+      "object_id": 16,
+      "raw_type": 3,
+      "validation_notes": [],
+      "value": {
+        "bsd_flags": 0,
+        "dstream": null,
+        "group": 99,
+        "has_uncompressed_size": false,
+        "inode_name": "\u0000\u0000\u0000",
+        "internal_flags": 32768,
+        "kind": "inode",
+        "mode": 16877,
+        "nchildren_or_nlink": 0,
+        "owner": 99,
+        "parent_id": 2,
+        "private_id": 16,
+        "sparse_bytes": null,
+        "uncompressed_size": 0,
+        "xfields": [
+          {
+            "interpreted": {
+              "kind": "utf8",
+              "note": null,
+              "value": "\u0000\u0000\u0000"
+            },
+            "layout": "record_relative_aligned_metadata_end",
+            "value_hex": "00000000",
+            "x_flags": 2,
+            "x_size": 4,
+            "x_type": 4
+          }
+        ]
+      },
+      "value_len": 108
+    },
+    {
+      "entry_index": 9,
+      "family": "xattr",
+      "key": {
+        "kind": "named",
+        "name": "com.apple.provenance",
+        "name_bytes_hex": "636f6d2e6170706c652e70726f76656e616e636500",
+        "name_len": 21,
+        "raw_key_form": "xattr"
+      },
+      "key_len": 31,
+      "node_paddr": 433,
+      "object_id": 16,
+      "raw_type": 4,
+      "validation_notes": [],
+      "value": {
+        "dstream": null,
+        "flags": 2,
+        "is_embedded": true,
+        "is_stream": false,
+        "kind": "xattr",
+        "payload_hex": "01020016872906fbfd2ca2",
+        "payload_utf8": null,
+        "stream_object_id": null,
+        "xdata_len": 11
+      },
+      "value_len": 15
+    },
+    {
+      "entry_index": 10,
+      "family": "inode",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 433,
+      "object_id": 17,
+      "raw_type": 3,
+      "validation_notes": [],
+      "value": {
+        "bsd_flags": 0,
+        "dstream": null,
+        "group": 99,
+        "has_uncompressed_size": false,
+        "inode_name": "\u0000\u0000\u0000",
+        "internal_flags": 32768,
+        "kind": "inode",
+        "mode": 16877,
+        "nchildren_or_nlink": 5,
+        "owner": 99,
+        "parent_id": 2,
+        "private_id": 17,
+        "sparse_bytes": null,
+        "uncompressed_size": 0,
+        "xfields": [
+          {
+            "interpreted": {
+              "kind": "utf8",
+              "note": null,
+              "value": "\u0000\u0000\u0000"
+            },
+            "layout": "record_relative_aligned_metadata_end",
+            "value_hex": "00000000",
+            "x_flags": 2,
+            "x_size": 4,
+            "x_type": 4
+          }
+        ]
+      },
+      "value_len": 108
+    },
+    {
+      "entry_index": 11,
+      "family": "xattr",
+      "key": {
+        "kind": "named",
+        "name": "com.apple.provenance",
+        "name_bytes_hex": "636f6d2e6170706c652e70726f76656e616e636500",
+        "name_len": 21,
+        "raw_key_form": "xattr"
+      },
+      "key_len": 31,
+      "node_paddr": 433,
+      "object_id": 17,
+      "raw_type": 4,
+      "validation_notes": [],
+      "value": {
+        "dstream": null,
+        "flags": 2,
+        "is_embedded": true,
+        "is_stream": false,
+        "kind": "xattr",
+        "payload_hex": "01020016872906fbfd2ca2",
+        "payload_utf8": null,
+        "stream_object_id": null,
+        "xdata_len": 11
+      },
+      "value_len": 15
+    },
+    {
+      "entry_index": 12,
+      "family": "dir_rec",
+      "key": {
+        "kind": "named",
+        "name": "clone.txt",
+        "name_bytes_hex": "636c6f6e652e74787400",
+        "name_len": 10,
+        "raw_key_form": "hashed"
+      },
+      "key_len": 22,
+      "node_paddr": 433,
+      "object_id": 17,
+      "raw_type": 9,
+      "validation_notes": [],
+      "value": {
+        "date_added": 1777197483550786299,
+        "entry_type": 8,
+        "file_id": 24,
+        "flags": 8,
+        "kind": "dir_rec",
+        "sibling_id": null,
+        "xfields": []
+      },
+      "value_len": 18
+    },
+    {
+      "entry_index": 13,
+      "family": "dir_rec",
+      "key": {
+        "kind": "named",
+        "name": "sparse.bin",
+        "name_bytes_hex": "7370617273652e62696e00",
+        "name_len": 11,
+        "raw_key_form": "hashed"
+      },
+      "key_len": 23,
+      "node_paddr": 433,
+      "object_id": 17,
+      "raw_type": 9,
+      "validation_notes": [],
+      "value": {
+        "date_added": 1777197483336935453,
+        "entry_type": 8,
+        "file_id": 23,
+        "flags": 8,
+        "kind": "dir_rec",
+        "sibling_id": null,
+        "xfields": []
+      },
+      "value_len": 18
+    },
+    {
+      "entry_index": 14,
+      "family": "dir_rec",
+      "key": {
+        "kind": "named",
+        "name": "moved.txt",
+        "name_bytes_hex": "6d6f7665642e74787400",
+        "name_len": 10,
+        "raw_key_form": "hashed"
+      },
+      "key_len": 22,
+      "node_paddr": 433,
+      "object_id": 17,
+      "raw_type": 9,
+      "validation_notes": [],
+      "value": {
+        "date_added": 1777197482909737971,
+        "entry_type": 8,
+        "file_id": 20,
+        "flags": 8,
+        "kind": "dir_rec",
+        "sibling_id": 21,
+        "xfields": [
+          {
+            "interpreted": {
+              "kind": "u64",
+              "value": 21
+            },
+            "layout": "unpacked_metadata_end",
+            "value_hex": "1500000000000000",
+            "x_flags": 2,
+            "x_size": 8,
+            "x_type": 1
+          }
+        ]
+      },
+      "value_len": 34
+    },
+    {
+      "entry_index": 15,
+      "family": "dir_rec",
+      "key": {
+        "kind": "named",
+        "name": "link.txt",
+        "name_bytes_hex": "6c696e6b2e74787400",
+        "name_len": 9,
+        "raw_key_form": "hashed"
+      },
+      "key_len": 21,
+      "node_paddr": 433,
+      "object_id": 17,
+      "raw_type": 9,
+      "validation_notes": [],
+      "value": {
+        "date_added": 1777197483976292273,
+        "entry_type": 10,
+        "file_id": 26,
+        "flags": 10,
+        "kind": "dir_rec",
+        "sibling_id": null,
+        "xfields": []
+      },
+      "value_len": 18
+    },
+    {
+      "entry_index": 16,
+      "family": "dir_rec",
+      "key": {
+        "kind": "named",
+        "name": "hard.txt",
+        "name_bytes_hex": "686172642e74787400",
+        "name_len": 9,
+        "raw_key_form": "hashed"
+      },
+      "key_len": 21,
+      "node_paddr": 433,
+      "object_id": 17,
+      "raw_type": 9,
+      "validation_notes": [],
+      "value": {
+        "date_added": 1777197483123660817,
+        "entry_type": 8,
+        "file_id": 20,
+        "flags": 8,
+        "kind": "dir_rec",
+        "sibling_id": 22,
+        "xfields": [
+          {
+            "interpreted": {
+              "kind": "u64",
+              "value": 22
+            },
+            "layout": "unpacked_metadata_end",
+            "value_hex": "1600000000000000",
+            "x_flags": 2,
+            "x_size": 8,
+            "x_type": 1
+          }
+        ]
+      },
+      "value_len": 34
+    },
+    {
+      "entry_index": 17,
+      "family": "inode",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 433,
+      "object_id": 18,
+      "raw_type": 3,
+      "validation_notes": [],
+      "value": {
+        "bsd_flags": 0,
+        "dstream": null,
+        "group": 99,
+        "has_uncompressed_size": false,
+        "inode_name": "ventsd\u0000\u0000\u0000\u0000",
+        "internal_flags": 32832,
+        "kind": "inode",
+        "mode": 16832,
+        "nchildren_or_nlink": 3,
+        "owner": 99,
+        "parent_id": 2,
+        "private_id": 18,
+        "sparse_bytes": null,
+        "uncompressed_size": 0,
+        "xfields": [
+          {
+            "interpreted": {
+              "kind": "utf8",
+              "note": null,
+              "value": "ventsd\u0000\u0000\u0000\u0000"
+            },
+            "layout": "record_relative_aligned_metadata_end",
+            "value_hex": "76656e7473640000000000",
+            "x_flags": 2,
+            "x_size": 11,
+            "x_type": 4
+          }
+        ]
+      },
+      "value_len": 116
+    },
+    {
+      "entry_index": 18,
+      "family": "xattr",
+      "key": {
+        "kind": "named",
+        "name": "com.apple.system.Security",
+        "name_bytes_hex": "636f6d2e6170706c652e73797374656d2e536563757269747900",
+        "name_len": 26,
+        "raw_key_form": "xattr"
+      },
+      "key_len": 36,
+      "node_paddr": 433,
+      "object_id": 18,
+      "raw_type": 4,
+      "validation_notes": [],
+      "value": {
+        "dstream": null,
+        "flags": 2,
+        "is_embedded": true,
+        "is_stream": false,
+        "kind": "xattr",
+        "payload_hex": "012cc16d00000000000000000000000000000000000000000000000000000000000000000000000100000000abcdefabcdefabcdefabcdef0000000c0000000100000200",
+        "payload_utf8": null,
+        "stream_object_id": null,
+        "xdata_len": 68
+      },
+      "value_len": 72
+    },
+    {
+      "entry_index": 19,
+      "family": "dir_rec",
+      "key": {
+        "kind": "named",
+        "name": "fseventsd-uuid",
+        "name_bytes_hex": "66736576656e7473642d7575696400",
+        "name_len": 15,
+        "raw_key_form": "hashed"
+      },
+      "key_len": 27,
+      "node_paddr": 433,
+      "object_id": 18,
+      "raw_type": 9,
+      "validation_notes": [],
+      "value": {
+        "date_added": 1777197482316680801,
+        "entry_type": 8,
+        "file_id": 19,
+        "flags": 8,
+        "kind": "dir_rec",
+        "sibling_id": null,
+        "xfields": []
+      },
+      "value_len": 18
+    },
+    {
+      "entry_index": 20,
+      "family": "dir_rec",
+      "key": {
+        "kind": "named",
+        "name": "00000000056dd30f",
+        "name_bytes_hex": "3030303030303030303536646433306600",
+        "name_len": 17,
+        "raw_key_form": "hashed"
+      },
+      "key_len": 29,
+      "node_paddr": 433,
+      "object_id": 18,
+      "raw_type": 9,
+      "validation_notes": [],
+      "value": {
+        "date_added": 1777197484276911188,
+        "entry_type": 8,
+        "file_id": 28,
+        "flags": 8,
+        "kind": "dir_rec",
+        "sibling_id": null,
+        "xfields": []
+      },
+      "value_len": 18
+    },
+    {
+      "entry_index": 21,
+      "family": "dir_rec",
+      "key": {
+        "kind": "named",
+        "name": "00000000056dd30e",
+        "name_bytes_hex": "3030303030303030303536646433306500",
+        "name_len": 17,
+        "raw_key_form": "hashed"
+      },
+      "key_len": 29,
+      "node_paddr": 433,
+      "object_id": 18,
+      "raw_type": 9,
+      "validation_notes": [],
+      "value": {
+        "date_added": 1777197484276036268,
+        "entry_type": 8,
+        "file_id": 27,
+        "flags": 8,
+        "kind": "dir_rec",
+        "sibling_id": null,
+        "xfields": []
+      },
+      "value_len": 18
+    },
+    {
+      "entry_index": 22,
+      "family": "inode",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 433,
+      "object_id": 19,
+      "raw_type": 3,
+      "validation_notes": [],
+      "value": {
+        "bsd_flags": 0,
+        "dstream": {
+          "alloced_size": 4096,
+          "default_crypto_id": 0,
+          "size": 36,
+          "total_bytes_read": 0,
+          "total_bytes_written": 36
+        },
+        "group": 99,
+        "has_uncompressed_size": false,
+        "inode_name": "fseventsd-uuid",
+        "internal_flags": 32768,
+        "kind": "inode",
+        "mode": 33152,
+        "nchildren_or_nlink": 1,
+        "owner": 99,
+        "parent_id": 18,
+        "private_id": 19,
+        "sparse_bytes": null,
+        "uncompressed_size": 0,
+        "xfields": [
+          {
+            "interpreted": {
+              "kind": "utf8",
+              "note": null,
+              "value": "fseventsd-uuid"
+            },
+            "layout": "record_relative_aligned_metadata_end",
+            "value_hex": "66736576656e7473642d7575696400",
+            "x_flags": 2,
+            "x_size": 15,
+            "x_type": 4
+          },
+          {
+            "interpreted": {
+              "kind": "dstream",
+              "value": {
+                "alloced_size": 4096,
+                "default_crypto_id": 0,
+                "size": 36,
+                "total_bytes_read": 0,
+                "total_bytes_written": 36
+              }
+            },
+            "layout": "record_relative_aligned_metadata_end",
+            "value_hex": "24000000000000000010000000000000000000000000000024000000000000000000000000000000",
+            "x_flags": 32,
+            "x_size": 40,
+            "x_type": 8
+          }
+        ]
+      },
+      "value_len": 160
+    },
+    {
+      "entry_index": 23,
+      "family": "dstream_id",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 433,
+      "object_id": 19,
+      "raw_type": 6,
+      "validation_notes": [],
+      "value": {
+        "kind": "dstream_id",
+        "refcnt": 1
+      },
+      "value_len": 4
+    },
+    {
+      "entry_index": 24,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 433,
+      "object_id": 19,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 25,
+      "family": "inode",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 433,
+      "object_id": 20,
+      "raw_type": 3,
+      "validation_notes": [],
+      "value": {
+        "bsd_flags": 0,
+        "dstream": {
+          "alloced_size": 4096,
+          "default_crypto_id": 0,
+          "size": 11,
+          "total_bytes_read": 0,
+          "total_bytes_written": 11
+        },
+        "group": 99,
+        "has_uncompressed_size": false,
+        "inode_name": "moved.txt",
+        "internal_flags": 33792,
+        "kind": "inode",
+        "mode": 33188,
+        "nchildren_or_nlink": 2,
+        "owner": 99,
+        "parent_id": 17,
+        "private_id": 25,
+        "sparse_bytes": null,
+        "uncompressed_size": 0,
+        "xfields": [
+          {
+            "interpreted": {
+              "kind": "utf8",
+              "note": null,
+              "value": "moved.txt"
+            },
+            "layout": "record_relative_aligned_metadata_end",
+            "value_hex": "6d6f7665642e74787400",
+            "x_flags": 2,
+            "x_size": 10,
+            "x_type": 4
+          },
+          {
+            "interpreted": {
+              "kind": "dstream",
+              "value": {
+                "alloced_size": 4096,
+                "default_crypto_id": 0,
+                "size": 11,
+                "total_bytes_read": 0,
+                "total_bytes_written": 11
+              }
+            },
+            "layout": "record_relative_aligned_metadata_end",
+            "value_hex": "0b00000000000000001000000000000000000000000000000b000000000000000000000000000000",
+            "x_flags": 32,
+            "x_size": 40,
+            "x_type": 8
+          }
+        ]
+      },
+      "value_len": 160
+    },
+    {
+      "entry_index": 26,
+      "family": "xattr",
+      "key": {
+        "kind": "named",
+        "name": "com.apple.provenance",
+        "name_bytes_hex": "636f6d2e6170706c652e70726f76656e616e636500",
+        "name_len": 21,
+        "raw_key_form": "xattr"
+      },
+      "key_len": 31,
+      "node_paddr": 433,
+      "object_id": 20,
+      "raw_type": 4,
+      "validation_notes": [],
+      "value": {
+        "dstream": null,
+        "flags": 2,
+        "is_embedded": true,
+        "is_stream": false,
+        "kind": "xattr",
+        "payload_hex": "01020016872906fbfd2ca2",
+        "payload_utf8": null,
+        "stream_object_id": null,
+        "xdata_len": 11
+      },
+      "value_len": 15
+    },
+    {
+      "entry_index": 27,
+      "family": "sibling_link",
+      "key": {
+        "kind": "sibling_link",
+        "sibling_id": 21
+      },
+      "key_len": 16,
+      "node_paddr": 433,
+      "object_id": 20,
+      "raw_type": 5,
+      "validation_notes": [],
+      "value": {
+        "kind": "sibling_link",
+        "name": "moved.txt",
+        "name_bytes_hex": "6d6f7665642e74787400",
+        "name_len": 10,
+        "parent_id": 17
+      },
+      "value_len": 20
+    },
+    {
+      "entry_index": 28,
+      "family": "sibling_link",
+      "key": {
+        "kind": "sibling_link",
+        "sibling_id": 22
+      },
+      "key_len": 16,
+      "node_paddr": 433,
+      "object_id": 20,
+      "raw_type": 5,
+      "validation_notes": [],
+      "value": {
+        "kind": "sibling_link",
+        "name": "hard.txt",
+        "name_bytes_hex": "686172642e74787400",
+        "name_len": 9,
+        "parent_id": 17
+      },
+      "value_len": 19
+    },
+    {
+      "entry_index": 29,
+      "family": "dstream_id",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 433,
+      "object_id": 20,
+      "raw_type": 6,
+      "validation_notes": [],
+      "value": {
+        "kind": "dstream_id",
+        "refcnt": 1
+      },
+      "value_len": 4
+    },
+    {
+      "entry_index": 30,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 433,
+      "object_id": 20,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 31,
+      "family": "sibling_map",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 433,
+      "object_id": 21,
+      "raw_type": 12,
+      "validation_notes": [],
+      "value": {
+        "file_id": 20,
+        "kind": "sibling_map"
+      },
+      "value_len": 8
+    },
+    {
+      "entry_index": 32,
+      "family": "sibling_map",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 433,
+      "object_id": 22,
+      "raw_type": 12,
+      "validation_notes": [],
+      "value": {
+        "file_id": 20,
+        "kind": "sibling_map"
+      },
+      "value_len": 8
+    },
+    {
+      "entry_index": 33,
+      "family": "inode",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 433,
+      "object_id": 23,
+      "raw_type": 3,
+      "validation_notes": [],
+      "value": {
+        "bsd_flags": 0,
+        "dstream": {
+          "alloced_size": 4503599627370496,
+          "default_crypto_id": 0,
+          "size": 4503599627370496,
+          "total_bytes_read": 0,
+          "total_bytes_written": 34359738368
+        },
+        "group": 99,
+        "has_uncompressed_size": false,
+        "inode_name": "sparse.bin",
+        "internal_flags": 33280,
+        "kind": "inode",
+        "mode": 33188,
+        "nchildren_or_nlink": 1,
+        "owner": 99,
+        "parent_id": 17,
+        "private_id": 23,
+        "sparse_bytes": 4362862139015168,
+        "uncompressed_size": 0,
+        "xfields": [
+          {
+            "interpreted": {
+              "kind": "utf8",
+              "note": null,
+              "value": "sparse.bin"
+            },
+            "layout": "unpacked_metadata_end",
+            "value_hex": "7370617273652e62696e00",
+            "x_flags": 2,
+            "x_size": 11,
+            "x_type": 4
+          },
+          {
+            "interpreted": {
+              "kind": "dstream",
+              "value": {
+                "alloced_size": 4503599627370496,
+                "default_crypto_id": 0,
+                "size": 4503599627370496,
+                "total_bytes_read": 0,
+                "total_bytes_written": 34359738368
+              }
+            },
+            "layout": "unpacked_metadata_end",
+            "value_hex": "00000000000010000000000000001000000000000000000000000000080000000000000000000000",
+            "x_flags": 32,
+            "x_size": 40,
+            "x_type": 8
+          },
+          {
+            "interpreted": {
+              "kind": "u64",
+              "value": 4362862139015168
+            },
+            "layout": "unpacked_metadata_end",
+            "value_hex": "0000000000800f00",
+            "x_flags": 40,
+            "x_size": 8,
+            "x_type": 13
+          }
+        ]
+      },
+      "value_len": 172
+    },
+    {
+      "entry_index": 34,
+      "family": "xattr",
+      "key": {
+        "kind": "named",
+        "name": "com.apple.provenance",
+        "name_bytes_hex": "636f6d2e6170706c652e70726f76656e616e636500",
+        "name_len": 21,
+        "raw_key_form": "xattr"
+      },
+      "key_len": 31,
+      "node_paddr": 433,
+      "object_id": 23,
+      "raw_type": 4,
+      "validation_notes": [],
+      "value": {
+        "dstream": null,
+        "flags": 2,
+        "is_embedded": true,
+        "is_stream": false,
+        "kind": "xattr",
+        "payload_hex": "01020016872906fbfd2ca2",
+        "payload_utf8": null,
+        "stream_object_id": null,
+        "xdata_len": 11
+      },
+      "value_len": 15
+    },
+    {
+      "entry_index": 35,
+      "family": "dstream_id",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 433,
+      "object_id": 23,
+      "raw_type": 6,
+      "validation_notes": [],
+      "value": {
+        "kind": "dstream_id",
+        "refcnt": 1
+      },
+      "value_len": 4
+    },
+    {
+      "entry_index": 36,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 433,
+      "object_id": 23,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 37,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 433,
+      "object_id": 23,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 38,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 433,
+      "object_id": 23,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 39,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 433,
+      "object_id": 23,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 40,
+      "family": "inode",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 433,
+      "object_id": 24,
+      "raw_type": 3,
+      "validation_notes": [],
+      "value": {
+        "bsd_flags": 0,
+        "dstream": {
+          "alloced_size": 4096,
+          "default_crypto_id": 0,
+          "size": 6,
+          "total_bytes_read": 0,
+          "total_bytes_written": 6
+        },
+        "group": 99,
+        "has_uncompressed_size": false,
+        "inode_name": "clone.txt",
+        "internal_flags": 33808,
+        "kind": "inode",
+        "mode": 33188,
+        "nchildren_or_nlink": 1,
+        "owner": 99,
+        "parent_id": 17,
+        "private_id": 20,
+        "sparse_bytes": null,
+        "uncompressed_size": 0,
+        "xfields": [
+          {
+            "interpreted": {
+              "kind": "dstream",
+              "value": {
+                "alloced_size": 4096,
+                "default_crypto_id": 0,
+                "size": 6,
+                "total_bytes_read": 0,
+                "total_bytes_written": 6
+              }
+            },
+            "layout": "record_relative_aligned_metadata_end",
+            "value_hex": "06000000000000000010000000000000000000000000000006000000000000000000000000000000",
+            "x_flags": 32,
+            "x_size": 40,
+            "x_type": 8
+          },
+          {
+            "interpreted": {
+              "kind": "utf8",
+              "note": null,
+              "value": "clone.txt"
+            },
+            "layout": "record_relative_aligned_metadata_end",
+            "value_hex": "636c6f6e652e74787400",
+            "x_flags": 2,
+            "x_size": 10,
+            "x_type": 4
+          }
+        ]
+      },
+      "value_len": 160
+    },
+    {
+      "entry_index": 41,
+      "family": "xattr",
+      "key": {
+        "kind": "named",
+        "name": "com.apple.provenance",
+        "name_bytes_hex": "636f6d2e6170706c652e70726f76656e616e636500",
+        "name_len": 21,
+        "raw_key_form": "xattr"
+      },
+      "key_len": 31,
+      "node_paddr": 433,
+      "object_id": 24,
+      "raw_type": 4,
+      "validation_notes": [],
+      "value": {
+        "dstream": null,
+        "flags": 2,
+        "is_embedded": true,
+        "is_stream": false,
+        "kind": "xattr",
+        "payload_hex": "01020016872906fbfd2ca2",
+        "payload_utf8": null,
+        "stream_object_id": null,
+        "xdata_len": 11
+      },
+      "value_len": 15
+    },
+    {
+      "entry_index": 42,
+      "family": "dstream_id",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 433,
+      "object_id": 25,
+      "raw_type": 6,
+      "validation_notes": [],
+      "value": {
+        "kind": "dstream_id",
+        "refcnt": 1
+      },
+      "value_len": 4
+    },
+    {
+      "entry_index": 43,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 433,
+      "object_id": 25,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 44,
+      "family": "inode",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 433,
+      "object_id": 26,
+      "raw_type": 3,
+      "validation_notes": [],
+      "value": {
+        "bsd_flags": 0,
+        "dstream": null,
+        "group": 99,
+        "has_uncompressed_size": false,
+        "inode_name": ".txt\u0000\u0000\u0000\u0000",
+        "internal_flags": 32768,
+        "kind": "inode",
+        "mode": 41453,
+        "nchildren_or_nlink": 1,
+        "owner": 99,
+        "parent_id": 17,
+        "private_id": 26,
+        "sparse_bytes": null,
+        "uncompressed_size": 0,
+        "xfields": [
+          {
+            "interpreted": {
+              "kind": "utf8",
+              "note": null,
+              "value": ".txt\u0000\u0000\u0000\u0000"
+            },
+            "layout": "record_relative_aligned_metadata_end",
+            "value_hex": "2e7478740000000000",
+            "x_flags": 2,
+            "x_size": 9,
+            "x_type": 4
+          }
+        ]
+      },
+      "value_len": 116
+    },
+    {
+      "entry_index": 45,
+      "family": "xattr",
+      "key": {
+        "kind": "named",
+        "name": "com.apple.fs.symlink",
+        "name_bytes_hex": "636f6d2e6170706c652e66732e73796d6c696e6b00",
+        "name_len": 21,
+        "raw_key_form": "xattr"
+      },
+      "key_len": 31,
+      "node_paddr": 433,
+      "object_id": 26,
+      "raw_type": 4,
+      "validation_notes": [],
+      "value": {
+        "dstream": null,
+        "flags": 6,
+        "is_embedded": true,
+        "is_stream": false,
+        "kind": "xattr",
+        "payload_hex": "6d6f7665642e74787400",
+        "payload_utf8": "moved.txt",
+        "stream_object_id": null,
+        "xdata_len": 10
+      },
+      "value_len": 14
+    },
+    {
+      "entry_index": 46,
+      "family": "xattr",
+      "key": {
+        "kind": "named",
+        "name": "com.apple.provenance",
+        "name_bytes_hex": "636f6d2e6170706c652e70726f76656e616e636500",
+        "name_len": 21,
+        "raw_key_form": "xattr"
+      },
+      "key_len": 31,
+      "node_paddr": 433,
+      "object_id": 26,
+      "raw_type": 4,
+      "validation_notes": [],
+      "value": {
+        "dstream": null,
+        "flags": 2,
+        "is_embedded": true,
+        "is_stream": false,
+        "kind": "xattr",
+        "payload_hex": "01020016872906fbfd2ca2",
+        "payload_utf8": null,
+        "stream_object_id": null,
+        "xdata_len": 11
+      },
+      "value_len": 15
+    },
+    {
+      "entry_index": 47,
+      "family": "inode",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 433,
+      "object_id": 27,
+      "raw_type": 3,
+      "validation_notes": [],
+      "value": {
+        "bsd_flags": 0,
+        "dstream": {
+          "alloced_size": 4096,
+          "default_crypto_id": 0,
+          "size": 201,
+          "total_bytes_read": 0,
+          "total_bytes_written": 201
+        },
+        "group": 99,
+        "has_uncompressed_size": false,
+        "inode_name": "00000000056dd30e",
+        "internal_flags": 32768,
+        "kind": "inode",
+        "mode": 33152,
+        "nchildren_or_nlink": 1,
+        "owner": 99,
+        "parent_id": 18,
+        "private_id": 27,
+        "sparse_bytes": null,
+        "uncompressed_size": 0,
+        "xfields": [
+          {
+            "interpreted": {
+              "kind": "utf8",
+              "note": null,
+              "value": "00000000056dd30e"
+            },
+            "layout": "record_relative_aligned_metadata_end",
+            "value_hex": "3030303030303030303536646433306500",
+            "x_flags": 2,
+            "x_size": 17,
+            "x_type": 4
+          },
+          {
+            "interpreted": {
+              "kind": "dstream",
+              "value": {
+                "alloced_size": 4096,
+                "default_crypto_id": 0,
+                "size": 201,
+                "total_bytes_read": 0,
+                "total_bytes_written": 201
+              }
+            },
+            "layout": "record_relative_aligned_metadata_end",
+            "value_hex": "c90000000000000000100000000000000000000000000000c9000000000000000000000000000000",
+            "x_flags": 32,
+            "x_size": 40,
+            "x_type": 8
+          }
+        ]
+      },
+      "value_len": 168
+    },
+    {
+      "entry_index": 48,
+      "family": "dstream_id",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 433,
+      "object_id": 27,
+      "raw_type": 6,
+      "validation_notes": [],
+      "value": {
+        "kind": "dstream_id",
+        "refcnt": 1
+      },
+      "value_len": 4
+    },
+    {
+      "entry_index": 49,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 433,
+      "object_id": 27,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 50,
+      "family": "inode",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 433,
+      "object_id": 28,
+      "raw_type": 3,
+      "validation_notes": [],
+      "value": {
+        "bsd_flags": 0,
+        "dstream": {
+          "alloced_size": 4096,
+          "default_crypto_id": 0,
+          "size": 72,
+          "total_bytes_read": 0,
+          "total_bytes_written": 72
+        },
+        "group": 99,
+        "has_uncompressed_size": false,
+        "inode_name": "00000000056dd30f",
+        "internal_flags": 32768,
+        "kind": "inode",
+        "mode": 33152,
+        "nchildren_or_nlink": 1,
+        "owner": 99,
+        "parent_id": 18,
+        "private_id": 28,
+        "sparse_bytes": null,
+        "uncompressed_size": 0,
+        "xfields": [
+          {
+            "interpreted": {
+              "kind": "utf8",
+              "note": null,
+              "value": "00000000056dd30f"
+            },
+            "layout": "record_relative_aligned_metadata_end",
+            "value_hex": "3030303030303030303536646433306600",
+            "x_flags": 2,
+            "x_size": 17,
+            "x_type": 4
+          },
+          {
+            "interpreted": {
+              "kind": "dstream",
+              "value": {
+                "alloced_size": 4096,
+                "default_crypto_id": 0,
+                "size": 72,
+                "total_bytes_read": 0,
+                "total_bytes_written": 72
+              }
+            },
+            "layout": "record_relative_aligned_metadata_end",
+            "value_hex": "48000000000000000010000000000000000000000000000048000000000000000000000000000000",
+            "x_flags": 32,
+            "x_size": 40,
+            "x_type": 8
+          }
+        ]
+      },
+      "value_len": 168
+    },
+    {
+      "entry_index": 51,
+      "family": "dstream_id",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 433,
+      "object_id": 28,
+      "raw_type": 6,
+      "validation_notes": [],
+      "value": {
+        "kind": "dstream_id",
+        "refcnt": 1
+      },
+      "value_len": 4
+    },
+    {
+      "entry_index": 52,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 433,
+      "object_id": 28,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported"
+      },
+      "value_len": 24
+    }
+  ],
+  "root_tree_lookup": {
+    "flags": 0,
+    "oid": 1028,
+    "paddr": 433,
+    "size": 4096,
+    "xid": 13
+  },
+  "selected_xid": 14,
+  "volume_oid": 1026
+}

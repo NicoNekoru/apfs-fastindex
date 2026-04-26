@@ -1,7 +1,8 @@
 {
   "id": "EX-13",
   "title": "Native FS-record body oracle",
-  "status": "designed_not_executed",
+  "status": "executed",
+  "observed_verdict": "body_field_mismatch",
   "primary_question": "Can native record-body field dumps reproduce mounted/POSIX namespace and ordinary logical-size facts for the same generated APFS proof fixture under a declared selected_xid?",
   "valid_verdicts": [
     "validated_native_record_body_contract",

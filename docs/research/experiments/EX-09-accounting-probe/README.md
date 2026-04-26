@@ -220,8 +220,8 @@ Future execution should save:
 
 ## Next Exact Step
 
-- Execute `EX-13` first or share its native field-dump machinery, then implement
-  `artifacts/probe_ex09.py` once inode dstream, inode uncompressed-size, xattr,
-  and decmpfs metadata can be emitted. The first `EX-09` result should answer
-  compressed logical-size precedence before any physical/shared accounting
-  formula is attempted.
+- Do not execute accounting yet. First resolve the `EX-13` sparse-file
+  xfield/dstream mismatch in Python so inode dstream, inode uncompressed-size,
+  xattr, and decmpfs metadata can be emitted with confidence. The first
+  `EX-09` result should answer compressed logical-size precedence before any
+  physical/shared accounting formula is attempted.

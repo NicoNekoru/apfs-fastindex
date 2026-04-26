@@ -255,8 +255,6 @@ encrypted/sealed/volume-group behavior.
 
 ## Next Exact Step
 
-- Follow `SR-014`/`EX-13`: implement a read-only record-body dump for
-  `DIR_REC`, `INODE`, `XATTR`, `SIBLING_LINK`, `SIBLING_MAP`, and dstream fields
-  under the validated `EX-12` OMAP/root context, then compare those fields to a
-  same-run mounted/POSIX oracle before emitting `NamespaceEntry` rows or logical
-  sizes.
+- Keep Rust at this record-family gate. `EX-13` should continue in Python until
+  sparse-file xfield/dstream layout matches the same-run mounted/POSIX oracle;
+  only then should a Rust record-body dump be considered.

@@ -4,8 +4,8 @@ ID: EX-13
 Title: Native FS-record body oracle
 Date: 2026-04-26
 Owner: GPT-5.5
-Status: Designed
-Result: Not executed
+Status: Executed
+Result: Python raw-byte record-body probe produced `body_field_mismatch`
 Related RLs:
 - RL-03 FS Tree Topology and Required Records
 - RL-06 Namespace Reconstruction
@@ -15,11 +15,13 @@ Related RLs:
 
 ## Bottom line
 
-`EX-12` validates native OMAP/root lookup for a paired detached fixture. The
-next correctness gate is not product namespace emission; it is a native
-FS-record body oracle that proves the parser can decode the required
-`DIR_REC`, `INODE`, `XATTR`, `SIBLING_LINK`, `SIBLING_MAP`, and dstream fields
-from the same selected scan state.
+`EX-12` validates native OMAP/root lookup for a paired detached fixture.
+`EX-13` executed the next gate as a Python-first raw-byte experiment, not a Rust
+parser change. The probe decoded FS-tree record bodies and reconstructed all
+mounted paths, but it did **not** validate the full native body contract:
+ordinary files, hard links, symlink target, and namespace rows matched, while
+the sparse file's inode dstream logical size decoded incorrectly because xfield
+data alignment/layout remains unresolved.
 
 ## Question
 
@@ -146,6 +148,55 @@ Minimum first fixture:
    - `oracle_inconclusive`
    - `not_executed`
 
+## Observed Results
+
+- Executed by `artifacts/probe_ex13.py`.
+- Implementation posture:
+  - Python parsed raw FS-tree node/key/value bytes directly.
+  - Existing Rust scanner output was used only as the already-validated `EX-12`
+    context provider for selected checkpoint/root-tree paddr.
+  - No new Rust record-body parser behavior was added.
+- Selected state:
+  - selected XID: `14`
+  - block size: `4096`
+  - FS-tree node count walked by Python: `1`
+  - FS-tree record count decoded by Python: `53`
+- Record-family counts:
+  - `inode=12`
+  - `dir_rec=13`
+  - `dstream_id=6`
+  - `xattr=9`
+  - `sibling_link=2`
+  - `sibling_map=2`
+  - `file_extent=9`
+- Namespace comparison:
+  - mounted/POSIX entries: `8`
+  - Python reconstructed entries: `8`
+  - missing paths: `0`
+  - unexpected paths: `0`
+  - path/type/file identity mismatches: `0`
+- Logical-size comparison:
+  - ordinary hard-linked file rows matched after record-relative xfield
+    alignment was added to the Python parser.
+  - symlink target and logical size matched.
+  - sparse file `dst/sparse.bin` mismatched:
+    - expected public logical size: `1048576`
+    - Python-decoded dstream size: `4503599627370496`
+- Verdict: `body_field_mismatch`.
+
+## Artifacts Saved
+
+- `README.md`
+- `artifacts/probe_ex13.py`
+- `artifacts/generated/oracle-contract.json`
+- `artifacts/generated/environment.json`
+- `artifacts/generated/fixture-operations.json`
+- `artifacts/generated/mounted-posix-oracle.json`
+- `artifacts/generated/native-record-body-dump.json`
+- `artifacts/generated/go-apfs-record-observer.json`
+- `artifacts/generated/comparison.json`
+- `artifacts/generated/summary.json`
+
 ## Expected Observations
 
 ### If Hypothesis A is true
@@ -167,38 +218,35 @@ Minimum first fixture:
 - Compression, sparse allocated-size, clone/shared accounting, and
   snapshot-retained bytes remain outside the pass/fail verdict.
 
-## Artifacts To Save
-
-- `README.md`
-- `artifacts/generated/oracle-contract.json`
-- `artifacts/generated/environment.json`
-- `artifacts/generated/fixture-operations.json`
-- `artifacts/generated/mounted-posix-oracle.json`
-- `artifacts/generated/native-record-body-dump.json`
-- `artifacts/generated/go-apfs-record-observer.json`
-- `artifacts/generated/comparison.json`
-- `artifacts/generated/summary.json`
-- execution script, when implemented, as `artifacts/probe_ex13.py`
-
 ## Interpretation
 
 - Observation: `EX-12` makes this experiment legal to design because native
   OMAP/root context is no longer the current blocker for the proof fixture.
 - Spec: `SR-014` identifies the body fields that must be present before
   namespace/logical-size rows can be trusted.
-- Hypothesis: Passing this experiment should promote record-body decoding from
-  source-backed design to native parser contract, while still leaving product
-  aggregation, `EX-09` accounting, and subtree reuse outside scope.
+- Observation: Python raw-byte parsing can reconstruct the proof fixture path
+  graph from `DIR_REC` keys/values and recover hard-link identity, symlink xattr
+  payload, and ordinary file dstream sizes for non-sparse files.
+- Observation: Sparse-file dstream/xfield parsing is not yet trustworthy. The
+  mismatch is localized to body-field decoding, not checkpoint selection, OMAP
+  lookup, path reconstruction, or mounted oracle capture.
+- Hypothesis: APFS xfield data alignment must be modeled relative to the
+  containing record and may have additional sparse-file layout nuance. This must
+  be resolved in Python before a Rust record-body decoder is justified.
 
 ## What This Can Rule Out
 
-- Treating record-family counts as sufficient evidence for namespace support.
-- Emitting product namespace rows before native `DIR_REC`/`INODE`/`XATTR`/sibling
-  bodies have an oracle diff.
-- Collapsing logical size, allocated size, compressed size, clone sharing, and
-  snapshot-retained bytes into one metric.
-- Using `go-apfs` or any third-party parser as a paddr/XID oracle without
-  declaring selected-XID alignment.
+- It rules out treating record-family counts as sufficient evidence for
+  namespace/logical-size support.
+- It rules out moving record-body decoding into Rust now; the sparse dstream
+  mismatch needs Python/source-level resolution first.
+- It rules out product namespace/logical-size rows until xfield/dstream decoding
+  matches sparse-file public logical size.
+- It rules out collapsing sparse logical size with allocated/shared/exclusive
+  accounting. The observed failure is a logical-size field decode issue, not a
+  physical accounting formula.
+- It continues to rule out using `go-apfs` or any third-party parser as a
+  paddr/XID oracle without selected-XID alignment.
 
 ## Impact on RLs
 
@@ -211,7 +259,8 @@ Minimum first fixture:
 
 ## Next Exact Step
 
-- Implement only the `EX-13` probe/dump path when returning to code: generate a
-  paired fixture, dump native record bodies, save POSIX and cross-tool observers,
-  and compare field rows. Do not emit product namespace rows until the verdict is
-  `validated_native_record_body_contract`.
+- Continue in Python: isolate APFS xfield data alignment for inodes with
+  `INO_EXT_TYPE_SPARSE_BYTES` by saving per-xfield raw offsets/candidate layouts
+  and comparing the sparse file against `go-apfs` record groups and Apple's
+  `xf_blob_t` rules. Do not implement Rust record-body decoding until sparse
+  dstream logical size matches the mounted oracle.

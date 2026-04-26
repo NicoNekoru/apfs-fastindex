@@ -213,11 +213,13 @@ Gate D: broader product semantics and optimization
   `ENCRYPTING`/`DECRYPTING`/`KEYROLLING`/`CRYPTO_GENERATION_FLAG`/
   unknown-bit hard stops at OMAP open time, all covered by Rust unit
   tests on synthetic OMAPs.
-- `EX-13` native FS-record body oracle; designed as the next correctness gate
-  after `EX-12`. It will compare native `DIR_REC`, `INODE`, `XATTR`,
-  `SIBLING_LINK`, `SIBLING_MAP`, and dstream field dumps against same-run
-  mounted/POSIX namespace and ordinary logical-size facts, preserving
-  selected-XID caveats for any cross-tool APFS observer. Not executed.
+- `EX-13` native FS-record body oracle; executed as a Python-first raw-byte
+  experiment after `EX-12`. It decoded `DIR_REC`, `INODE`, `XATTR`,
+  `SIBLING_LINK`, `SIBLING_MAP`, and dstream field candidates, reconstructed all
+  mounted paths, and preserved same-run mounted/POSIX plus `go-apfs` observer
+  artifacts. Verdict: `body_field_mismatch` because sparse-file inode dstream
+  logical size did not match public `st_size`; keep record-body decoding in
+  Python until xfield layout is resolved.
 
 ## Research Tracks
 
