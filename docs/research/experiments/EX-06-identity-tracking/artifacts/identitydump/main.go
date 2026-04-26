@@ -16,12 +16,13 @@ import (
 )
 
 type output struct {
-	Device       string          `json:"device"`
-	Volume       string          `json:"volume"`
-	RootTree     objectIdentity  `json:"root_tree"`
-	Nodes        []objectIdentity `json:"nodes"`
-	Entries      []entry          `json:"entries"`
-	RecordGroups []recordGroup    `json:"record_groups"`
+	Device        string          `json:"device"`
+	Volume        string          `json:"volume"`
+	RootTree      objectIdentity  `json:"root_tree"`
+	Nodes         []objectIdentity `json:"nodes"`
+	NodeSummaries []nodeSummary    `json:"node_summaries"`
+	Entries       []entry          `json:"entries"`
+	RecordGroups  []recordGroup    `json:"record_groups"`
 }
 
 type objectIdentity struct {
@@ -56,6 +57,30 @@ type recordGroup struct {
 	Names       []string `json:"names,omitempty"`
 	LinkCount   int32    `json:"link_count,omitempty"`
 	LogicalSize uint64   `json:"logical_size,omitempty"`
+}
+
+type nodeSummary struct {
+	NodeKey          string         `json:"node_key"`
+	Domain           string         `json:"domain"`
+	Role             string         `json:"role"`
+	Oid              uint64         `json:"oid"`
+	LookupXid        uint64         `json:"lookup_xid,omitempty"`
+	ObjectXid        uint64         `json:"object_xid"`
+	Paddr            uint64         `json:"paddr"`
+	Checksum         uint64         `json:"checksum"`
+	Type             string         `json:"type"`
+	Subtype          string         `json:"subtype"`
+	Level            uint16         `json:"level,omitempty"`
+	KeyCount         uint32         `json:"key_count,omitempty"`
+	IsLeaf           bool           `json:"is_leaf"`
+	RecordCounts     map[string]int `json:"record_counts"`
+	MinFileID        uint64         `json:"min_file_id,omitempty"`
+	MaxFileID        uint64         `json:"max_file_id,omitempty"`
+	ChildOids        []uint64       `json:"child_oids,omitempty"`
+	NameCount        int            `json:"name_count,omitempty"`
+	NameSample       []string       `json:"name_sample,omitempty"`
+	LogicalSizeTotal uint64         `json:"logical_size_total,omitempty"`
+	SummaryHash      string         `json:"summary_hash"`
 }
 
 func main() {
@@ -106,7 +131,7 @@ func dump(device string) (*output, error) {
 	}
 	rootNode := rootObj.Body.(types.BTreeNodePhys)
 
-	nodes, err := collectNodeIdentities(reader, fsOMAP, rootObj, rootNode, rootEntry.Val.Paddr, "fs_root_tree", 0)
+	nodes, summaries, err := collectNodeIdentities(reader, fsOMAP, rootObj, rootNode, rootEntry.Val.Paddr, "fs_root_tree", 0)
 	if err != nil {
 		return nil, err
 	}
@@ -125,12 +150,13 @@ func dump(device string) (*output, error) {
 	}
 
 	return &output{
-		Device:       device,
-		Volume:       strings.TrimRight(string(fs.Volume.VolumeName[:]), "\x00"),
-		RootTree:     nodes[0],
-		Nodes:        nodes,
-		Entries:      entries,
-		RecordGroups: groups,
+		Device:        device,
+		Volume:        strings.TrimRight(string(fs.Volume.VolumeName[:]), "\x00"),
+		RootTree:      nodes[0],
+		Nodes:         nodes,
+		NodeSummaries: summaries,
+		Entries:       entries,
+		RecordGroups:  groups,
 	}, nil
 }
 
@@ -142,10 +168,10 @@ func collectNodeIdentities(
 	paddr uint64,
 	role string,
 	depth int,
-) ([]objectIdentity, error) {
+) ([]objectIdentity, []nodeSummary, error) {
 	contentHash, err := blockHash(reader, paddr)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	identity := objectIdentity{
 		Domain:      "volume_omap",
@@ -163,10 +189,12 @@ func collectNodeIdentities(
 		IsLeaf:      node.IsLeaf(),
 		ContentHash: contentHash,
 	}
+	summary := summarizeNode(identity, node)
 	identities := []objectIdentity{identity}
+	summaries := []nodeSummary{summary}
 
 	if node.IsLeaf() {
-		return identities, nil
+		return identities, summaries, nil
 	}
 
 	for idx, raw := range node.Entries {
@@ -180,28 +208,135 @@ func collectNodeIdentities(
 		}
 		omapEntry, err := fsOMAP.GetOMapEntry(reader, types.OidT(childOID), types.XidT(^uint64(0)))
 		if err != nil {
-			return nil, fmt.Errorf("resolve child node %#x: %w", childOID, err)
+			return nil, nil, fmt.Errorf("resolve child node %#x: %w", childOID, err)
 		}
 		childObj, err := types.ReadObj(reader, omapEntry.Val.Paddr)
 		if err != nil {
-			return nil, fmt.Errorf("read child node %#x: %w", childOID, err)
+			return nil, nil, fmt.Errorf("read child node %#x: %w", childOID, err)
 		}
 		childNode, ok := childObj.Body.(types.BTreeNodePhys)
 		if !ok {
 			continue
 		}
 		role := fmt.Sprintf("fs_tree_child_depth_%d_index_%d", depth+1, idx)
-		childIdentities, err := collectNodeIdentities(reader, fsOMAP, childObj, childNode, omapEntry.Val.Paddr, role, depth+1)
+		childIdentities, childSummaries, err := collectNodeIdentities(reader, fsOMAP, childObj, childNode, omapEntry.Val.Paddr, role, depth+1)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		for i := range childIdentities {
 			childIdentities[i].LookupXid = uint64(omapEntry.Key.Xid)
 		}
+		for i := range childSummaries {
+			childSummaries[i].LookupXid = uint64(omapEntry.Key.Xid)
+		}
 		identities = append(identities, childIdentities...)
+		summaries = append(summaries, childSummaries...)
 	}
 
-	return identities, nil
+	return identities, summaries, nil
+}
+
+func summarizeNode(identity objectIdentity, node types.BTreeNodePhys) nodeSummary {
+	recordCounts := map[string]int{}
+	var names []string
+	var childOids []uint64
+	var canonical []string
+	var minFileID uint64
+	var maxFileID uint64
+	var logicalSizeTotal uint64
+
+	for _, raw := range node.Entries {
+		rec, ok := raw.(types.NodeEntry)
+		if !ok {
+			continue
+		}
+
+		recordType := fmt.Sprint(rec.Hdr.GetType())
+		recordCounts[recordType]++
+		fileID := rec.Hdr.GetID()
+		if minFileID == 0 || fileID < minFileID {
+			minFileID = fileID
+		}
+		if fileID > maxFileID {
+			maxFileID = fileID
+		}
+
+		name := ""
+		switch key := rec.Key.(type) {
+		case types.JDrecHashedKeyT:
+			name = key.Name
+			names = append(names, name)
+		case types.JXattrKeyT:
+			name = key.Name
+			names = append(names, name)
+		}
+
+		var child uint64
+		if childOID, ok := childOID(rec); ok {
+			child = childOID
+			childOids = append(childOids, childOID)
+		}
+
+		var logicalSize uint64
+		if inode, ok := rec.Val.(types.JInodeVal); ok {
+			if size, ok := inodeLogicalSize(inode); ok {
+				logicalSize = size
+				logicalSizeTotal += size
+			}
+		}
+
+		canonical = append(
+			canonical,
+			fmt.Sprintf("%016x|%s|%s|%016x|%d", fileID, recordType, name, child, logicalSize),
+		)
+	}
+
+	slices.Sort(names)
+	slices.Sort(childOids)
+	slices.Sort(canonical)
+	sum := sha256.Sum256([]byte(strings.Join(canonical, "\n")))
+	nameSample := names
+	if len(nameSample) > 20 {
+		nameSample = nameSample[:20]
+	}
+
+	return nodeSummary{
+		NodeKey:          identityKey(identity),
+		Domain:           identity.Domain,
+		Role:             identity.Role,
+		Oid:              identity.Oid,
+		LookupXid:        identity.LookupXid,
+		ObjectXid:        identity.ObjectXid,
+		Paddr:            identity.Paddr,
+		Checksum:         identity.Checksum,
+		Type:             identity.Type,
+		Subtype:          identity.Subtype,
+		Level:            identity.Level,
+		KeyCount:         identity.KeyCount,
+		IsLeaf:           identity.IsLeaf,
+		RecordCounts:     recordCounts,
+		MinFileID:        minFileID,
+		MaxFileID:        maxFileID,
+		ChildOids:        childOids,
+		NameCount:        len(names),
+		NameSample:       nameSample,
+		LogicalSizeTotal: logicalSizeTotal,
+		SummaryHash:      fmt.Sprintf("%x", sum[:]),
+	}
+}
+
+func identityKey(identity objectIdentity) string {
+	return fmt.Sprintf(
+		"%s|%d|%d|%d|%d|%s|%s|%s",
+		identity.Domain,
+		identity.Oid,
+		identity.ObjectXid,
+		identity.Paddr,
+		identity.Checksum,
+		identity.Type,
+		identity.Subtype,
+		identity.ContentHash,
+	)
 }
 
 func blockHash(reader io.ReaderAt, paddr uint64) (string, error) {

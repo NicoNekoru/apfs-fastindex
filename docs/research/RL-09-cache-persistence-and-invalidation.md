@@ -57,6 +57,11 @@ Last Updated: TBD
 - [2026-04-25] `EX-07` defined the next incremental oracle: simulate reuse
   decisions between two pinned raw states and compare the result to a fresh full
   raw summary of the same state.
+- [2026-04-26] `EX-07` executed that oracle at node-summary granularity. Exact
+  node-key matches had zero summary-hash mismatches across six adjacent pinned
+  states, while changed or missing node keys forced descent/reparse. This
+  supports separating the reuse-decision proof from the later persistent cache
+  storage format.
 
 ## Interim Decisions
 - Prefer conservative invalidation over aggressive reuse.
@@ -65,6 +70,9 @@ Last Updated: TBD
   scan-state continuity, OMAP domain, object XID, paddr, and checksum/hash.
 - Incremental correctness should be validated independently from cache storage
   format; first prove reuse decisions, then design persistence.
+- A future persistent cache entry for parsed node summaries must include parser
+  version and summary schema version in addition to the exact raw node identity.
+  If any field is absent, changed, or unvalidated, reuse is forbidden.
 
 ## Exit Criteria
 - Cache schema defined.

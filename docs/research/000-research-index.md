@@ -111,6 +111,8 @@ for the exact question being tested.
 - implementation-facing docs:
   - `contracts/narrow-v1-parser-contract.md`
   - `plans/first-raw-parser-prototype-plan.md`
+  - `../implementation/000-implementation-index.md`
+  - `../implementation/narrow-v1-proof-parser-skeleton.md`
 - templates:
   - `001-research-template.md`
   - `002-source-review-template.md`
@@ -159,7 +161,8 @@ Gate D: broader product semantics and optimization
 - `EX-03` pinned-state raw-vs-oracle proof loop
 - `EX-04` expanded pinned raw-vs-oracle corpus
 - `EX-06` OID, paddr, XID, checksum identity tracking
-- `EX-07` subtree reuse proof probe
+- `EX-07` subtree reuse proof probe; first execution found zero false reuse for
+  exact node-identity matches in the detached lab corpus
 
 ## Research Tracks
 

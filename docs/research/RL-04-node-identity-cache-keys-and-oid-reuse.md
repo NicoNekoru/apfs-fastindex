@@ -48,12 +48,19 @@ Last Updated: TBD
   mutations, while paddr, object XID, checksum, and block hash changed at every
   step. Delete/recreate of `work/beta.txt` produced a new file id in this short
   run, but that does not prove file-id reuse impossible.
+- [2026-04-26] `EX-07` tested the stronger identity tuple against per-node
+  summary hashes. Exact node keys had zero false reuse in the detached lab
+  corpus; weaker keys were not promoted. The observed safe candidate remains an
+  exact tuple, not a reduced or performance-optimized key.
 
 ## Interim Decisions
 - Cache identity should remain conservative until reuse safety is demonstrated.
 - A candidate raw object identity for future probes is at least:
   `omap domain + oid + object_xid + paddr + checksum/hash + scan state`.
 - File identity and B-tree node identity must remain separate concepts.
+- For future subtree summary reuse, include parser version, summary schema, and
+  expected type/subtype with the raw identity tuple. Do not collapse the key to
+  OID, paddr, or object XID alone for performance.
 
 ## Exit Criteria
 - Final cache-key definition for node cache.

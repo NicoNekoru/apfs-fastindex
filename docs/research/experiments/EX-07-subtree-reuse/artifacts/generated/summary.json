@@ -1,0 +1,157 @@
+{
+  "any_false_reuse": false,
+  "candidate_reuse_rule": "reuse only when exact node_key matches; node_key includes OMAP domain, OID, object XID, paddr, checksum, type/subtype, and SHA-256 block hash",
+  "state_count": 7,
+  "state_summaries": [
+    {
+      "checkpoint_xid": 6,
+      "entry_count": 624,
+      "hot_digest_count": 201,
+      "label": "00-baseline",
+      "leaf_summary_count": 60,
+      "node_count": 61,
+      "stable_a_digest_count": 201,
+      "stable_b_digest_count": 201
+    },
+    {
+      "checkpoint_xid": 10,
+      "entry_count": 624,
+      "hot_digest_count": 201,
+      "label": "01-append-hot",
+      "leaf_summary_count": 60,
+      "node_count": 61,
+      "stable_a_digest_count": 201,
+      "stable_b_digest_count": 201
+    },
+    {
+      "checkpoint_xid": 14,
+      "entry_count": 624,
+      "hot_digest_count": 201,
+      "label": "02-rename-hot",
+      "leaf_summary_count": 61,
+      "node_count": 62,
+      "stable_a_digest_count": 201,
+      "stable_b_digest_count": 201
+    },
+    {
+      "checkpoint_xid": 18,
+      "entry_count": 624,
+      "hot_digest_count": 200,
+      "label": "03-move-hot",
+      "leaf_summary_count": 61,
+      "node_count": 62,
+      "stable_a_digest_count": 201,
+      "stable_b_digest_count": 201
+    },
+    {
+      "checkpoint_xid": 22,
+      "entry_count": 624,
+      "hot_digest_count": 200,
+      "label": "04-delete-recreate-hot",
+      "leaf_summary_count": 62,
+      "node_count": 63,
+      "stable_a_digest_count": 201,
+      "stable_b_digest_count": 201
+    },
+    {
+      "checkpoint_xid": 26,
+      "entry_count": 824,
+      "hot_digest_count": 400,
+      "label": "05-add-hot-fanout",
+      "leaf_summary_count": 81,
+      "node_count": 82,
+      "stable_a_digest_count": 201,
+      "stable_b_digest_count": 201
+    },
+    {
+      "checkpoint_xid": 30,
+      "entry_count": 724,
+      "hot_digest_count": 300,
+      "label": "06-delete-hot-fanout",
+      "leaf_summary_count": 74,
+      "node_count": 75,
+      "stable_a_digest_count": 201,
+      "stable_b_digest_count": 201
+    }
+  ],
+  "transitions": [
+    {
+      "current_node_count": 61,
+      "current_reuse_fraction": 0.8524590163934426,
+      "false_reuse_count": 0,
+      "false_reuse_node_keys": [],
+      "from": "00-baseline",
+      "previous_node_count": 61,
+      "reusable_leaf_count": 52,
+      "reusable_node_count": 52,
+      "stable_a_unchanged": true,
+      "stable_b_unchanged": true,
+      "to": "01-append-hot"
+    },
+    {
+      "current_node_count": 62,
+      "current_reuse_fraction": 0.8548387096774194,
+      "false_reuse_count": 0,
+      "false_reuse_node_keys": [],
+      "from": "01-append-hot",
+      "previous_node_count": 61,
+      "reusable_leaf_count": 53,
+      "reusable_node_count": 53,
+      "stable_a_unchanged": true,
+      "stable_b_unchanged": true,
+      "to": "02-rename-hot"
+    },
+    {
+      "current_node_count": 62,
+      "current_reuse_fraction": 0.9032258064516129,
+      "false_reuse_count": 0,
+      "false_reuse_node_keys": [],
+      "from": "02-rename-hot",
+      "previous_node_count": 62,
+      "reusable_leaf_count": 56,
+      "reusable_node_count": 56,
+      "stable_a_unchanged": true,
+      "stable_b_unchanged": true,
+      "to": "03-move-hot"
+    },
+    {
+      "current_node_count": 63,
+      "current_reuse_fraction": 0.873015873015873,
+      "false_reuse_count": 0,
+      "false_reuse_node_keys": [],
+      "from": "03-move-hot",
+      "previous_node_count": 62,
+      "reusable_leaf_count": 55,
+      "reusable_node_count": 55,
+      "stable_a_unchanged": true,
+      "stable_b_unchanged": true,
+      "to": "04-delete-recreate-hot"
+    },
+    {
+      "current_node_count": 82,
+      "current_reuse_fraction": 0.6585365853658537,
+      "false_reuse_count": 0,
+      "false_reuse_node_keys": [],
+      "from": "04-delete-recreate-hot",
+      "previous_node_count": 63,
+      "reusable_leaf_count": 54,
+      "reusable_node_count": 54,
+      "stable_a_unchanged": true,
+      "stable_b_unchanged": true,
+      "to": "05-add-hot-fanout"
+    },
+    {
+      "current_node_count": 75,
+      "current_reuse_fraction": 0.84,
+      "false_reuse_count": 0,
+      "false_reuse_node_keys": [],
+      "from": "05-add-hot-fanout",
+      "previous_node_count": 82,
+      "reusable_leaf_count": 63,
+      "reusable_node_count": 63,
+      "stable_a_unchanged": true,
+      "stable_b_unchanged": true,
+      "to": "06-delete-hot-fanout"
+    }
+  ]
+}

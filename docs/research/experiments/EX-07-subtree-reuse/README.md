@@ -3,9 +3,9 @@
 ID: EX-07
 Title: Subtree reuse proof probe
 Date: 2026-04-25
-Owner: TBD
-Status: Planned
-Result: Inconclusive
+Owner: GPT-5.5
+Status: Complete
+Result: Positive within lab corpus
 Related RLs:
 - RL-05 Subtree Reuse Correctness
 - RL-04 Node Identity, Cache Keys, and OID Reuse
@@ -15,8 +15,8 @@ Related RLs:
 ## Bottom line
 
 `EX-06` ruled out bare OID cache identity and produced the first multi-node FS
-tree states for this repo. `EX-07` should use that finding to test a narrower
-and falsifiable reuse rule:
+tree states for this repo. `EX-07` used that finding to test a narrower and
+falsifiable reuse rule:
 
 - a subtree summary may be reused only when the child node identity observed
   through the parent pointer is unchanged under the same OMAP domain and scan
@@ -26,9 +26,20 @@ and falsifiable reuse rule:
 - any changed ancestor, changed child pointer, changed child identity, changed
   parser version, or unsupported side metadata forces descent
 
-The goal is not to prove a general APFS theorem. The goal is to decide whether a
-conservative subtree-skipping algorithm is worth designing after the narrow full
-parser exists.
+The first execution produced a positive result in a detached image-backed lab
+corpus:
+
+- exact node-identity reuse produced zero false reuse across six adjacent
+  transitions
+- low-churn hot-directory mutations still left `65.9%` to `90.3%` of current
+  FS-tree nodes reusable
+- `stable-a/` and `stable-b/` raw path digests stayed unchanged throughout all
+  hot-directory mutations
+
+The goal is still not to prove a general APFS theorem. The result is strong
+enough to keep subtree summary reuse as a viable post-v1 architecture track, but
+not enough to encode it as production cache behavior before a native parser and
+larger corpus exist.
 
 ## Question
 
@@ -93,6 +104,16 @@ Recommended fanout:
 - increase to `1000` only if the FS tree does not split into enough nodes
 - record node count after setup before proceeding
 
+Actual first-run setup:
+
+- fresh unencrypted 384 MiB APFS image
+- case-insensitive
+- detached raw reads only
+- mounted mutation/oracle phase before every detach
+- `200` files each in `stable-a/`, `stable-b/`, and `hot/`
+- `20` seed files in `moved/`
+- `200` extra files added during the split/fanout transition
+
 ## Probe Steps
 
 1. Build the baseline volume with `stable-a/`, `stable-b/`, `hot/`, and
@@ -150,6 +171,20 @@ Save at least:
 - comparison report for simulated incremental output versus full raw output
 - a final `summary.json` with pass/fail for each transition
 
+Saved artifacts:
+
+- `artifacts/probe_ex07.py`
+- `artifacts/generated/environment.json`
+- `artifacts/generated/00-baseline.json`
+- `artifacts/generated/01-append-hot.json`
+- `artifacts/generated/02-rename-hot.json`
+- `artifacts/generated/03-move-hot.json`
+- `artifacts/generated/04-delete-recreate-hot.json`
+- `artifacts/generated/05-add-hot-fanout.json`
+- `artifacts/generated/06-delete-hot-fanout.json`
+- `artifacts/generated/summary.json`
+- `artifacts/generated/run.json`
+
 ## Documentation Requirements
 
 The completed `README.md` must answer:
@@ -180,15 +215,63 @@ If any condition fails, descend or fully reparse.
 
 ## Observed Results
 
-- Not run yet.
+- The state sequence covered `7` pinned raw states.
+- Highest visible checkpoint XID advanced from `6` to `30`.
+- The corpus started with:
+  - `624` raw entries
+  - `61` FS-tree nodes
+  - `60` leaf node summaries
+- The add-fanout transition grew the tree to:
+  - `824` raw entries
+  - `82` FS-tree nodes
+  - `81` leaf node summaries
+- The delete-fanout transition reduced it to:
+  - `724` raw entries
+  - `75` FS-tree nodes
+  - `74` leaf node summaries
+- Across all adjacent transitions, exact node-identity reuse produced:
+  - `false_reuse_count = 0`
+  - no reused node summary hash mismatch
+  - unchanged `stable-a/` raw path digest
+  - unchanged `stable-b/` raw path digest
+
+Reuse by transition:
+
+- `00-baseline -> 01-append-hot`: `52 / 61` current nodes reusable (`85.2%`)
+- `01-append-hot -> 02-rename-hot`: `53 / 62` current nodes reusable (`85.5%`)
+- `02-rename-hot -> 03-move-hot`: `56 / 62` current nodes reusable (`90.3%`)
+- `03-move-hot -> 04-delete-recreate-hot`: `55 / 63` current nodes reusable
+  (`87.3%`)
+- `04-delete-recreate-hot -> 05-add-hot-fanout`: `54 / 82` current nodes
+  reusable (`65.9%`)
+- `05-add-hot-fanout -> 06-delete-hot-fanout`: `63 / 75` current nodes
+  reusable (`84.0%`)
 
 ## Interpretation
 
-- Pending execution.
+- The tested identity tuple is sufficient in this corpus to avoid false reuse
+  for node-local namespace/logical-size summaries.
+- Stable subtrees remained reusable even when mutations targeted `hot/`,
+  including append, rename, move, delete/recreate, fanout growth, and fanout
+  deletion.
+- Tree growth reduced reuse granularity but did not collapse the model. The
+  add-fanout transition had the lowest reuse fraction because it created many
+  new hot-directory nodes.
+- The result supports a future conservative incremental design where unchanged
+  exact node identities can reuse parsed summaries and every changed/missing
+  identity forces descent or full parse.
+- This is not a production cache theorem yet. The tool still uses `go-apfs`, the
+  corpus is image-backed and single-volume, and no physical/shared accounting or
+  live mounted raw scan semantics were requested.
 
 ## What This Rules Out
 
-- Pending execution.
+- It rules out the fear that every small mutation necessarily rewrites the whole
+  FS tree in this lab image-backed corpus.
+- It rules out abandoning subtree summary reuse before the native parser exists.
+- It does not rule out APFS layouts or product modes where relocation, snapshots,
+  compression side metadata, volume groups, or live reads make reuse ineffective
+  or unsafe.
 
 ## Impact on RLs
 
@@ -202,6 +285,13 @@ If any condition fails, descend or fully reparse.
 
 ## Next Exact Step
 
-- Implement the mutation and identity-summary harness by extending the
-  `EX-06` identity dumper with per-node namespace/logical-size summaries and a
-  simulated reuse decision report.
+- Keep the exact node-identity rule as the only permitted candidate for future
+  subtree summary reuse:
+  `(omap domain, oid, object_xid, paddr, checksum/hash, type/subtype, parser
+  version, summary schema)`.
+- Do not implement persistent incremental caching yet. First replace the
+  `go-apfs` proof backend with native root/FS-record parsing and rerun this
+  corpus through native summaries.
+- Add a larger follow-up corpus only after native parsing exists, with
+  case-sensitive images, larger fanout, clone/sparse/compressed candidates, and
+  repeated churn across multiple top-level directories.

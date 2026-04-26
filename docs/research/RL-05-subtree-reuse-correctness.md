@@ -50,6 +50,11 @@ Last Updated: TBD
   falsifiable subtree-reuse probe. It will test reuse only when a parent child
   pointer resolves to the same child tuple: OMAP domain, OID, object XID, paddr,
   checksum/hash, and type/subtype.
+- [2026-04-26] `EX-07` executed on a detached 384 MiB image-backed corpus with
+  separated `stable-a/`, `stable-b/`, `hot/`, and `moved/` subtrees. Exact
+  node-identity reuse produced zero false reuse across append, rename, move,
+  delete/recreate, fanout growth, and fanout deletion transitions. Reusable
+  current-node fractions ranged from `65.9%` to `90.3%`.
 
 ## Interim Decisions
 - Reuse should be proven at the node/subtree level before being trusted in production.
@@ -57,6 +62,12 @@ Last Updated: TBD
   logical size. Physical/shared/snapshot accounting requires a separate theorem.
 - Any changed identity field, unsupported side metadata, parser-version change,
   or unproven metric dependency should force descent or full reparse.
+- Keep exact node identity reuse alive as a post-v1 architecture candidate. The
+  only currently supported candidate identity includes OMAP domain, OID, object
+  XID, paddr, checksum/hash, and type/subtype; weaker identity tuples remain
+  rejected.
+- Do not implement persistent subtree skipping yet. The positive `EX-07` result
+  must be rerun after native root/FS-record parsing exists.
 
 ## Exit Criteria
 - A precise reuse theorem for our implementation.
