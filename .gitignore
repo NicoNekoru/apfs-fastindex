@@ -1,0 +1,71 @@
+# Rust build output
+/target/
+
+# Rust backup files sometimes created by rustfmt
+**/*.rs.bk
+
+# Python and uv local state
+__pycache__/
+*.py[cod]
+*$py.class
+.python-version
+.venv/
+venv/
+env/
+.uv-cache/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# LaTeX build output
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.lof
+*.lot
+*.nav
+*.out
+*.run.xml
+*.snm
+*.synctex.gz
+*.toc
+*.vrb
+*.xdv
+/docs/manual/*.pdf
+
+# Coverage and profiling output
+/coverage/
+/tarpaulin-report.html
+/lcov.info
+*.profraw
+*.profdata
+
+# Local environment files
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# Editor and OS metadata
+.DS_Store
+.AppleDouble
+.LSOverride
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Local logs and temporary files
+*.log
+*.tmp
+*.temp
