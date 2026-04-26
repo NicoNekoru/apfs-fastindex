@@ -3,7 +3,7 @@
 Status: Open
 Priority: P0
 Owner: TBD
-Last Updated: TBD
+Last Updated: 2026-04-26
 
 ## Core Question
 - How do OID-to-physical-address mappings behave across XIDs?
@@ -60,6 +60,46 @@ Last Updated: TBD
   states. The FS root tree OID stayed stable while resolved paddr, object XID,
   checksum, and block hash changed after every mutation, reinforcing that OMAP
   resolution output must carry version/content identity, not just OID.
+- [2026-04-26] `SR-005` reinforced that object resolution is both
+  OMAP-domain-specific and XID-aware. Container and volume OMAPs have separate
+  virtual address spaces, and active-state lookup must choose the highest usable
+  mapping for the requested object within the selected scan XID rather than a
+  bare latest mapping.
+- [2026-04-26] `SR-006` narrowed the native resolver contract to
+  `(omap context, oid, max_xid or snapshot_xid)` and identified domain ambiguity,
+  newer-than-scan mappings, encrypted OMAP values, and resolved-object
+  validation failures as hard stops.
+- [2026-04-26] `SR-007` made object-header validation a resolver prerequisite:
+  checksum, expected type/subtype, and object XID relative to the selected scan
+  state must be checked before an object body is trusted.
+- [2026-04-26] `SR-013` clarified that native OMAP/root resolution also depends
+  on checkpoint-map validation. A highest-candidate `NXSB` is not enough input
+  for a resolver until the selected checkpoint's ephemeral-object context is
+  validated.
+- [2026-04-26] `SR-006` was tightened further: lookup should seek
+  `(oid, selected_xid)` and accept the greatest matching key with
+  `xid <= selected_xid`; `OMAP_VAL_DELETED` is a negative lookup result, while
+  encrypted/no-header/crypto-generation flags are unsupported hard stops.
+- [2026-04-26] `EX-12` was designed to compare native OMAP lookup output against
+  pinned identity artifacts from `EX-06` and `EX-07`, after `EX-11` supplies a
+  validated checkpoint context.
+- [2026-04-26] `EX-11` executed and produced a validated checkpoint context for a
+  generated detached proof fixture, but `EX-12` was blocked because the
+  `EX-06`/`EX-07` raw images that produced the pinned identity oracles were not
+  preserved.
+- [2026-04-26] `EX-10` extended the Rust path with a native OMAP resolver
+  (`crates/apfs-fastindex/src/omap.rs`). The resolver opens an `omap_phys_t`,
+  walks the embedded B-tree, and performs the `(oid, max_xid)` lower-bound
+  lookup that `SR-006` requires. On the proof fixture it resolves volume OID
+  `1026` to paddr `439` at xid `14` from the container OMAP, then opens the
+  volume OMAP and resolves FS-tree root virtual OID `1028` to paddr `433` at
+  xid `13`. `OMAP_VAL_ENCRYPTED` and `OMAP_VAL_NOHEADER` values force a hard
+  stop and `OMAP_VAL_DELETED` returns a negative lookup, all covered by
+  in-memory unit tests against a synthetic OMAP leaf. An empirical correction
+  was distilled into the code: the value-area offset stored in B-tree TOC
+  entries is the distance from the **end** of the value area to the
+  **start** of the value (values run forward), which fixed an early misread of
+  `flags=1114111` on real fixture data.
 
 ## Interim Decisions
 - Do not assume `OID` alone is a sufficient cache identity until proven.
@@ -69,6 +109,22 @@ Last Updated: TBD
   type mismatches.
 - Incremental identity observations should record OMAP domain, OID, object XID,
   paddr, checksum/hash, and scan-state context until a cheaper tuple is proven.
+- Native parser work must not wire namespace traversal to candidate checkpoint
+  discovery alone. It needs checkpoint-map validation plus container OMAP,
+  volume OMAP, and expected object type/subtype validation before resolved
+  roots can be trusted.
+- Native OMAP parsing should not begin as a global lookup table. The resolver API
+  must require the owning container or volume OMAP domain and selected scan-state
+  XID.
+- OMAP snapshot lookup and encrypted OMAP values are deferred until their source
+  and oracle semantics are probed.
+- The next resolver experiment should consume a `validated_checkpoint_context`
+  verdict from `EX-11`, not the preliminary `EX-10` checkpoint-candidate output.
+- Deleted mappings should be treated as absent at the selected scan state. Do not
+  walk backward to an older mapping unless a separate recovery mode and oracle
+  define that behavior.
+- OMAP validation requires the raw media and identity oracle to be paired. Stale
+  JSON identities cannot validate native lookup on a different generated image.
 
 ## Exit Criteria
 - Documented resolver contract: input, output, validation steps.

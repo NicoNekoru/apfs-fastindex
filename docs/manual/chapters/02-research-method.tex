@@ -1,0 +1,51 @@
+\chapter{Research Method}
+
+\section{Artifact Types}
+
+The project uses three durable research artifact types, defined in
+\path{docs/research/000-research-index.md}.
+
+\begin{description}
+  \item[RL] Research logs. These are living synthesis documents organized by
+  question and decision impact.
+  \item[SR] Source reviews. These summarize external public documentation,
+  open-source implementation behavior, reverse-engineering notes, and support
+  limits.
+  \item[EX] Experiments. These are controlled probes with scripts, generated
+  artifacts, expected outcomes, observed outcomes, and a distilled conclusion.
+\end{description}
+
+Raw command output belongs in experiment artifacts. Durable conclusions belong
+in the experiment README and then in the affected research logs.
+
+\section{Staged Gates}
+
+The staged gates are:
+
+\begin{description}
+  \item[Gate A] Minimally correct v1 parser: checkpoint selection, object
+  resolution, FS tree records, namespace, logical size, and validation.
+  \item[Gate B] Support boundary: runtime source classes, encryption, feature
+  gates, and fallback.
+  \item[Gate C] Safe incremental scanning: identity, subtree reuse, persistence,
+  and invalidation.
+  \item[Gate D] Product semantics and optimization: snapshots, firmlinks,
+  volume groups, and performance model.
+\end{description}
+
+This ordering prevents performance work from outrunning correctness and prevents
+product claims from outrunning support evidence.
+
+\section{Claim Discipline}
+
+Every durable claim should be tagged mentally as one of:
+
+\begin{itemize}
+  \item \textbf{Spec}: backed by Apple/public documentation.
+  \item \textbf{Observation}: backed by repo experiments or converging external
+  implementations.
+  \item \textbf{Hypothesis}: plausible, useful, but not yet proven.
+\end{itemize}
+
+The manual should preserve that discipline. It is acceptable for a chapter to
+say "not yet known"; that is better than encoding a guess as architecture.

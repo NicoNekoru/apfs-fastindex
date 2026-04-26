@@ -1,0 +1,43 @@
+\chapter{Validation And Oracles}
+
+\section{Plural Oracles}
+
+There is no single oracle for APFS indexing. The correct oracle depends on the
+metric and product mode:
+
+\begin{itemize}
+  \item namespace: POSIX/API traversal of the same selected volume or stable view
+  \item logical size: public file metadata APIs and raw inode/dstream comparison
+  \item allocated size: metric-specific public tool and raw extent evidence
+  \item incremental correctness: fresh full raw parse of the same selected state
+  \item boot-root semantics: user-visible macOS namespace only when that mode is
+  explicitly requested
+\end{itemize}
+
+The canonical oracle policy is in
+\path{docs/research/RL-10-validation-corpus-and-oracle.md}.
+
+\section{Successful Proof Pattern}
+
+The successful v1 proof pattern is:
+
+\begin{enumerate}
+  \item mount a lab image
+  \item build a deterministic corpus
+  \item capture mounted oracle
+  \item detach the image to stabilize raw state
+  \item reattach without mounting
+  \item raw-walk the APFS container
+  \item normalize and compare path, type, file identity, logical size, and
+  symlink target
+\end{enumerate}
+
+This pattern was established in \path{docs/research/experiments/EX-03-pinned-state-raw-vs-oracle/README.md}
+and expanded in \path{docs/research/experiments/EX-04-expanded-pinned-corpus/README.md}.
+
+\section{Negative Live-State Pattern}
+
+\path{docs/research/experiments/EX-05-live-pinned-churn/README.md} is the
+counterexample pattern. A mounted image can be raw-readable while latest-state
+raw output still lacks a named stable oracle. That result prevents the manual
+from treating live latest raw traversal as correctness evidence.

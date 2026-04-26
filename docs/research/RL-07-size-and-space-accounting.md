@@ -3,7 +3,7 @@
 Status: Open
 Priority: P0
 Owner: TBD
-Last Updated: TBD
+Last Updated: 2026-04-26
 
 ## Core Question
 - What size metrics will the product report, and how can those metrics be computed correctly on APFS?
@@ -68,6 +68,17 @@ Last Updated: TBD
   later mutated, cross-directory hard links, and symlink target size. The
   compression candidate did not prove compressed storage semantics and remains a
   future accounting probe.
+- [2026-04-26] `EX-09` was designed as the focused accounting probe for sparse,
+  clone, compression, hard-link, and optional snapshot-retained fixtures. It
+  explicitly separates logical-size oracles from allocated/shared/exclusive
+  observations.
+- [2026-04-26] `SR-009` narrowed compression handling: v1 may report logical
+  size for compressed files only when inode/dstream or uncompressed-size metadata
+  agrees with the public logical-size oracle; compressed storage savings remain
+  a later accounting mode.
+- [2026-04-26] `SR-009` and `EX-09` were tightened around compressed logical-size
+  precedence. Ordinary dstream size, inode `uncompressed_size`, and decmpfs
+  header uncompressed size must be compared separately to public `st_size`.
 
 ## Interim Decisions
 - v1 may need to distinguish "logical size" mode from "physical accounting" mode.
@@ -78,6 +89,16 @@ Last Updated: TBD
   directory aggregates, even at the cost of strict additive child sums.
 - Compressed-file logical size still needs a focused corpus check before the
   parser encodes broad field-precedence rules beyond the current allowlist.
+- Do not add physical, shared, exclusive, or snapshot-retained accounting to
+  implementation specs until `EX-09` or a successor produces metric-specific
+  formulas and mismatch cases.
+- Unsupported compression algorithms should not be productized as best-effort
+  reads. If compression metadata affects requested logical-size output and lacks
+  an oracle-backed precedence rule, raw mode should fail closed for that source
+  class.
+- If ordinary dstream size is zero or inconsistent for a compressed file, v1
+  must use an oracle-backed uncompressed-size source or reject the file/source
+  class for raw output.
 
 ## Exit Criteria
 - Defined product-facing size semantics.

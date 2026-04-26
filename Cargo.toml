@@ -1,0 +1,3 @@
+[workspace]
+members = ["crates/apfs-fastindex"]
+resolver = "2"

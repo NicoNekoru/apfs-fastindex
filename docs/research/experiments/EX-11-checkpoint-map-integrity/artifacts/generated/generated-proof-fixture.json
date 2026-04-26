@@ -1,0 +1,230 @@
+{
+  "candidate_count": 4,
+  "checkpoint_candidates": [
+    {
+      "block_address": 2,
+      "checksum": 16370515834402361828,
+      "descriptor_index": 1,
+      "object_type_raw": 2147483649,
+      "oid": 1,
+      "xid": 13
+    },
+    {
+      "block_address": 4,
+      "checksum": 16370621628036772241,
+      "descriptor_index": 3,
+      "object_type_raw": 2147483649,
+      "oid": 1,
+      "xid": 14
+    },
+    {
+      "block_address": 6,
+      "checksum": 16370310921512717432,
+      "descriptor_index": 5,
+      "object_type_raw": 2147483649,
+      "oid": 1,
+      "xid": 11
+    },
+    {
+      "block_address": 8,
+      "checksum": 16370421353711806443,
+      "descriptor_index": 7,
+      "object_type_raw": 2147483649,
+      "oid": 1,
+      "xid": 12
+    }
+  ],
+  "checkpoint_fields": {
+    "container_omap_oid": 440,
+    "data_base": 9,
+    "data_base_non_contiguous": false,
+    "data_blocks": 312,
+    "data_index": 50,
+    "data_len": 4,
+    "data_next": 54,
+    "descriptor_base": 1,
+    "descriptor_base_non_contiguous": false,
+    "descriptor_blocks": 8,
+    "descriptor_index": 2,
+    "descriptor_len": 2,
+    "descriptor_next": 4,
+    "spaceman_oid": 1024
+  },
+  "checkpoint_maps": [
+    {
+      "block_address": 3,
+      "checksum": 9312413444462565380,
+      "count": 4,
+      "descriptor_index": 2,
+      "flags": 1,
+      "is_last": true,
+      "step": 0,
+      "xid": 14
+    }
+  ],
+  "ephemeral_objects": [
+    {
+      "checksum": 8356371083775973263,
+      "object_xid": 14,
+      "oid": 1024,
+      "paddr": 59,
+      "read_blocks": [
+        59
+      ],
+      "sha256": "e8a545feab5e5c62ded9ec1cac338f939eb1151d6db590e85b44157471b3ba2b",
+      "size": 4096,
+      "subtype": "OBJECT_TYPE_0x0",
+      "subtype_raw": 0,
+      "type": "OBJECT_TYPE_SPACEMAN",
+      "type_raw": 2147483653
+    },
+    {
+      "checksum": 21705551380664120,
+      "object_xid": 14,
+      "oid": 1025,
+      "paddr": 60,
+      "read_blocks": [
+        60
+      ],
+      "sha256": "c2ed4ae2306d87d4959475ec7dfe3274cc90857a7f7580b040bb3f95e573ff6d",
+      "size": 4096,
+      "subtype": "OBJECT_TYPE_0x0",
+      "subtype_raw": 0,
+      "type": "OBJECT_TYPE_0x11",
+      "type_raw": 2147483665
+    },
+    {
+      "checksum": 16226531315936635750,
+      "object_xid": 14,
+      "oid": 1027,
+      "paddr": 61,
+      "read_blocks": [
+        61
+      ],
+      "sha256": "864e0bf110fbe00548c159671532de6b2edc2509cb466fdd998467c7d7670d51",
+      "size": 4096,
+      "subtype": "OBJECT_TYPE_0x9",
+      "subtype_raw": 9,
+      "type": "OBJECT_TYPE_BTREE",
+      "type_raw": 2147483650
+    },
+    {
+      "checksum": 8046881757450828983,
+      "object_xid": 14,
+      "oid": 1029,
+      "paddr": 62,
+      "read_blocks": [
+        62
+      ],
+      "sha256": "f2a3139d1960179671babd6ac80d3ce538b442de9cb9c7655d8aac2ce2e22dd5",
+      "size": 4096,
+      "subtype": "OBJECT_TYPE_0x9",
+      "subtype_raw": 9,
+      "type": "OBJECT_TYPE_BTREE",
+      "type_raw": 2147483650
+    }
+  ],
+  "mappings": [
+    {
+      "fs_oid": 0,
+      "map_descriptor_index": 2,
+      "map_entry_index": 0,
+      "oid": 1024,
+      "paddr": 59,
+      "size": 4096,
+      "subtype": "OBJECT_TYPE_0x0",
+      "subtype_raw": 0,
+      "type": "OBJECT_TYPE_SPACEMAN",
+      "type_raw": 2147483653
+    },
+    {
+      "fs_oid": 0,
+      "map_descriptor_index": 2,
+      "map_entry_index": 1,
+      "oid": 1025,
+      "paddr": 60,
+      "size": 4096,
+      "subtype": "OBJECT_TYPE_0x0",
+      "subtype_raw": 0,
+      "type": "OBJECT_TYPE_0x11",
+      "type_raw": 2147483665
+    },
+    {
+      "fs_oid": 0,
+      "map_descriptor_index": 2,
+      "map_entry_index": 2,
+      "oid": 1027,
+      "paddr": 61,
+      "size": 4096,
+      "subtype": "OBJECT_TYPE_0x9",
+      "subtype_raw": 9,
+      "type": "OBJECT_TYPE_BTREE",
+      "type_raw": 2147483650
+    },
+    {
+      "fs_oid": 0,
+      "map_descriptor_index": 2,
+      "map_entry_index": 3,
+      "oid": 1029,
+      "paddr": 62,
+      "size": 4096,
+      "subtype": "OBJECT_TYPE_0x9",
+      "subtype_raw": 9,
+      "type": "OBJECT_TYPE_BTREE",
+      "type_raw": 2147483650
+    }
+  ],
+  "selected_checkpoint": {
+    "block_address": 4,
+    "checksum": 16370621628036772241,
+    "descriptor_index": 3,
+    "oid": 1,
+    "xid": 14
+  },
+  "source": {
+    "existing_proof_artifacts_note": "EX-03/EX-04/EX-06/EX-07 preserve JSON oracles but no reusable image files",
+    "existing_proof_artifacts_reused": false,
+    "fixture_operations": [
+      "create src and dst directories",
+      "create src/base.txt",
+      "rename src/base.txt -> src/renamed.txt",
+      "move src/renamed.txt -> dst/moved.txt",
+      "create hard link dst/hard.txt",
+      "create sparse file dst/sparse.bin",
+      "clone dst/moved.txt -> dst/clone.txt",
+      "append to dst/moved.txt",
+      "create symlink dst/link.txt -> moved.txt"
+    ],
+    "image_name": "skeleton-proof.dmg",
+    "nomount_entities": [
+      {
+        "content-hint": "GUID_partition_scheme",
+        "dev-entry": "/dev/disk4",
+        "potentially-mountable": false,
+        "unmapped-content-hint": "GUID_partition_scheme"
+      },
+      {
+        "content-hint": "Apple_APFS",
+        "dev-entry": "/dev/disk4s1",
+        "potentially-mountable": false,
+        "unmapped-content-hint": "7C3457EF-0000-11AA-AA11-00306543ECAC"
+      },
+      {
+        "content-hint": "41504653-0000-11AA-AA11-00306543ECAC",
+        "dev-entry": "/dev/disk5s1",
+        "potentially-mountable": true,
+        "unmapped-content-hint": "41504653-0000-11AA-AA11-00306543ECAC",
+        "volume-kind": "apfs"
+      },
+      {
+        "content-hint": "EF57347C-0000-11AA-AA11-00306543ECAC",
+        "dev-entry": "/dev/disk5",
+        "potentially-mountable": false,
+        "unmapped-content-hint": "EF57347C-0000-11AA-AA11-00306543ECAC"
+      }
+    ],
+    "raw_container_path": "/dev/rdisk5",
+    "source_id": "generated-proof-fixture"
+  },
+  "verdict": "validated_checkpoint_context"
+}

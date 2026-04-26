@@ -1,0 +1,26 @@
+{
+  "checkpoint_discovery": false,
+  "comparison_matched": null,
+  "fallback_reason": "PermissionError: [Errno 1] Operation not permitted: '/dev/rdisk3'",
+  "oracle_available": false,
+  "raw_container_path": "/dev/rdisk3",
+  "raw_readable": false,
+  "raw_walk": false,
+  "requested_mode": "raw_single_volume_namespace_logical_size",
+  "root_discovery": false,
+  "root_volume": {
+    "APFSContainerReference": "disk3",
+    "APFSSnapshot": true,
+    "APFSSnapshotName": "com.apple.os.update-5514FF97DEE9C60C7FBF462B06A418D5FC4A882D5AF41D2BAF0A1419FB9B9F86",
+    "APFSVolumeGroupID": "53C3C11B-267E-44AA-ADCF-6934D89D8654",
+    "DeviceIdentifier": "disk3s1s1",
+    "Encryption": true,
+    "FileVault": true,
+    "MountPoint": "/",
+    "Sealed": "Yes",
+    "Writable": false
+  },
+  "source_class": "startup_container",
+  "source_id": "startup-container-unprivileged-raw-read",
+  "support_verdict": "blocked_privilege"
+}

@@ -1,0 +1,63 @@
+\chapter{V1 Raw Pipeline}
+
+\section{Pipeline}
+
+The narrow raw parser pipeline is:
+
+\begin{enumerate}
+  \item source gate
+  \item checkpoint pinning
+  \item container root discovery
+  \item volume root discovery
+  \item FS record walk
+  \item namespace entry construction
+  \item logical-size aggregate construction
+  \item oracle comparison
+\end{enumerate}
+
+The implementation-facing contract is
+\path{docs/research/contracts/narrow-v1-parser-contract.md}. The first prototype
+plan is \path{docs/research/plans/first-raw-parser-prototype-plan.md}.
+
+\section{Checkpoint And Scan State}
+
+The parser must choose one coherent state and keep all object resolution within
+that state. \path{docs/research/RL-01-checkpoint-selection-and-consistency.md}
+tracks the open checkpoint questions. \path{docs/research/sources/SR-002-checkpoint-omap-root-contract.md}
+is the current source review for checkpoint, OMAP, and root discovery.
+
+\section{OMAP And Object Resolution}
+
+Object lookup is not a global \texttt{oid -> paddr} map. Resolution needs the
+owning OMAP context, logical object id, and selected scan state. The active logs
+are \path{docs/research/RL-02-omap-and-object-resolution.md} and
+\path{docs/research/RL-04-node-identity-cache-keys-and-oid-reuse.md}.
+
+\section{FS Records}
+
+The v1 record surface is intentionally narrow:
+
+\begin{itemize}
+  \item directory records for membership and names
+  \item inode records for identity and metadata
+  \item dstream or equivalent fields for logical size
+  \item symlink xattrs for symlink target fidelity
+  \item hard-link records where present
+\end{itemize}
+
+The current source-backed taxonomy is
+\path{docs/research/sources/SR-003-fs-record-taxonomy.md}; the rolling synthesis
+is \path{docs/research/RL-03-fs-tree-topology-and-required-records.md}.
+
+\section{Namespace And Logical Size}
+
+Namespace output must preserve path identity and file identity separately.
+Logical size is the only v1 size metric. Physical, shared, exclusive, and
+snapshot-retained accounting are separate modes.
+
+Related logs:
+
+\begin{itemize}
+  \item \path{docs/research/RL-06-namespace-reconstruction.md}
+  \item \path{docs/research/RL-07-size-and-space-accounting.md}
+\end{itemize}

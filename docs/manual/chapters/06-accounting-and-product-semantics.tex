@@ -1,0 +1,38 @@
+\chapter{Accounting And Product Semantics}
+
+\section{Logical Size First}
+
+The v1 metric is logical size. This is the only size metric with enough current
+evidence for the narrow raw parser contract. Directory aggregates use
+unique-inode logical totals within the aggregate root so hard links do not
+double-count inside one aggregate.
+
+The current accounting log is
+\path{docs/research/RL-07-size-and-space-accounting.md}.
+
+\section{Deferred Metrics}
+
+The following metrics remain research topics:
+
+\begin{itemize}
+  \item allocated size
+  \item exclusive size
+  \item shared size
+  \item compression storage savings
+  \item snapshot-retained bytes
+\end{itemize}
+
+\path{docs/research/experiments/EX-09-accounting-probe/README.md} defines the
+next accounting probe. It explicitly avoids treating \texttt{du},
+\texttt{st\_blocks}, raw extents, and Finder-like values as interchangeable
+oracles.
+
+\section{Boot-Root Semantics}
+
+Raw single-volume namespace and user-visible macOS root namespace are distinct.
+Modern macOS may involve System/Data volume groups, firmlinks, snapshots, and
+signed system volume behavior. The manual should never imply that a raw
+single-volume walk is the same as Finder-visible \texttt{/}.
+
+The product-semantics log is
+\path{docs/research/RL-11-snapshots-volume-groups-and-firmlinks.md}.

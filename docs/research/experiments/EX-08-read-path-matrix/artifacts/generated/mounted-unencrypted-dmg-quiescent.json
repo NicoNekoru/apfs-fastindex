@@ -1,0 +1,40 @@
+{
+  "aggregate_count": 3,
+  "checkpoint_discovery": true,
+  "comparison_matched": false,
+  "entry_count": 3,
+  "fallback_reason": "mounted lab image was raw-readable and parsable, but current raw path does not enforce selected-XID lookups for mounted sources",
+  "operations": [
+    "create src and dst directories",
+    "create src/base.txt",
+    "move src/base.txt -> dst/moved.txt",
+    "create symlink dst/link.txt -> moved.txt"
+  ],
+  "oracle_available": true,
+  "oracle_diff": {
+    "matched": false,
+    "mismatches": [],
+    "missing_paths": [
+      "dst/link.txt",
+      "dst/moved.txt"
+    ],
+    "unexpected_paths": [
+      "src/base.txt"
+    ]
+  },
+  "raw_readable": true,
+  "raw_walk": true,
+  "requested_mode": "raw_single_volume_namespace_logical_size",
+  "root_discovery": true,
+  "scan_state": {
+    "block_size": 4096,
+    "candidate_count": 4,
+    "descriptor_base": 1,
+    "descriptor_base_non_contiguous": false,
+    "descriptor_blocks": 8,
+    "highest_xid": 6
+  },
+  "source_class": "mounted_image",
+  "source_id": "mounted-unencrypted-dmg-quiescent",
+  "support_verdict": "readable_not_supported"
+}

@@ -3,7 +3,7 @@
 Status: Open
 Priority: P1
 Owner: TBD
-Last Updated: TBD
+Last Updated: 2026-04-26
 
 ## Core Question
 - How stable is this raw-parser approach across APFS/macOS versions, and when should the product fall back to supported APIs?
@@ -82,6 +82,63 @@ Last Updated: TBD
   stable sources; unsupported feature bits, encryption requirements, Fusion,
   snapshot/sealed-volume semantics, merged-root requests, and unvalidated APFS
   variants are hard stops or fallback triggers.
+- [2026-04-26] `EX-05` added a support-boundary distinction: mounted image-backed
+  APFS can be raw-readable during churn, but the current latest-state raw walk
+  is not raw-supported because it did not validate against a named stable oracle.
+- [2026-04-26] `EX-08` converted the support-boundary draft into an executable
+  matrix design. Each source class must record raw readability, checkpoint/root
+  discovery, oracle availability, comparison result, and support verdict.
+- [2026-04-26] `SR-005` and `EX-10` moved `.dmg`/raw-device source gating and
+  contiguous checkpoint descriptor scanning into native Rust while keeping
+  non-contiguous descriptor layouts, short reads, and missing valid NXSB
+  candidates as hard stops.
+- [2026-04-26] `SR-007` and `SR-012` clarified the parser's fail-closed posture:
+  validate object headers before use and gate APFS feature/layout drift through
+  allowlists rather than best-effort parsing.
+- [2026-04-26] `SR-011` kept FileVault, hardware-backed encryption, encrypted
+  OMAP values, and key rolling outside raw mode until a read-path matrix cell is
+  executed.
+- [2026-04-26] First `EX-08` safe-host execution produced concrete verdict
+  artifacts. Detached image-backed APFS matched oracle and stayed `supported`
+  for narrow v1 proof work. Mounted image-backed APFS was raw-readable and
+  parsable but mismatched the mounted oracle, so the correct verdict is
+  `readable_not_supported`. Startup-container raw read failed unprivileged and
+  is `blocked_privilege`.
+- [2026-04-26] `SR-005` clarified immediate native hard stops for the checkpoint
+  layer: unsupported non-contiguous descriptor layouts, invalid block-zero
+  locator, checksum-failing checkpoint candidates, out-of-range checkpoint
+  indexes, and missing checkpoint-map validation before downstream traversal.
+- [2026-04-26] `SR-013` and `EX-11` promoted checkpoint-map integrity to an
+  explicit compatibility gate. Invalid checkpoint-map chains, missing terminal
+  flags, impossible mapping counts, unsupported data-ring wrapping, or bad
+  ephemeral-object checksums require fallback.
+- [2026-04-26] `SR-012` and `EX-08` converted feature drift into recorded
+  allowlist fields: source-gate facts, container facts, volume facts, and
+  requested-mode blockers. They also split checkpoint-scanner-safe,
+  checkpoint-context-safe, OMAP-root-safe, namespace-logical-size-safe, and
+  product-supported verdicts.
+- [2026-04-26] `SR-009` and `EX-09` clarified compression as a compatibility
+  gate for v1 logical-size output: if compressed metadata cannot be reconciled
+  with public logical size, raw mode should fail closed rather than report a
+  guessed size.
+- [2026-04-26] `EX-11` executed checkpoint-map validation on a generated
+  detached proof fixture and matched synthetic hard-stop verdicts for malformed
+  map chains, invalid mapping counts/sizes, bad ephemeral checksums, and
+  non-contiguous descriptors.
+- [2026-04-26] `EX-12` was blocked because the identity-oracle raw media was not
+  preserved. This is a compatibility/oracle gate: a source can pass checkpoint
+  context validation while still lacking the evidence required for OMAP/root
+  support.
+- [2026-04-26] `EX-10` extended the Rust path with explicit feature-allowlist
+  enforcement. The container decoder rejects any `incompatible_features` bit
+  outside the v1 allowlist before checkpoint-map validation begins. The volume
+  decoder marks volumes with `OBJ_ENCRYPTED` set, the
+  `APFS_INCOMPAT_SEALED_VOLUME` bit, normalization sensitivity, or unknown
+  `incompatible_features` bits as `Unsupported(reason)` and skips their
+  FS-tree. `OMAP_VAL_ENCRYPTED` and `OMAP_VAL_NOHEADER` are hard stops in the
+  resolver. Unknown FS-record families are recorded as
+  `unsupported_record_count` rather than silently ignored. The EX-10 probe
+  asserts that all of these counters are zero for the proof fixture.
 
 ## Interim Decisions
 - Compatibility boundaries must be explicit, not implied.
@@ -92,6 +149,25 @@ Last Updated: TBD
   narrow parser contract rather than infer it ad hoc at runtime.
 - Feature-bit and environment checks belong at the source gate before traversal,
   not after partial parser output has already been produced.
+- Compatibility/fallback language should report both access and correctness:
+  `readable` means bytes can be read; `supported` means the output is validated
+  against the selected product semantics.
+- Runtime support should be represented as a matrix artifact, not prose alone,
+  so untested hardware and blocked privilege cases remain visible.
+- Native Rust code should land as source-gate or parser-gate slices. Each slice
+  must state exactly which unsupported APFS layouts become hard errors.
+- The source gate should preserve the distinction between access, parsing, and
+  support. A source that reaches checkpoint discovery or proof raw walk can
+  still be outside the allowlist when oracle alignment or coherent-state
+  pinning is missing.
+- Candidate checkpoint discovery is a parser-gate slice, not support. Support
+  for native traversal starts only after checkpoint-map, OMAP, root, and
+  requested record validation all pass for the selected product mode.
+- Feature masks, volume roles, volume-group UUIDs, snapshot/revert fields,
+  encryption state, OMAP flags, and root-tree layout facts must be recorded
+  before a source is promoted from one gate to the next.
+- Support promotion requires replayable evidence at the same gate. Do not use
+  raw identities from one generated image as an oracle for another image.
 
 ## Exit Criteria
 - Supported-version matrix exists.

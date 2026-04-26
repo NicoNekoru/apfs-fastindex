@@ -3,7 +3,7 @@
 Status: Open
 Priority: P0
 Owner: TBD
-Last Updated: TBD
+Last Updated: 2026-04-26
 
 ## Core Question
 - What constitutes a stable identity for a B-tree node or parsed object in cache?
@@ -52,6 +52,13 @@ Last Updated: TBD
   summary hashes. Exact node keys had zero false reuse in the detached lab
   corpus; weaker keys were not promoted. The observed safe candidate remains an
   exact tuple, not a reduced or performance-optimized key.
+- [2026-04-26] `SR-006` and `EX-12` moved native identity evidence behind an
+  explicit OMAP lookup contract. Cache identity must consume the mapping actually
+  returned for `(omap domain, oid, selected_xid)`, including OMAP value flags,
+  not a guessed latest mapping.
+- [2026-04-26] `EX-12` was blocked because the raw images corresponding to
+  `EX-06`/`EX-07` identity JSON were not preserved. Native cache identity proof
+  therefore still needs regenerated or preserved raw media.
 
 ## Interim Decisions
 - Cache identity should remain conservative until reuse safety is demonstrated.
@@ -61,6 +68,10 @@ Last Updated: TBD
 - For future subtree summary reuse, include parser version, summary schema, and
   expected type/subtype with the raw identity tuple. Do not collapse the key to
   OID, paddr, or object XID alone for performance.
+- Do not promote any identity tuple from `EX-06`/`EX-07` into native cache code
+  until `EX-12` proves the native resolver returns the same identities.
+- Future identity experiments must preserve the raw source or a reproducible
+  fixture recipe that can regenerate the exact compared state.
 
 ## Exit Criteria
 - Final cache-key definition for node cache.

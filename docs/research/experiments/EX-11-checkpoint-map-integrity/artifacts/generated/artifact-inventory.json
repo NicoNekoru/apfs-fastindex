@@ -1,0 +1,28 @@
+{
+  "conclusion": "Existing proof routes provide JSON oracles and stale raw device paths, but no reusable detached image files are stored in the repo.",
+  "image_artifact_count": 0,
+  "image_artifacts": [],
+  "json_artifact_count": 42,
+  "json_artifacts_sample": [
+    "docs/research/experiments/EX-03-pinned-state-raw-vs-oracle/artifacts/generated/summary.json",
+    "docs/research/experiments/EX-03-pinned-state-raw-vs-oracle/artifacts/generated/comparison.json",
+    "docs/research/experiments/EX-03-pinned-state-raw-vs-oracle/artifacts/generated/oracle.json",
+    "docs/research/experiments/EX-03-pinned-state-raw-vs-oracle/artifacts/generated/pinned-state.json",
+    "docs/research/experiments/EX-03-pinned-state-raw-vs-oracle/artifacts/generated/raw-walk.json",
+    "docs/research/experiments/EX-03-pinned-state-raw-vs-oracle/artifacts/generated/run.json",
+    "docs/research/experiments/EX-03-pinned-state-raw-vs-oracle/artifacts/generated/environment.json",
+    "docs/research/experiments/EX-04-expanded-pinned-corpus/artifacts/generated/summary.json",
+    "docs/research/experiments/EX-04-expanded-pinned-corpus/artifacts/generated/ex04ci-run.json",
+    "docs/research/experiments/EX-04-expanded-pinned-corpus/artifacts/generated/ex04ci-raw-walk.json",
+    "docs/research/experiments/EX-04-expanded-pinned-corpus/artifacts/generated/ex04cs-oracle.json",
+    "docs/research/experiments/EX-04-expanded-pinned-corpus/artifacts/generated/ex04ci-comparison.json",
+    "docs/research/experiments/EX-04-expanded-pinned-corpus/artifacts/generated/ex04ci-oracle.json",
+    "docs/research/experiments/EX-04-expanded-pinned-corpus/artifacts/generated/ex04cs-comparison.json",
+    "docs/research/experiments/EX-04-expanded-pinned-corpus/artifacts/generated/ex04cs-raw-walk.json",
+    "docs/research/experiments/EX-04-expanded-pinned-corpus/artifacts/generated/ex04cs-pinned-state.json",
+    "docs/research/experiments/EX-04-expanded-pinned-corpus/artifacts/generated/ex04ci-pinned-state.json",
+    "docs/research/experiments/EX-04-expanded-pinned-corpus/artifacts/generated/environment.json",
+    "docs/research/experiments/EX-04-expanded-pinned-corpus/artifacts/generated/ex04cs-run.json",
+    "docs/research/experiments/EX-06-identity-tracking/artifacts/generated/summary.json"
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "experiment_id": "EX-12",
+  "status": "blocked",
+  "blocked_at": "OMAP lookup execution",
+  "reason": "EX-06 and EX-07 preserve pinned identity JSON but do not preserve the detached raw images needed to replay native OMAP lookup against those identities.",
+  "ex11_context": {
+    "available": true,
+    "source": "EX-11 generated proof fixture",
+    "verdict": "validated_checkpoint_context",
+    "limitation": "The EX-11 context belongs to a fresh generated fixture, not to the EX-06 or EX-07 identity artifacts."
+  },
+  "missing_inputs": [
+    "raw detached image for EX-06 state sequence",
+    "raw detached image for EX-07 subtree-reuse state sequence",
+    "native or probe-only OMAP cursor output for the same image that produced the identity oracle"
+  ],
+  "what_this_rules_out": [
+    "comparing a new generated fixture to stale EX-06/EX-07 identities",
+    "claiming OMAP lookup validation from checkpoint-map validation alone",
+    "starting FS-record parser claims before replayable OMAP identity media exists"
+  ],
+  "next_exact_step": "Regenerate or preserve EX-06/EX-07 raw media, then run EX-12 against the same image/state that produced the identity oracle."
+}

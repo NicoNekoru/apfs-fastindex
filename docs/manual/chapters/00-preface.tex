@@ -1,0 +1,27 @@
+\chapter*{Preface}
+\addcontentsline{toc}{chapter}{Preface}
+
+This manual is a living guide to the \texttt{apfs-fastindex} research project.
+Its purpose is to help a future engineer reproduce the work, understand why the
+scope is narrow, and adapt the method to other projects that need filesystem
+metadata faster than ordinary high-level traversal APIs can provide.
+
+The source of truth remains the repository artifact trail:
+
+\begin{itemize}
+  \item research synthesis lives in \path{docs/research/RL-*.md}
+  \item external evidence reviews live in \path{docs/research/sources/SR-*.md}
+  \item controlled probes live in \path{docs/research/experiments/EX-*}
+  \item implementation-facing boundaries live in \path{docs/implementation/}
+  \item the current product intent lives in \path{spec.md}
+\end{itemize}
+
+This document should not promote hypotheses into design commitments. When it
+summarizes a claim, it should preserve the project's claim discipline:
+\emph{Spec} for public documentation, \emph{Observation} for experiment or
+converging implementation evidence, and \emph{Hypothesis} for plausible but
+unproven design direction.
+
+The current manual is intentionally skeletal. It records the narrative structure
+and the canonical cross-links so later research can fill chapters without
+turning the repository into a second, inconsistent source of truth.

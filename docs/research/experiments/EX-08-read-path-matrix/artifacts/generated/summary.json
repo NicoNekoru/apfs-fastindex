@@ -1,0 +1,23 @@
+{
+  "cell_count": 3,
+  "comparison_matched": {
+    "detached-unencrypted-dmg": true,
+    "mounted-unencrypted-dmg-quiescent": false,
+    "startup-container-unprivileged-raw-read": null
+  },
+  "raw_readable": {
+    "detached-unencrypted-dmg": true,
+    "mounted-unencrypted-dmg-quiescent": true,
+    "startup-container-unprivileged-raw-read": false
+  },
+  "ruled_out": [
+    "raw-readable is not equivalent to supported",
+    "mounted-image readability does not prove live raw support without selected-XID enforcement",
+    "startup raw v1 support remains outside the allowlist"
+  ],
+  "verdicts": {
+    "detached-unencrypted-dmg": "supported",
+    "mounted-unencrypted-dmg-quiescent": "readable_not_supported",
+    "startup-container-unprivileged-raw-read": "blocked_privilege"
+  }
+}

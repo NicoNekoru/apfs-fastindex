@@ -1,0 +1,88 @@
+{
+  "cases": [
+    {
+      "case": {
+        "case_id": "valid-single-map",
+        "expected": "validated_checkpoint_context"
+      },
+      "case_id": "valid-single-map",
+      "detail": "validated as expected",
+      "expected_verdict": "validated_checkpoint_context",
+      "matched_expectation": true,
+      "observed_verdict": "validated_checkpoint_context"
+    },
+    {
+      "case": {
+        "case_id": "missing-checkpoint-map-last",
+        "descriptor_blocks": 1,
+        "expected": "malformed_checkpoint_map",
+        "missing_last": true
+      },
+      "case_id": "missing-checkpoint-map-last",
+      "detail": "synthetic missing CHECKPOINT_MAP_LAST",
+      "expected_verdict": "malformed_checkpoint_map",
+      "matched_expectation": true,
+      "observed_verdict": "malformed_checkpoint_map"
+    },
+    {
+      "case": {
+        "case_id": "invalid-cpm-count",
+        "expected": "malformed_checkpoint_map",
+        "map_count": 102
+      },
+      "case_id": "invalid-cpm-count",
+      "detail": "synthetic cpm_count 102 exceeds max 101",
+      "expected_verdict": "malformed_checkpoint_map",
+      "matched_expectation": true,
+      "observed_verdict": "malformed_checkpoint_map"
+    },
+    {
+      "case": {
+        "case_id": "invalid-mapped-size-zero",
+        "expected": "bad_ephemeral_object",
+        "mapped_size": 0
+      },
+      "case_id": "invalid-mapped-size-zero",
+      "detail": "synthetic invalid mapped object size 0",
+      "expected_verdict": "bad_ephemeral_object",
+      "matched_expectation": true,
+      "observed_verdict": "bad_ephemeral_object"
+    },
+    {
+      "case": {
+        "case_id": "invalid-mapped-size-unaligned",
+        "expected": "bad_ephemeral_object",
+        "mapped_size": 128
+      },
+      "case_id": "invalid-mapped-size-unaligned",
+      "detail": "synthetic invalid mapped object size 128",
+      "expected_verdict": "bad_ephemeral_object",
+      "matched_expectation": true,
+      "observed_verdict": "bad_ephemeral_object"
+    },
+    {
+      "case": {
+        "bad_ephemeral_checksum": true,
+        "case_id": "bad-ephemeral-checksum",
+        "expected": "bad_ephemeral_object"
+      },
+      "case_id": "bad-ephemeral-checksum",
+      "detail": "synthetic bad ephemeral checksum",
+      "expected_verdict": "bad_ephemeral_object",
+      "matched_expectation": true,
+      "observed_verdict": "bad_ephemeral_object"
+    },
+    {
+      "case": {
+        "case_id": "non-contiguous-descriptor-layout",
+        "expected": "unsupported_non_contiguous_descriptors",
+        "non_contiguous": true
+      },
+      "case_id": "non-contiguous-descriptor-layout",
+      "detail": "synthetic non-contiguous descriptor layout",
+      "expected_verdict": "unsupported_non_contiguous_descriptors",
+      "matched_expectation": true,
+      "observed_verdict": "unsupported_non_contiguous_descriptors"
+    }
+  ]
+}

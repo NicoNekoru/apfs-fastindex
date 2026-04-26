@@ -3,7 +3,7 @@
 Status: Open
 Priority: P0
 Owner: TBD
-Last Updated: TBD
+Last Updated: 2026-04-26
 
 ## Core Question
 - Under what deployment conditions can we actually read APFS metadata raw and reliably?
@@ -67,6 +67,30 @@ Last Updated: TBD
   detached unencrypted image-backed sources remain the initial allowlist, while
   live startup disks, unsupported encryption, snapshot entitlement assumptions,
   Fusion, and merged-root requirements are fallback or hard-stop conditions.
+- [2026-04-26] `EX-05` showed that a mounted image-backed APFS lab volume can be
+  raw-readable during churn, but that does not make it raw-supported. The
+  current proof walker resolved latest state and produced output that matched
+  neither the baseline nor final mounted oracle.
+- [2026-04-26] `EX-08` designed the read-path support matrix and verdict
+  vocabulary: `readable`, `parsable`, `validatable`, and `supported` are
+  separate claims. Hardware-sensitive cells remain pending until media exists.
+- [2026-04-26] `SR-010` reaffirmed that snapshots, sealed system volumes,
+  System/Data volume groups, and firmlinks are product-mode boundaries, not
+  parser edge cases for raw single-volume v1.
+- [2026-04-26] `SR-011` made encryption a source-gate issue: FileVault,
+  hardware-backed internal storage, encrypted OMAP values, and key rolling are
+  fallback conditions until unlock/decryption/oracle behavior is explicitly
+  tested.
+- [2026-04-26] First `EX-08` safe-host execution tested three cells. Detached
+  unencrypted APFS `.dmg` remained `supported` for narrow v1 proof work and
+  matched oracle. Mounted unencrypted APFS `.dmg` was raw-readable and parsable
+  but did not match the mounted oracle, so it remains
+  `readable_not_supported`. The startup container unprivileged raw-read attempt
+  failed with `Operation not permitted` on `/dev/rdisk3`, with FileVault,
+  encryption, signed snapshot, sealed root, and volume-group facts recorded.
+- [2026-04-26] `SR-012` and `EX-08` were tightened into explicit gate semantics:
+  checkpoint-scanner-safe, checkpoint-context-safe, OMAP-root-safe,
+  namespace-logical-size-safe, and product-supported are separate verdicts.
 
 ## Interim Decisions
 - Deployment constraints are first-class product constraints, not implementation
@@ -79,6 +103,22 @@ Last Updated: TBD
 - Snapshot-assisted online scanning should not be assumed as a generic
   third-party pinning primitive until entitlement and oracle constraints are
   proven.
+- Distinguish `raw-readable` from `raw-supported` in every support matrix cell.
+  Mounted lab images are useful probes, but v1 support remains detached or
+  explicitly stable unless pinning is proven.
+- Use the `EX-08` verdict vocabulary for future source-gate work:
+  `supported`, `readable_not_supported`, `parsable_not_validated`,
+  `fallback_required`, `blocked_privilege`, `blocked_unavailable_hardware`, and
+  `not_tested`.
+- Detached unencrypted images remain the native Rust target. Encrypted,
+  mounted-live, startup, snapshot, and merged-root sources must not be accepted
+  as raw-supported merely because some bytes are readable.
+- Current safe-host matrix has only one supported raw cell: detached
+  unencrypted image-backed APFS for narrow v1 proof work. Mounted image-backed
+  APFS remains a probe cell, not product support, until selected-XID enforcement
+  or a valid stable oracle exists.
+- Future read-path cells must record source-gate, container, volume, and
+  requested-mode blocker fields before broadening support.
 
 ## Exit Criteria
 - Supported environment matrix.

@@ -1,0 +1,41 @@
+{
+  "experiment": "EX-10-rust-checkpoint-scanner",
+  "oracle_type": "synthetic_unit_oracle",
+  "source_reviews": [
+    "docs/research/sources/SR-005-checkpoint-validation-details.md",
+    "docs/research/sources/SR-007-object-header-fail-closed-validation.md"
+  ],
+  "accepted_behavior": {
+    "block_zero": "read as locator for checkpoint descriptor area",
+    "descriptor_layout": "contiguous only",
+    "candidate_validation": [
+      "NXSB magic",
+      "NX superblock object type after masking object flags",
+      "block-zero NX superblock object id",
+      "APFS Fletcher-64 object checksum"
+    ],
+    "selection": "highest valid candidate o_xid",
+    "output_claim": "candidate pinned scan state for allowlisted detached APFS sources"
+  },
+  "hard_stop_behavior": [
+    "short block-zero read",
+    "short descriptor read",
+    "non-contiguous descriptor area",
+    "zero descriptor blocks",
+    "descriptor count above fail-closed loop limit",
+    "no valid checkpoint candidates"
+  ],
+  "source_gate_behavior": [
+    "accept detached APFS .dmg images that expose a simple APFS container",
+    "normalize /dev/disk* to /dev/rdisk*",
+    "detach hdiutil-attached images after scan"
+  ],
+  "explicitly_out_of_scope": [
+    "checkpoint-map membership validation",
+    "OMAP lookup",
+    "volume superblock parsing",
+    "FS-record parsing",
+    "live mounted raw scanning",
+    "encryption handling"
+  ]
+}

@@ -3,7 +3,7 @@
 Status: Open
 Priority: P0
 Owner: TBD
-Last Updated: TBD
+Last Updated: 2026-04-26
 
 ## Core Question
 - How do we store index/cache state across runs, and when must that state be invalidated?
@@ -62,6 +62,12 @@ Last Updated: TBD
   states, while changed or missing node keys forced descent/reparse. This
   supports separating the reuse-decision proof from the later persistent cache
   storage format.
+- [2026-04-26] `EX-12` was designed as a prerequisite for native cache identity:
+  prove native OMAP lookup returns the same mapped object identities as the
+  pinned proof artifacts before any persistent cache consumes those identities.
+- [2026-04-26] `EX-12` was blocked because the raw media for the pinned identity
+  artifacts was not preserved. Persistent cache identity remains unproven for
+  native lookup.
 
 ## Interim Decisions
 - Prefer conservative invalidation over aggressive reuse.
@@ -73,6 +79,10 @@ Last Updated: TBD
 - A future persistent cache entry for parsed node summaries must include parser
   version and summary schema version in addition to the exact raw node identity.
   If any field is absent, changed, or unvalidated, reuse is forbidden.
+- Cache writes remain out of scope until checkpoint-map validation and native
+  OMAP lookup both have executed proof artifacts.
+- Cache validation artifacts must pair identity JSON with replayable raw media;
+  otherwise they can document behavior but cannot validate native reuse.
 
 ## Exit Criteria
 - Cache schema defined.

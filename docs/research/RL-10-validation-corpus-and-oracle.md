@@ -3,7 +3,7 @@
 Status: Open
 Priority: P0
 Owner: TBD
-Last Updated: TBD
+Last Updated: 2026-04-26
 
 ## Core Question
 - How do we prove the parser and incremental engine are correct?
@@ -77,6 +77,35 @@ Last Updated: TBD
   variants and a broader corpus. Both case-insensitive and case-sensitive
   images matched the mounted oracle exactly for path, type, file identity,
   logical size, and symlink target fields.
+- [2026-04-26] `EX-05` demonstrated a negative live-state oracle case: baseline
+  and final mounted oracles were not enough to validate a raw walk that resolved
+  latest state during write churn. The live raw walk needs either true XID
+  pinning or a stable snapshot/API oracle before correctness can be asserted.
+- [2026-04-26] `EX-09` accounting design split size validation into per-metric
+  oracles. Logical size, allocated size, clone/shared behavior, compression, and
+  snapshot-retained bytes must not share a single pass/fail oracle.
+- [2026-04-26] `EX-10` added a synthetic unit oracle for the Rust checkpoint
+  scanner. The oracle validates fail-closed selection mechanics only; real APFS
+  support still requires detached-image comparison against existing pinned-state
+  artifacts and mounted oracles.
+- [2026-04-26] `EX-11` defined a checkpoint-map integrity oracle: detached proof
+  images for positive checkpoint context and synthetic malformed descriptor/data
+  rings for negative verdicts.
+- [2026-04-26] `EX-12` defined an OMAP lookup oracle using pinned identity
+  artifacts from `EX-06` and `EX-07`, keeping object-resolution correctness
+  separate from namespace reconstruction.
+- [2026-04-26] `EX-11` executed its positive checkpoint-map oracle on a generated
+  detached proof fixture and matched all synthetic malformed-case expectations.
+- [2026-04-26] `EX-12` was marked blocked because `EX-06`/`EX-07` preserved
+  identity JSON but not the raw images needed to replay native OMAP lookup
+  against those identities.
+- [2026-04-26] `EX-09` was tightened so compressed logical-size precedence must
+  compare public `st_size` with dstream size, inode uncompressed-size fields,
+  and decmpfs metadata separately.
+- [2026-04-26] `EX-10` also added a proof-fixture smoke artifact. That run is a
+  valid oracle only for Rust `.dmg` source gating and checkpoint candidate
+  discovery on the detached-image allowlist; it is not a namespace or
+  logical-size oracle because Rust still emits no entries or aggregates.
 
 ## Interim Decisions
 - Every optimization must be validated against a fresh full-scan oracle.
@@ -89,6 +118,16 @@ Last Updated: TBD
 - Broader corpus additions should keep using the same mounted oracle -> detach
   -> raw walk -> normalized diff pattern unless the question is specifically
   about live-state behavior.
+- For live-state behavior, every oracle must name the exact state it validates.
+  "Before" and "after" mounted walks are diagnostic artifacts, not proof that a
+  concurrent latest raw walk is coherent.
+- Synthetic unit oracles are acceptable for parser hard-stop mechanics, but they
+  must not be treated as real-media APFS compatibility evidence.
+- Native parser gates should be validated independently in this order:
+  checkpoint candidate selection, checkpoint-map context, OMAP lookup, root
+  discovery, FS-record decode, namespace/logical-size diff.
+- Identity-oracle artifacts must preserve or regenerate matching raw media. JSON
+  identities alone are not enough to validate a native resolver on a later image.
 
 ## Oracle Matrix
 
@@ -100,12 +139,35 @@ Last Updated: TBD
 - `Allocated size`:
   public metadata APIs only for explicitly scoped cases; do not generalize to
   clone-, compression-, or snapshot-heavy semantics without proof.
+- `Physical/shared/exclusive accounting`:
+  metric-specific comparison only after a probe defines whether public tools,
+  raw extents, extent-reference records, or product policy owns the metric.
 - `Incremental correctness`:
   compare incremental output against a fresh full reparse of the same selected
   state.
 - `Boot-root or merged namespace semantics`:
   only use a user-visible macOS root oracle when that exact semantic mode is the
   question under test.
+- `Checkpoint scanner unit boundary`:
+  source-backed synthetic block images may validate magic/type/checksum,
+  descriptor-layout rejection, short-read errors, and highest-XID selection, but
+  not real-source support.
+- `Checkpoint-map integrity`:
+  detached proof images plus synthetic malformed rings validate
+  checkpoint-map/ephemeral-object handling before OMAP lookup.
+- `OMAP lookup`:
+  pinned identity artifacts validate `(omap context, oid, selected_xid)` mapping
+  before FS-record parsing.
+- `OMAP lookup blocker`:
+  if the raw media that produced pinned identities is absent, the OMAP lookup
+  experiment must be blocked rather than compared against a different image.
+- `Compression logical-size precedence`:
+  public logical-size APIs must be compared to each raw candidate size source
+  rather than collapsed into a global size pass/fail.
+- `Checkpoint scanner detached-image smoke`:
+  the existing proof fixture may validate Rust `.dmg` source gating and candidate
+  checkpoint discovery against a real APFS image, but not namespace,
+  logical-size, OMAP, or FS-record correctness.
 
 ## Artifact Policy
 

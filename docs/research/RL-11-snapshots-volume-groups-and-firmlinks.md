@@ -3,7 +3,7 @@
 Status: Open
 Priority: P1
 Owner: TBD
-Last Updated: TBD
+Last Updated: 2026-04-26
 
 ## Core Question
 - What exactly are we indexing: a raw APFS volume, a snapshot, a volume group, or the user-visible merged namespace?
@@ -53,11 +53,36 @@ Last Updated: TBD
 - [TBD] Volume-group namespace notes.
 - [2026-04-24] `SR-001` concluded that raw single-volume namespace and
   Finder-visible boot-root namespace should be treated as separate product modes.
+- [2026-04-26] `EX-08` matrix design keeps System/Data volume groups, signed
+  system volumes, snapshots, and Finder-visible merged root out of raw v1 unless
+  a separate product mode and oracle are defined.
+- [2026-04-26] `EX-09` accounting design treats snapshot-retained bytes as a
+  separate product/accounting semantic rather than part of raw v1 logical-size
+  output.
+- [2026-04-26] `SR-010` consolidated Apple, forensic, and open-source evidence:
+  snapshots, SSV, System/Data volume groups, and firmlinks require separate
+  product modes and oracles rather than expansion of raw single-volume v1.
+- [2026-04-26] `SR-010` was tightened with future boot-root evidence
+  requirements: roles, volume-group UUIDs, mounted snapshot identity, firmlink
+  table interpretation, and user-visible POSIX/API output must be joined in a
+  separate oracle before any Finder-visible root mode exists.
 
 ## Interim Decisions
 - Keep boot-root semantics out of core parser design until raw single-volume
   semantics are stable.
 - The default raw-mode v1 target is one APFS volume, not merged `/`.
+- In support matrices, startup/System/Data and snapshot cells should be
+  `fallback_required` for raw v1 rather than treated as parser failures. They
+  are different semantic targets.
+- Snapshot-retained space should not be attributed to files or directories in
+  v1 logical-size mode.
+- Native raw code may record volume role, snapshot, and seal indicators for
+  source-gate decisions, but it must not synthesize Finder-visible root output
+  until a boot-root oracle exists.
+- A future boot-root experiment is blocked until native raw single-volume output
+  is stable enough to compare as one input to a merged-root oracle.
+- `/usr/share/firmlinks` and `diskutil apfs list` are candidate diagnostic
+  inputs for that future mode, not v1 parser dependencies.
 
 ## Exit Criteria
 - Explicit product scope statement.

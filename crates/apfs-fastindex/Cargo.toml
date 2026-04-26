@@ -1,0 +1,18 @@
+[package]
+name = "apfs-fastindex"
+version = "0.1.0"
+edition = "2021"
+description = "Fail-closed APFS checkpoint scanner for detached sources"
+
+[lib]
+name = "apfs_fastindex"
+path = "src/lib.rs"
+
+[[bin]]
+name = "apfs-fastindex-scan"
+path = "src/main.rs"
+
+[dependencies]
+plist = "1.8.0"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"

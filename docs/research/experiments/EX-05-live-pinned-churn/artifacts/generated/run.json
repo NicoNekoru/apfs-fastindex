@@ -1,0 +1,7220 @@
+{
+  "baseline": {
+    "checkpoint": {
+      "block_size": 4096,
+      "candidate_count": 4,
+      "candidates": [
+        {
+          "descriptor_index": 1,
+          "obj_type": 2147483649,
+          "xid": 9
+        },
+        {
+          "descriptor_index": 3,
+          "obj_type": 2147483649,
+          "xid": 6
+        },
+        {
+          "descriptor_index": 5,
+          "obj_type": 2147483649,
+          "xid": 7
+        },
+        {
+          "descriptor_index": 7,
+          "obj_type": 2147483649,
+          "xid": 8
+        }
+      ],
+      "descriptor_base": 1,
+      "descriptor_base_non_contiguous": false,
+      "descriptor_blocks": 8,
+      "highest_xid": 9
+    },
+    "oracle": [
+      {
+        "inode": 2,
+        "nlink": 5,
+        "path": ".",
+        "type": "dir"
+      },
+      {
+        "inode": 17,
+        "nlink": 2,
+        "path": "hot",
+        "type": "dir"
+      },
+      {
+        "inode": 16,
+        "nlink": 302,
+        "path": "stable",
+        "type": "dir"
+      },
+      {
+        "inode": 18,
+        "logical_size": 7,
+        "nlink": 1,
+        "path": "stable/seed-0000.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 19,
+        "logical_size": 7,
+        "nlink": 1,
+        "path": "stable/seed-0001.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 20,
+        "logical_size": 7,
+        "nlink": 1,
+        "path": "stable/seed-0002.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 21,
+        "logical_size": 7,
+        "nlink": 1,
+        "path": "stable/seed-0003.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 22,
+        "logical_size": 7,
+        "nlink": 1,
+        "path": "stable/seed-0004.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 23,
+        "logical_size": 7,
+        "nlink": 1,
+        "path": "stable/seed-0005.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 24,
+        "logical_size": 7,
+        "nlink": 1,
+        "path": "stable/seed-0006.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 25,
+        "logical_size": 7,
+        "nlink": 1,
+        "path": "stable/seed-0007.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 26,
+        "logical_size": 7,
+        "nlink": 1,
+        "path": "stable/seed-0008.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 27,
+        "logical_size": 7,
+        "nlink": 1,
+        "path": "stable/seed-0009.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 28,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0010.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 29,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0011.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 30,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0012.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 31,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0013.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 32,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0014.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 33,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0015.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 34,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0016.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 35,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0017.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 36,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0018.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 37,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0019.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 38,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0020.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 39,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0021.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 40,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0022.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 41,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0023.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 42,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0024.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 43,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0025.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 44,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0026.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 45,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0027.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 46,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0028.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 47,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0029.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 48,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0030.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 49,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0031.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 50,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0032.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 51,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0033.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 52,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0034.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 53,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0035.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 54,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0036.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 55,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0037.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 56,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0038.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 57,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0039.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 58,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0040.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 59,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0041.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 60,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0042.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 61,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0043.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 62,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0044.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 63,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0045.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 64,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0046.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 65,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0047.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 66,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0048.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 67,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0049.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 68,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0050.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 69,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0051.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 70,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0052.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 71,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0053.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 72,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0054.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 73,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0055.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 74,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0056.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 75,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0057.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 76,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0058.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 77,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0059.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 78,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0060.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 79,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0061.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 80,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0062.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 81,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0063.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 82,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0064.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 83,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0065.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 84,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0066.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 85,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0067.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 86,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0068.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 87,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0069.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 88,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0070.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 89,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0071.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 90,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0072.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 91,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0073.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 92,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0074.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 93,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0075.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 94,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0076.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 95,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0077.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 96,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0078.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 97,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0079.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 98,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0080.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 99,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0081.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 100,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0082.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 101,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0083.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 102,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0084.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 103,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0085.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 104,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0086.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 105,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0087.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 106,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0088.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 107,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0089.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 108,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0090.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 109,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0091.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 110,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0092.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 111,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0093.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 112,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0094.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 113,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0095.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 114,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0096.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 115,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0097.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 116,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0098.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 117,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0099.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 118,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0100.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 119,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0101.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 120,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0102.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 121,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0103.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 122,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0104.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 123,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0105.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 124,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0106.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 125,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0107.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 126,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0108.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 127,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0109.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 128,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0110.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 129,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0111.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 130,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0112.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 131,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0113.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 132,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0114.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 133,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0115.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 134,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0116.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 135,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0117.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 136,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0118.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 137,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0119.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 138,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0120.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 139,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0121.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 140,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0122.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 141,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0123.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 142,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0124.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 143,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0125.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 144,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0126.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 145,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0127.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 146,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0128.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 147,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0129.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 148,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0130.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 149,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0131.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 150,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0132.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 151,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0133.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 152,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0134.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 153,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0135.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 154,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0136.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 155,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0137.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 156,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0138.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 157,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0139.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 158,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0140.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 159,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0141.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 160,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0142.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 161,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0143.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 162,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0144.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 163,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0145.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 164,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0146.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 165,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0147.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 166,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0148.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 167,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0149.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 168,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0150.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 169,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0151.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 170,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0152.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 171,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0153.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 172,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0154.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 173,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0155.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 174,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0156.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 175,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0157.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 176,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0158.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 177,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0159.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 178,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0160.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 179,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0161.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 180,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0162.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 181,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0163.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 182,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0164.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 183,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0165.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 184,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0166.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 185,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0167.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 186,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0168.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 187,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0169.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 188,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0170.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 190,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0171.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 191,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0172.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 192,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0173.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 194,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0174.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 195,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0175.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 196,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0176.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 197,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0177.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 198,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0178.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 199,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0179.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 200,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0180.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 201,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0181.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 202,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0182.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 203,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0183.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 204,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0184.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 205,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0185.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 206,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0186.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 207,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0187.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 208,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0188.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 209,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0189.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 210,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0190.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 211,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0191.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 212,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0192.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 213,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0193.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 214,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0194.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 215,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0195.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 216,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0196.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 217,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0197.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 218,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0198.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 219,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0199.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 220,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0200.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 221,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0201.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 222,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0202.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 223,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0203.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 224,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0204.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 225,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0205.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 226,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0206.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 227,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0207.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 228,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0208.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 229,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0209.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 230,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0210.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 231,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0211.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 232,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0212.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 233,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0213.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 234,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0214.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 235,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0215.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 236,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0216.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 237,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0217.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 238,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0218.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 239,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0219.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 240,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0220.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 241,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0221.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 242,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0222.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 243,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0223.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 244,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0224.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 245,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0225.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 246,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0226.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 247,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0227.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 248,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0228.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 249,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0229.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 250,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0230.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 251,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0231.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 252,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0232.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 253,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0233.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 254,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0234.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 255,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0235.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 256,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0236.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 257,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0237.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 258,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0238.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 259,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0239.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 260,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0240.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 261,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0241.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 262,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0242.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 263,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0243.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 264,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0244.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 265,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0245.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 266,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0246.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 267,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0247.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 268,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0248.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 269,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0249.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 270,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0250.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 271,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0251.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 272,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0252.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 273,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0253.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 274,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0254.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 275,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0255.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 276,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0256.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 277,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0257.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 278,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0258.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 279,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0259.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 280,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0260.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 281,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0261.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 282,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0262.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 283,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0263.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 284,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0264.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 285,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0265.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 286,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0266.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 287,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0267.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 288,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0268.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 289,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0269.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 290,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0270.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 291,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0271.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 292,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0272.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 293,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0273.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 294,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0274.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 295,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0275.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 296,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0276.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 297,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0277.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 298,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0278.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 299,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0279.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 300,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0280.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 301,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0281.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 302,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0282.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 303,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0283.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 304,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0284.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 305,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0285.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 306,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0286.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 307,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0287.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 308,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0288.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 309,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0289.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 310,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0290.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 311,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0291.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 312,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0292.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 313,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0293.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 314,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0294.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 315,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0295.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 316,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0296.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 317,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0297.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 318,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0298.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 319,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0299.txt",
+        "symlink_target": null,
+        "type": "file"
+      }
+    ]
+  },
+  "final": {
+    "checkpoint": {
+      "block_size": 4096,
+      "candidate_count": 4,
+      "candidates": [
+        {
+          "descriptor_index": 1,
+          "obj_type": 2147483649,
+          "xid": 37
+        },
+        {
+          "descriptor_index": 3,
+          "obj_type": 2147483649,
+          "xid": 34
+        },
+        {
+          "descriptor_index": 5,
+          "obj_type": 2147483649,
+          "xid": 35
+        },
+        {
+          "descriptor_index": 7,
+          "obj_type": 2147483649,
+          "xid": 36
+        }
+      ],
+      "descriptor_base": 1,
+      "descriptor_base_non_contiguous": false,
+      "descriptor_blocks": 8,
+      "highest_xid": 37
+    },
+    "oracle": [
+      {
+        "inode": 2,
+        "nlink": 5,
+        "path": ".",
+        "type": "dir"
+      },
+      {
+        "inode": 17,
+        "nlink": 82,
+        "path": "hot",
+        "type": "dir"
+      },
+      {
+        "inode": 320,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "hot/churn-0000.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 321,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "hot/churn-0001.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 322,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "hot/churn-0002.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 323,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "hot/churn-0003.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 324,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "hot/churn-0004.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 325,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "hot/churn-0005.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 326,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "hot/churn-0006.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 327,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "hot/churn-0007.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 328,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "hot/churn-0008.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 329,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "hot/churn-0009.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 330,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0010.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 331,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0011.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 332,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0012.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 333,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0013.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 334,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0014.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 335,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0015.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 336,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0016.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 337,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0017.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 338,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0018.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 339,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0019.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 340,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0020.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 341,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0021.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 342,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0022.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 343,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0023.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 344,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0024.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 345,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0025.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 346,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0026.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 347,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0027.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 348,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0028.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 349,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0029.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 350,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0030.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 351,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0031.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 352,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0032.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 353,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0033.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 354,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0034.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 355,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0035.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 356,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0036.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 357,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0037.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 358,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0038.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 359,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0039.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 360,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0040.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 361,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0041.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 362,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0042.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 363,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0043.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 364,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0044.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 365,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0045.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 366,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0046.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 367,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0047.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 368,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0048.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 369,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0049.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 370,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0050.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 371,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0051.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 372,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0052.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 373,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0053.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 374,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0054.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 375,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0055.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 376,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0056.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 377,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0057.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 378,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0058.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 379,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0059.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 380,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0060.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 381,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0061.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 382,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0062.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 383,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0063.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 384,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0064.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 385,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0065.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 386,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0066.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 387,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0067.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 388,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0068.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 389,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0069.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 390,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0070.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 391,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0071.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 392,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0072.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 393,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0073.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 394,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0074.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 395,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0075.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 396,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0076.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 397,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0077.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 398,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0078.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 399,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "hot/churn-0079.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 16,
+        "nlink": 302,
+        "path": "stable",
+        "type": "dir"
+      },
+      {
+        "inode": 18,
+        "logical_size": 7,
+        "nlink": 1,
+        "path": "stable/seed-0000.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 19,
+        "logical_size": 7,
+        "nlink": 1,
+        "path": "stable/seed-0001.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 20,
+        "logical_size": 7,
+        "nlink": 1,
+        "path": "stable/seed-0002.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 21,
+        "logical_size": 7,
+        "nlink": 1,
+        "path": "stable/seed-0003.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 22,
+        "logical_size": 7,
+        "nlink": 1,
+        "path": "stable/seed-0004.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 23,
+        "logical_size": 7,
+        "nlink": 1,
+        "path": "stable/seed-0005.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 24,
+        "logical_size": 7,
+        "nlink": 1,
+        "path": "stable/seed-0006.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 25,
+        "logical_size": 7,
+        "nlink": 1,
+        "path": "stable/seed-0007.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 26,
+        "logical_size": 7,
+        "nlink": 1,
+        "path": "stable/seed-0008.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 27,
+        "logical_size": 7,
+        "nlink": 1,
+        "path": "stable/seed-0009.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 28,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0010.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 29,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0011.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 30,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0012.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 31,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0013.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 32,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0014.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 33,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0015.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 34,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0016.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 35,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0017.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 36,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0018.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 37,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0019.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 38,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0020.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 39,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0021.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 40,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0022.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 41,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0023.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 42,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0024.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 43,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0025.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 44,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0026.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 45,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0027.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 46,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0028.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 47,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0029.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 48,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0030.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 49,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0031.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 50,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0032.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 51,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0033.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 52,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0034.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 53,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0035.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 54,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0036.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 55,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0037.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 56,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0038.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 57,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0039.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 58,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0040.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 59,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0041.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 60,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0042.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 61,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0043.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 62,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0044.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 63,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0045.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 64,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0046.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 65,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0047.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 66,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0048.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 67,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0049.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 68,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0050.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 69,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0051.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 70,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0052.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 71,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0053.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 72,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0054.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 73,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0055.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 74,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0056.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 75,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0057.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 76,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0058.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 77,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0059.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 78,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0060.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 79,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0061.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 80,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0062.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 81,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0063.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 82,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0064.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 83,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0065.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 84,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0066.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 85,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0067.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 86,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0068.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 87,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0069.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 88,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0070.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 89,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0071.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 90,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0072.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 91,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0073.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 92,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0074.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 93,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0075.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 94,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0076.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 95,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0077.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 96,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0078.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 97,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0079.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 98,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0080.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 99,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0081.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 100,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0082.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 101,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0083.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 102,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0084.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 103,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0085.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 104,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0086.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 105,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0087.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 106,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0088.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 107,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0089.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 108,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0090.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 109,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0091.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 110,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0092.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 111,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0093.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 112,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0094.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 113,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0095.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 114,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0096.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 115,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0097.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 116,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0098.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 117,
+        "logical_size": 8,
+        "nlink": 1,
+        "path": "stable/seed-0099.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 118,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0100.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 119,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0101.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 120,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0102.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 121,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0103.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 122,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0104.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 123,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0105.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 124,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0106.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 125,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0107.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 126,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0108.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 127,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0109.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 128,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0110.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 129,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0111.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 130,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0112.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 131,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0113.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 132,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0114.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 133,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0115.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 134,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0116.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 135,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0117.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 136,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0118.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 137,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0119.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 138,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0120.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 139,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0121.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 140,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0122.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 141,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0123.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 142,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0124.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 143,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0125.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 144,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0126.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 145,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0127.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 146,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0128.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 147,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0129.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 148,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0130.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 149,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0131.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 150,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0132.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 151,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0133.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 152,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0134.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 153,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0135.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 154,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0136.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 155,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0137.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 156,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0138.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 157,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0139.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 158,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0140.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 159,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0141.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 160,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0142.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 161,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0143.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 162,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0144.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 163,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0145.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 164,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0146.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 165,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0147.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 166,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0148.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 167,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0149.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 168,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0150.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 169,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0151.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 170,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0152.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 171,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0153.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 172,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0154.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 173,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0155.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 174,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0156.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 175,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0157.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 176,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0158.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 177,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0159.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 178,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0160.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 179,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0161.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 180,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0162.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 181,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0163.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 182,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0164.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 183,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0165.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 184,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0166.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 185,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0167.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 186,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0168.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 187,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0169.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 188,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0170.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 190,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0171.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 191,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0172.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 192,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0173.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 194,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0174.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 195,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0175.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 196,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0176.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 197,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0177.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 198,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0178.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 199,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0179.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 200,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0180.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 201,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0181.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 202,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0182.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 203,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0183.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 204,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0184.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 205,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0185.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 206,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0186.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 207,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0187.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 208,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0188.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 209,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0189.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 210,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0190.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 211,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0191.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 212,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0192.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 213,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0193.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 214,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0194.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 215,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0195.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 216,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0196.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 217,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0197.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 218,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0198.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 219,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0199.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 220,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0200.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 221,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0201.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 222,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0202.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 223,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0203.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 224,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0204.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 225,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0205.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 226,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0206.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 227,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0207.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 228,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0208.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 229,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0209.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 230,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0210.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 231,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0211.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 232,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0212.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 233,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0213.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 234,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0214.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 235,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0215.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 236,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0216.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 237,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0217.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 238,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0218.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 239,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0219.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 240,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0220.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 241,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0221.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 242,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0222.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 243,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0223.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 244,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0224.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 245,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0225.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 246,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0226.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 247,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0227.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 248,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0228.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 249,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0229.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 250,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0230.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 251,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0231.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 252,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0232.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 253,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0233.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 254,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0234.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 255,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0235.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 256,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0236.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 257,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0237.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 258,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0238.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 259,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0239.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 260,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0240.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 261,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0241.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 262,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0242.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 263,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0243.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 264,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0244.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 265,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0245.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 266,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0246.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 267,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0247.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 268,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0248.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 269,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0249.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 270,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0250.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 271,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0251.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 272,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0252.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 273,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0253.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 274,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0254.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 275,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0255.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 276,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0256.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 277,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0257.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 278,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0258.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 279,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0259.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 280,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0260.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 281,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0261.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 282,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0262.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 283,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0263.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 284,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0264.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 285,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0265.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 286,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0266.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 287,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0267.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 288,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0268.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 289,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0269.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 290,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0270.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 291,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0271.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 292,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0272.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 293,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0273.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 294,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0274.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 295,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0275.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 296,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0276.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 297,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0277.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 298,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0278.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 299,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0279.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 300,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0280.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 301,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0281.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 302,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0282.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 303,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0283.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 304,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0284.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 305,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0285.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 306,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0286.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 307,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0287.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 308,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0288.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 309,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0289.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 310,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0290.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 311,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0291.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 312,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0292.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 313,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0293.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 314,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0294.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 315,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0295.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 316,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0296.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 317,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0297.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 318,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0298.txt",
+        "symlink_target": null,
+        "type": "file"
+      },
+      {
+        "inode": 319,
+        "logical_size": 9,
+        "nlink": 1,
+        "path": "stable/seed-0299.txt",
+        "symlink_target": null,
+        "type": "file"
+      }
+    ]
+  },
+  "image_name": "ex05-live-pinned-churn.dmg",
+  "live_scan": {
+    "elapsed_seconds": 0.1471599159999999,
+    "end_checkpoint": {
+      "block_size": 4096,
+      "candidate_count": 4,
+      "candidates": [
+        {
+          "descriptor_index": 1,
+          "obj_type": 2147483649,
+          "xid": 37
+        },
+        {
+          "descriptor_index": 3,
+          "obj_type": 2147483649,
+          "xid": 34
+        },
+        {
+          "descriptor_index": 5,
+          "obj_type": 2147483649,
+          "xid": 35
+        },
+        {
+          "descriptor_index": 7,
+          "obj_type": 2147483649,
+          "xid": 36
+        }
+      ],
+      "descriptor_base": 1,
+      "descriptor_base_non_contiguous": false,
+      "descriptor_blocks": 8,
+      "highest_xid": 37
+    },
+    "error": null,
+    "mutations": [
+      {
+        "highest_xid": 10,
+        "index": 0,
+        "path": "hot/churn-0000.txt"
+      },
+      {
+        "highest_xid": 11,
+        "index": 5,
+        "path": "hot/churn-0005.txt"
+      },
+      {
+        "highest_xid": 13,
+        "index": 10,
+        "path": "hot/churn-0010.txt"
+      },
+      {
+        "highest_xid": 15,
+        "index": 15,
+        "path": "hot/churn-0015.txt"
+      },
+      {
+        "highest_xid": 16,
+        "index": 20,
+        "path": "hot/churn-0020.txt"
+      },
+      {
+        "highest_xid": 18,
+        "index": 25,
+        "path": "hot/churn-0025.txt"
+      },
+      {
+        "highest_xid": 20,
+        "index": 30,
+        "path": "hot/churn-0030.txt"
+      },
+      {
+        "highest_xid": 21,
+        "index": 35,
+        "path": "hot/churn-0035.txt"
+      },
+      {
+        "highest_xid": 23,
+        "index": 40,
+        "path": "hot/churn-0040.txt"
+      },
+      {
+        "highest_xid": 25,
+        "index": 45,
+        "path": "hot/churn-0045.txt"
+      },
+      {
+        "highest_xid": 26,
+        "index": 50,
+        "path": "hot/churn-0050.txt"
+      },
+      {
+        "highest_xid": 28,
+        "index": 55,
+        "path": "hot/churn-0055.txt"
+      },
+      {
+        "highest_xid": 30,
+        "index": 60,
+        "path": "hot/churn-0060.txt"
+      },
+      {
+        "highest_xid": 31,
+        "index": 65,
+        "path": "hot/churn-0065.txt"
+      },
+      {
+        "highest_xid": 33,
+        "index": 70,
+        "path": "hot/churn-0070.txt"
+      },
+      {
+        "highest_xid": 35,
+        "index": 75,
+        "path": "hot/churn-0075.txt"
+      }
+    ],
+    "raw_walk": {
+      "device": "/dev/rdisk5",
+      "entries": [
+        {
+          "file_id": 17,
+          "path": "hot",
+          "type": "dir"
+        },
+        {
+          "file_id": 16,
+          "path": "stable",
+          "type": "dir"
+        },
+        {
+          "file_id": 18,
+          "logical_size": 7,
+          "path": "stable/seed-0000.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 19,
+          "logical_size": 7,
+          "path": "stable/seed-0001.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 20,
+          "logical_size": 7,
+          "path": "stable/seed-0002.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 21,
+          "logical_size": 7,
+          "path": "stable/seed-0003.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 22,
+          "logical_size": 7,
+          "path": "stable/seed-0004.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 23,
+          "logical_size": 7,
+          "path": "stable/seed-0005.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 24,
+          "logical_size": 7,
+          "path": "stable/seed-0006.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 25,
+          "logical_size": 7,
+          "path": "stable/seed-0007.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 26,
+          "logical_size": 7,
+          "path": "stable/seed-0008.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 27,
+          "logical_size": 7,
+          "path": "stable/seed-0009.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 28,
+          "logical_size": 8,
+          "path": "stable/seed-0010.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 29,
+          "logical_size": 8,
+          "path": "stable/seed-0011.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 30,
+          "logical_size": 8,
+          "path": "stable/seed-0012.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 31,
+          "logical_size": 8,
+          "path": "stable/seed-0013.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 32,
+          "logical_size": 8,
+          "path": "stable/seed-0014.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 33,
+          "logical_size": 8,
+          "path": "stable/seed-0015.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 34,
+          "logical_size": 8,
+          "path": "stable/seed-0016.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 35,
+          "logical_size": 8,
+          "path": "stable/seed-0017.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 36,
+          "logical_size": 8,
+          "path": "stable/seed-0018.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 37,
+          "logical_size": 8,
+          "path": "stable/seed-0019.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 38,
+          "logical_size": 8,
+          "path": "stable/seed-0020.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 39,
+          "logical_size": 8,
+          "path": "stable/seed-0021.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 40,
+          "logical_size": 8,
+          "path": "stable/seed-0022.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 41,
+          "logical_size": 8,
+          "path": "stable/seed-0023.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 42,
+          "logical_size": 8,
+          "path": "stable/seed-0024.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 43,
+          "logical_size": 8,
+          "path": "stable/seed-0025.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 44,
+          "logical_size": 8,
+          "path": "stable/seed-0026.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 45,
+          "logical_size": 8,
+          "path": "stable/seed-0027.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 46,
+          "logical_size": 8,
+          "path": "stable/seed-0028.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 47,
+          "logical_size": 8,
+          "path": "stable/seed-0029.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 48,
+          "logical_size": 8,
+          "path": "stable/seed-0030.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 49,
+          "logical_size": 8,
+          "path": "stable/seed-0031.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 50,
+          "logical_size": 8,
+          "path": "stable/seed-0032.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 51,
+          "logical_size": 8,
+          "path": "stable/seed-0033.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 52,
+          "logical_size": 8,
+          "path": "stable/seed-0034.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 53,
+          "logical_size": 8,
+          "path": "stable/seed-0035.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 54,
+          "logical_size": 8,
+          "path": "stable/seed-0036.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 55,
+          "logical_size": 8,
+          "path": "stable/seed-0037.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 56,
+          "logical_size": 8,
+          "path": "stable/seed-0038.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 57,
+          "logical_size": 8,
+          "path": "stable/seed-0039.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 58,
+          "logical_size": 8,
+          "path": "stable/seed-0040.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 59,
+          "logical_size": 8,
+          "path": "stable/seed-0041.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 60,
+          "logical_size": 8,
+          "path": "stable/seed-0042.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 61,
+          "logical_size": 8,
+          "path": "stable/seed-0043.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 62,
+          "logical_size": 8,
+          "path": "stable/seed-0044.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 63,
+          "logical_size": 8,
+          "path": "stable/seed-0045.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 64,
+          "logical_size": 8,
+          "path": "stable/seed-0046.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 65,
+          "logical_size": 8,
+          "path": "stable/seed-0047.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 66,
+          "logical_size": 8,
+          "path": "stable/seed-0048.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 67,
+          "logical_size": 8,
+          "path": "stable/seed-0049.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 68,
+          "logical_size": 8,
+          "path": "stable/seed-0050.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 69,
+          "logical_size": 8,
+          "path": "stable/seed-0051.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 70,
+          "logical_size": 8,
+          "path": "stable/seed-0052.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 71,
+          "logical_size": 8,
+          "path": "stable/seed-0053.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 72,
+          "logical_size": 8,
+          "path": "stable/seed-0054.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 73,
+          "logical_size": 8,
+          "path": "stable/seed-0055.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 74,
+          "logical_size": 8,
+          "path": "stable/seed-0056.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 75,
+          "logical_size": 8,
+          "path": "stable/seed-0057.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 76,
+          "logical_size": 8,
+          "path": "stable/seed-0058.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 77,
+          "logical_size": 8,
+          "path": "stable/seed-0059.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 78,
+          "logical_size": 8,
+          "path": "stable/seed-0060.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 79,
+          "logical_size": 8,
+          "path": "stable/seed-0061.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 80,
+          "logical_size": 8,
+          "path": "stable/seed-0062.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 81,
+          "logical_size": 8,
+          "path": "stable/seed-0063.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 82,
+          "logical_size": 8,
+          "path": "stable/seed-0064.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 83,
+          "logical_size": 8,
+          "path": "stable/seed-0065.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 84,
+          "logical_size": 8,
+          "path": "stable/seed-0066.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 85,
+          "logical_size": 8,
+          "path": "stable/seed-0067.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 86,
+          "logical_size": 8,
+          "path": "stable/seed-0068.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 87,
+          "logical_size": 8,
+          "path": "stable/seed-0069.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 88,
+          "logical_size": 8,
+          "path": "stable/seed-0070.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 89,
+          "logical_size": 8,
+          "path": "stable/seed-0071.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 90,
+          "logical_size": 8,
+          "path": "stable/seed-0072.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 91,
+          "logical_size": 8,
+          "path": "stable/seed-0073.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 92,
+          "logical_size": 8,
+          "path": "stable/seed-0074.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 93,
+          "logical_size": 8,
+          "path": "stable/seed-0075.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 94,
+          "logical_size": 8,
+          "path": "stable/seed-0076.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 95,
+          "logical_size": 8,
+          "path": "stable/seed-0077.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 96,
+          "logical_size": 8,
+          "path": "stable/seed-0078.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 97,
+          "logical_size": 8,
+          "path": "stable/seed-0079.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 98,
+          "logical_size": 8,
+          "path": "stable/seed-0080.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 99,
+          "logical_size": 8,
+          "path": "stable/seed-0081.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 100,
+          "logical_size": 8,
+          "path": "stable/seed-0082.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 101,
+          "logical_size": 8,
+          "path": "stable/seed-0083.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 102,
+          "logical_size": 8,
+          "path": "stable/seed-0084.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 103,
+          "logical_size": 8,
+          "path": "stable/seed-0085.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 104,
+          "logical_size": 8,
+          "path": "stable/seed-0086.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 105,
+          "logical_size": 8,
+          "path": "stable/seed-0087.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 106,
+          "logical_size": 8,
+          "path": "stable/seed-0088.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 107,
+          "logical_size": 8,
+          "path": "stable/seed-0089.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 108,
+          "logical_size": 8,
+          "path": "stable/seed-0090.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 109,
+          "logical_size": 8,
+          "path": "stable/seed-0091.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 110,
+          "logical_size": 8,
+          "path": "stable/seed-0092.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 111,
+          "logical_size": 8,
+          "path": "stable/seed-0093.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 112,
+          "logical_size": 8,
+          "path": "stable/seed-0094.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 113,
+          "logical_size": 8,
+          "path": "stable/seed-0095.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 114,
+          "logical_size": 8,
+          "path": "stable/seed-0096.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 115,
+          "logical_size": 8,
+          "path": "stable/seed-0097.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 116,
+          "logical_size": 8,
+          "path": "stable/seed-0098.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 117,
+          "logical_size": 8,
+          "path": "stable/seed-0099.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 118,
+          "logical_size": 9,
+          "path": "stable/seed-0100.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 119,
+          "logical_size": 9,
+          "path": "stable/seed-0101.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 120,
+          "logical_size": 9,
+          "path": "stable/seed-0102.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 121,
+          "logical_size": 9,
+          "path": "stable/seed-0103.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 122,
+          "logical_size": 9,
+          "path": "stable/seed-0104.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 123,
+          "logical_size": 9,
+          "path": "stable/seed-0105.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 124,
+          "logical_size": 9,
+          "path": "stable/seed-0106.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 125,
+          "logical_size": 9,
+          "path": "stable/seed-0107.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 126,
+          "logical_size": 9,
+          "path": "stable/seed-0108.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 127,
+          "logical_size": 9,
+          "path": "stable/seed-0109.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 128,
+          "logical_size": 9,
+          "path": "stable/seed-0110.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 129,
+          "logical_size": 9,
+          "path": "stable/seed-0111.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 130,
+          "logical_size": 9,
+          "path": "stable/seed-0112.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 131,
+          "logical_size": 9,
+          "path": "stable/seed-0113.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 132,
+          "logical_size": 9,
+          "path": "stable/seed-0114.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 133,
+          "logical_size": 9,
+          "path": "stable/seed-0115.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 134,
+          "logical_size": 9,
+          "path": "stable/seed-0116.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 135,
+          "logical_size": 9,
+          "path": "stable/seed-0117.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 136,
+          "logical_size": 9,
+          "path": "stable/seed-0118.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 137,
+          "logical_size": 9,
+          "path": "stable/seed-0119.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 138,
+          "logical_size": 9,
+          "path": "stable/seed-0120.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 139,
+          "logical_size": 9,
+          "path": "stable/seed-0121.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 140,
+          "logical_size": 9,
+          "path": "stable/seed-0122.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 141,
+          "logical_size": 9,
+          "path": "stable/seed-0123.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 142,
+          "logical_size": 9,
+          "path": "stable/seed-0124.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 143,
+          "logical_size": 9,
+          "path": "stable/seed-0125.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 144,
+          "logical_size": 9,
+          "path": "stable/seed-0126.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 145,
+          "logical_size": 9,
+          "path": "stable/seed-0127.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 146,
+          "logical_size": 9,
+          "path": "stable/seed-0128.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 147,
+          "logical_size": 9,
+          "path": "stable/seed-0129.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 148,
+          "logical_size": 9,
+          "path": "stable/seed-0130.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 149,
+          "logical_size": 9,
+          "path": "stable/seed-0131.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 150,
+          "logical_size": 9,
+          "path": "stable/seed-0132.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 151,
+          "logical_size": 9,
+          "path": "stable/seed-0133.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 152,
+          "logical_size": 9,
+          "path": "stable/seed-0134.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 153,
+          "logical_size": 9,
+          "path": "stable/seed-0135.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 154,
+          "logical_size": 9,
+          "path": "stable/seed-0136.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 155,
+          "logical_size": 9,
+          "path": "stable/seed-0137.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 156,
+          "logical_size": 9,
+          "path": "stable/seed-0138.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 157,
+          "logical_size": 9,
+          "path": "stable/seed-0139.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 158,
+          "logical_size": 9,
+          "path": "stable/seed-0140.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 159,
+          "logical_size": 9,
+          "path": "stable/seed-0141.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 160,
+          "logical_size": 9,
+          "path": "stable/seed-0142.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 161,
+          "logical_size": 9,
+          "path": "stable/seed-0143.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 162,
+          "logical_size": 9,
+          "path": "stable/seed-0144.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 163,
+          "logical_size": 9,
+          "path": "stable/seed-0145.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 164,
+          "logical_size": 9,
+          "path": "stable/seed-0146.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 165,
+          "logical_size": 9,
+          "path": "stable/seed-0147.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 166,
+          "logical_size": 9,
+          "path": "stable/seed-0148.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 167,
+          "logical_size": 9,
+          "path": "stable/seed-0149.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 168,
+          "logical_size": 9,
+          "path": "stable/seed-0150.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 169,
+          "logical_size": 9,
+          "path": "stable/seed-0151.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 170,
+          "logical_size": 9,
+          "path": "stable/seed-0152.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 171,
+          "logical_size": 9,
+          "path": "stable/seed-0153.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 172,
+          "logical_size": 9,
+          "path": "stable/seed-0154.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 173,
+          "logical_size": 9,
+          "path": "stable/seed-0155.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 174,
+          "logical_size": 9,
+          "path": "stable/seed-0156.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 175,
+          "logical_size": 9,
+          "path": "stable/seed-0157.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 176,
+          "logical_size": 9,
+          "path": "stable/seed-0158.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 177,
+          "logical_size": 9,
+          "path": "stable/seed-0159.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 178,
+          "logical_size": 9,
+          "path": "stable/seed-0160.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 179,
+          "logical_size": 9,
+          "path": "stable/seed-0161.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 180,
+          "logical_size": 9,
+          "path": "stable/seed-0162.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 181,
+          "logical_size": 9,
+          "path": "stable/seed-0163.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 182,
+          "logical_size": 9,
+          "path": "stable/seed-0164.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 183,
+          "logical_size": 9,
+          "path": "stable/seed-0165.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 184,
+          "logical_size": 9,
+          "path": "stable/seed-0166.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 185,
+          "logical_size": 9,
+          "path": "stable/seed-0167.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 186,
+          "logical_size": 9,
+          "path": "stable/seed-0168.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 187,
+          "logical_size": 9,
+          "path": "stable/seed-0169.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 188,
+          "logical_size": 9,
+          "path": "stable/seed-0170.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 190,
+          "logical_size": 9,
+          "path": "stable/seed-0171.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 191,
+          "logical_size": 9,
+          "path": "stable/seed-0172.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 192,
+          "logical_size": 9,
+          "path": "stable/seed-0173.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 194,
+          "logical_size": 9,
+          "path": "stable/seed-0174.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 195,
+          "logical_size": 9,
+          "path": "stable/seed-0175.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 196,
+          "logical_size": 9,
+          "path": "stable/seed-0176.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 197,
+          "logical_size": 9,
+          "path": "stable/seed-0177.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 198,
+          "logical_size": 9,
+          "path": "stable/seed-0178.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 199,
+          "logical_size": 9,
+          "path": "stable/seed-0179.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 200,
+          "logical_size": 9,
+          "path": "stable/seed-0180.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 201,
+          "logical_size": 9,
+          "path": "stable/seed-0181.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 202,
+          "logical_size": 9,
+          "path": "stable/seed-0182.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 203,
+          "logical_size": 9,
+          "path": "stable/seed-0183.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 204,
+          "logical_size": 9,
+          "path": "stable/seed-0184.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 205,
+          "logical_size": 9,
+          "path": "stable/seed-0185.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 206,
+          "logical_size": 9,
+          "path": "stable/seed-0186.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 207,
+          "logical_size": 9,
+          "path": "stable/seed-0187.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 208,
+          "logical_size": 9,
+          "path": "stable/seed-0188.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 209,
+          "logical_size": 9,
+          "path": "stable/seed-0189.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 210,
+          "logical_size": 9,
+          "path": "stable/seed-0190.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 211,
+          "logical_size": 9,
+          "path": "stable/seed-0191.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 212,
+          "logical_size": 9,
+          "path": "stable/seed-0192.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 213,
+          "logical_size": 9,
+          "path": "stable/seed-0193.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 214,
+          "logical_size": 9,
+          "path": "stable/seed-0194.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 215,
+          "logical_size": 9,
+          "path": "stable/seed-0195.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 216,
+          "logical_size": 9,
+          "path": "stable/seed-0196.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 217,
+          "logical_size": 9,
+          "path": "stable/seed-0197.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 218,
+          "logical_size": 9,
+          "path": "stable/seed-0198.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 219,
+          "logical_size": 9,
+          "path": "stable/seed-0199.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 220,
+          "logical_size": 9,
+          "path": "stable/seed-0200.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 221,
+          "logical_size": 9,
+          "path": "stable/seed-0201.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 222,
+          "logical_size": 9,
+          "path": "stable/seed-0202.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 223,
+          "logical_size": 9,
+          "path": "stable/seed-0203.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 224,
+          "logical_size": 9,
+          "path": "stable/seed-0204.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 225,
+          "logical_size": 9,
+          "path": "stable/seed-0205.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 226,
+          "logical_size": 9,
+          "path": "stable/seed-0206.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 227,
+          "logical_size": 9,
+          "path": "stable/seed-0207.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 228,
+          "logical_size": 9,
+          "path": "stable/seed-0208.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 229,
+          "logical_size": 9,
+          "path": "stable/seed-0209.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 230,
+          "logical_size": 9,
+          "path": "stable/seed-0210.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 231,
+          "logical_size": 9,
+          "path": "stable/seed-0211.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 232,
+          "logical_size": 9,
+          "path": "stable/seed-0212.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 233,
+          "logical_size": 9,
+          "path": "stable/seed-0213.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 234,
+          "logical_size": 9,
+          "path": "stable/seed-0214.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 235,
+          "logical_size": 9,
+          "path": "stable/seed-0215.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 236,
+          "logical_size": 9,
+          "path": "stable/seed-0216.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 237,
+          "logical_size": 9,
+          "path": "stable/seed-0217.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 238,
+          "logical_size": 9,
+          "path": "stable/seed-0218.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 239,
+          "logical_size": 9,
+          "path": "stable/seed-0219.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 240,
+          "logical_size": 9,
+          "path": "stable/seed-0220.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 241,
+          "logical_size": 9,
+          "path": "stable/seed-0221.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 242,
+          "logical_size": 9,
+          "path": "stable/seed-0222.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 243,
+          "logical_size": 9,
+          "path": "stable/seed-0223.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 244,
+          "logical_size": 9,
+          "path": "stable/seed-0224.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 245,
+          "logical_size": 9,
+          "path": "stable/seed-0225.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 246,
+          "logical_size": 9,
+          "path": "stable/seed-0226.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 247,
+          "logical_size": 9,
+          "path": "stable/seed-0227.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 248,
+          "logical_size": 9,
+          "path": "stable/seed-0228.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 249,
+          "logical_size": 9,
+          "path": "stable/seed-0229.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 250,
+          "logical_size": 9,
+          "path": "stable/seed-0230.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 251,
+          "logical_size": 9,
+          "path": "stable/seed-0231.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 252,
+          "logical_size": 9,
+          "path": "stable/seed-0232.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 253,
+          "logical_size": 9,
+          "path": "stable/seed-0233.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 254,
+          "logical_size": 9,
+          "path": "stable/seed-0234.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 255,
+          "logical_size": 9,
+          "path": "stable/seed-0235.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 256,
+          "logical_size": 9,
+          "path": "stable/seed-0236.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 257,
+          "logical_size": 9,
+          "path": "stable/seed-0237.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 258,
+          "logical_size": 9,
+          "path": "stable/seed-0238.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 259,
+          "logical_size": 9,
+          "path": "stable/seed-0239.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 260,
+          "logical_size": 9,
+          "path": "stable/seed-0240.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 261,
+          "logical_size": 9,
+          "path": "stable/seed-0241.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 262,
+          "logical_size": 9,
+          "path": "stable/seed-0242.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 263,
+          "logical_size": 9,
+          "path": "stable/seed-0243.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 264,
+          "logical_size": 9,
+          "path": "stable/seed-0244.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 265,
+          "logical_size": 9,
+          "path": "stable/seed-0245.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 266,
+          "logical_size": 9,
+          "path": "stable/seed-0246.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 267,
+          "logical_size": 9,
+          "path": "stable/seed-0247.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 268,
+          "logical_size": 9,
+          "path": "stable/seed-0248.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 269,
+          "logical_size": 9,
+          "path": "stable/seed-0249.txt",
+          "type": "file"
+        },
+        {
+          "file_id": 270,
+          "logical_size": 9,
+          "path": "stable/seed-0250.txt",
+          "type": "file"
+        }
+      ],
+      "entry_count": 253,
+      "volume": "EX05Live"
+    },
+    "start_checkpoint": {
+      "block_size": 4096,
+      "candidate_count": 4,
+      "candidates": [
+        {
+          "descriptor_index": 1,
+          "obj_type": 2147483649,
+          "xid": 9
+        },
+        {
+          "descriptor_index": 3,
+          "obj_type": 2147483649,
+          "xid": 6
+        },
+        {
+          "descriptor_index": 5,
+          "obj_type": 2147483649,
+          "xid": 7
+        },
+        {
+          "descriptor_index": 7,
+          "obj_type": 2147483649,
+          "xid": 8
+        }
+      ],
+      "descriptor_base": 1,
+      "descriptor_base_non_contiguous": false,
+      "descriptor_blocks": 8,
+      "highest_xid": 9
+    }
+  },
+  "operations": [
+    "created 300 stable seed files"
+  ],
+  "raw_container_path": "/dev/rdisk5"
+}

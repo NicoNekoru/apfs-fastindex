@@ -1,0 +1,28 @@
+{
+  "experiment_id": "EX-12",
+  "question": "Can native OMAP lookup resolve (omap context, oid, selected_xid) to the same identities as pinned proof artifacts and reject failure flags?",
+  "positive_oracle": {
+    "sources": [
+      "EX-06 pinned root-tree identity artifacts",
+      "EX-07 pinned node-identity artifacts"
+    ],
+    "expected": "native lookup returns the same paddr, object_xid, checksum, block hash, and expected type/subtype for each target object"
+  },
+  "failure_oracles": [
+    "no matching oid with xid <= selected_xid",
+    "OMAP_VAL_DELETED",
+    "OMAP_VAL_ENCRYPTED",
+    "OMAP_VAL_NOHEADER",
+    "OMAP_VAL_CRYPTO_GENERATION",
+    "OMAP ENCRYPTING/DECRYPTING/KEYROLLING flags",
+    "wrong OMAP domain",
+    "resolved object checksum/type/subtype/XID validation failure"
+  ],
+  "hard_stop_policy": "fail closed before FS-record parsing",
+  "not_proven": [
+    "snapshot lookup support",
+    "encrypted source support",
+    "namespace reconstruction",
+    "persistent cache reuse"
+  ]
+}

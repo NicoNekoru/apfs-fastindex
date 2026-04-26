@@ -1,0 +1,40 @@
+{
+  "aggregate_count": 3,
+  "checkpoint_discovery": true,
+  "comparison_matched": true,
+  "entry_count": 7,
+  "fallback_reason": null,
+  "operations": [
+    "create src and dst directories",
+    "create src/base.txt",
+    "rename src/base.txt -> src/renamed.txt",
+    "move src/renamed.txt -> dst/moved.txt",
+    "create hard link dst/hard.txt",
+    "create sparse file dst/sparse.bin",
+    "clone dst/moved.txt -> dst/clone.txt",
+    "append to dst/moved.txt",
+    "create symlink dst/link.txt -> moved.txt"
+  ],
+  "oracle_available": true,
+  "oracle_diff": {
+    "matched": true,
+    "mismatches": [],
+    "missing_paths": [],
+    "unexpected_paths": []
+  },
+  "raw_readable": true,
+  "raw_walk": true,
+  "requested_mode": "raw_single_volume_namespace_logical_size",
+  "root_discovery": true,
+  "scan_state": {
+    "block_size": 4096,
+    "candidate_count": 4,
+    "descriptor_base": 1,
+    "descriptor_base_non_contiguous": false,
+    "descriptor_blocks": 8,
+    "highest_xid": 14
+  },
+  "source_class": "detached_image",
+  "source_id": "detached-unencrypted-dmg",
+  "support_verdict": "supported"
+}

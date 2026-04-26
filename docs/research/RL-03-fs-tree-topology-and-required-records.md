@@ -3,7 +3,7 @@
 Status: Open
 Priority: P0
 Owner: TBD
-Last Updated: TBD
+Last Updated: 2026-04-26
 
 ## Core Question
 - Which APFS trees and record types are required to build a complete directory index and size model?
@@ -80,6 +80,20 @@ Last Updated: TBD
 - [2026-04-25] `EX-04` validated that matrix against a broader pinned
   raw-vs-oracle corpus on both case-insensitive and case-sensitive APFS images:
   raw and oracle path sets matched with zero mismatches.
+- [2026-04-26] `SR-008` reconfirmed the native v1 record surface:
+  `DIR_REC`, `INODE`, dstream or equivalent logical-size fields, symlink
+  `XATTR`, and `SIBLING_LINK` / `SIBLING_MAP`; file extents and
+  extent-reference parsing remain outside namespace plus logical-size v1.
+- [2026-04-26] `EX-10` extended the Rust path with a read-only FS-tree
+  record-family dumper (`crates/apfs-fastindex/src/fs_records.rs`). On the
+  proof fixture (53 leaf records, 16 unique object IDs) it counted the v1
+  scope families exactly: `inode=12`, `dir_rec=13`, `dstream_id=6`,
+  `xattr=9`, `sibling_link=2`, `sibling_map=2`, plus `file_extent=9` outside
+  v1 namespace scope. `unsupported_record_count=0`. The dumper does not
+  decode record bodies, names, or extents. Empirical correction distilled
+  into the code: the FS-tree root is reached via the volume OMAP and
+  therefore carries a virtual `obj_phys_t`, not physical, so the validator
+  must not require `o_oid == paddr` for FS-tree blocks.
 
 ## Interim Decisions
 - Separate "required for namespace" from "required for accounting."
@@ -93,6 +107,9 @@ Last Updated: TBD
   treated as part of the active parser surface rather than a speculative add-on.
 - The next parser-surface proof should be a broader pinned raw-vs-oracle corpus,
   not more broad taxonomy research.
+- Native FS-record parsing should begin as a record dumper with raw key type,
+  object ID, decoded family, and unsupported-record counts before it emits
+  product namespace entries.
 
 ## Exit Criteria
 - A required-record matrix exists for each product mode.

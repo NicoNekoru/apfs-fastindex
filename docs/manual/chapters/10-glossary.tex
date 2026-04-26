@@ -1,0 +1,29 @@
+\chapter{Glossary}
+
+\begin{description}
+  \item[APFS] Apple File System.
+  \item[Checkpoint] A transaction state used to locate coherent APFS metadata.
+  \item[XID] Transaction identifier. Raw scans must avoid mixing incompatible
+  transaction contexts.
+  \item[OID] Object identifier. A logical object id is not by itself a safe
+  parsed-content cache key.
+  \item[OMAP] Object map. The B-tree used to resolve APFS virtual objects to
+  physical locations in the correct domain and transaction context.
+  \item[FS tree] File-system B-tree containing records used to reconstruct
+  namespace and file metadata.
+  \item[DIR\_REC] Directory record used for directory membership and names.
+  \item[INODE] Inode record used for file identity and metadata.
+  \item[Dstream] Data stream metadata that carries logical size information for
+  ordinary file content.
+  \item[Oracle] A feature-specific validation source. There is no single oracle
+  for all APFS product semantics.
+  \item[Raw-readable] Bytes can be opened and sampled from a source.
+  \item[Raw-supported] Raw output is validated for the requested product mode and
+  source class.
+  \item[Logical size] The v1 size metric, corresponding to the user-visible file
+  length rather than allocated/shared storage attribution.
+  \item[Snapshot-retained bytes] Storage retained by APFS snapshot semantics.
+  This is not part of raw v1 logical-size output.
+  \item[Firmlink] macOS presentation mechanism that contributes to merged
+  System/Data namespace behavior.
+\end{description}

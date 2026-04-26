@@ -57,6 +57,15 @@ Current source reviews:
 - `SR-002` checkpoint, OMAP, and root-discovery contract
 - `SR-003` FS record taxonomy for narrow v1
 - `SR-004` runtime read path and encryption boundary
+- `SR-005` checkpoint validation details for the Rust scanner
+- `SR-006` OMAP lookup semantics and failure cases
+- `SR-007` object-header fail-closed validation
+- `SR-008` FS record layout for native v1 parsing
+- `SR-009` compression and logical-size precedence
+- `SR-010` snapshots, volume groups, and firmlink boundaries
+- `SR-011` encryption and runtime read-path boundary
+- `SR-012` format drift and feature-bit allowlisting
+- `SR-013` checkpoint map integrity and ephemeral-object validation
 
 ### `EX-*` Experiment Notes
 
@@ -113,6 +122,8 @@ for the exact question being tested.
   - `plans/first-raw-parser-prototype-plan.md`
   - `../implementation/000-implementation-index.md`
   - `../implementation/narrow-v1-proof-parser-skeleton.md`
+- living manual:
+  - `../manual/apfs-fastindex-manual.tex`
 - templates:
   - `001-research-template.md`
   - `002-source-review-template.md`
@@ -160,9 +171,32 @@ Gate D: broader product semantics and optimization
 - `EX-02` required-record taxonomy for narrow v1
 - `EX-03` pinned-state raw-vs-oracle proof loop
 - `EX-04` expanded pinned raw-vs-oracle corpus
+- `EX-05` live pinned churn; mounted image raw reads worked operationally, but
+  latest-state raw output did not match baseline or final mounted oracles under
+  churn
 - `EX-06` OID, paddr, XID, checksum identity tracking
 - `EX-07` subtree reuse proof probe; first execution found zero false reuse for
   exact node-identity matches in the detached lab corpus
+- `EX-08` read-path support matrix; first safe-host execution supports detached
+  unencrypted image-backed APFS for narrow v1 proof work, keeps mounted images
+  `readable_not_supported`, and records startup raw read as `blocked_privilege`
+- `EX-09` accounting probe design; keeps physical/shared/exclusive/compression
+  and snapshot-retained metrics outside v1 until metric-specific evidence exists
+- `EX-10` Rust checkpoint scanner; native Rust read-only path that now covers
+  source gating, descriptor scanning, NX superblock decoding, checkpoint-map
+  validation, container/volume OMAP `(oid, max_xid)` resolution, volume
+  superblock decoding under the v1 feature allowlist, FS-tree root validation
+  against the volume OMAP, and a read-only FS-tree record-family dump. Probe
+  asserts that no validation gaps and no unsupported FS-record families are
+  reported on the proof fixture. Native namespace emission and logical-size
+  decoding remain unimplemented.
+- `EX-11` checkpoint map integrity design; validates checkpoint-map chains and
+  mapped ephemeral objects before native OMAP/root traversal. First execution
+  validated a generated detached proof fixture and matched synthetic malformed
+  checkpoint-map hard-stop cases.
+- `EX-12` OMAP lookup contract; currently blocked because `EX-06`/`EX-07`
+  preserved identity JSON but not replayable raw media for native lookup
+  comparison.
 
 ## Research Tracks
 

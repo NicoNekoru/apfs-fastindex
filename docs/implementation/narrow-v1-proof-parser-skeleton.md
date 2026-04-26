@@ -30,6 +30,16 @@ What is not resolved:
 - physical/shared/snapshot accounting
 - merged boot-root semantics
 
+Native Rust status as of 2026-04-26:
+
+- `crates/apfs-fastindex` implements only the first checkpoint scanner slice:
+  source gating for `.dmg` and raw-device inputs, block-zero locator parsing,
+  contiguous descriptor scanning, candidate `NXSB` magic/type/checksum
+  validation, highest valid candidate XID selection, and JSON output.
+- The Rust scanner is tracked by `EX-10` and is not yet wired into
+  `ParserSkeleton`.
+- It does not implement OMAP/root discovery or FS-record parsing.
+
 This document is intentionally specific to the proof skeleton. Do not use it as
 the final native parser spec.
 
@@ -42,7 +52,10 @@ The skeleton is justified by:
 - `docs/research/experiments/EX-04-expanded-pinned-corpus/README.md`
 - `docs/research/sources/SR-003-fs-record-taxonomy.md`
 - `docs/research/sources/SR-004-runtime-read-path-and-encryption.md`
+- `docs/research/sources/SR-005-checkpoint-validation-details.md`
 - `docs/research/experiments/EX-06-identity-tracking/README.md`
+- `docs/research/experiments/EX-10-rust-checkpoint-scanner/README.md`
+- `docs/implementation/rust-checkpoint-scanner.md`
 
 Current regression command:
 
@@ -285,6 +298,7 @@ summaries and `RL-12` profiling before it belongs in an implementation spec.
 Replace `ProofRawWalkBackend` in this order:
 
 1. Implement native root resolver:
+   - consume the Rust checkpoint scanner boundary from `EX-10`
    - validate checkpoint superblock checksum/magic/type
    - validate checkpoint-map chain enough to reject malformed state
    - resolve container OMAP

@@ -1,0 +1,28 @@
+{
+  "experiment_id": "EX-11",
+  "question": "Can the selected checkpoint produce a validated checkpoint-map and ephemeral-object context before OMAP/root traversal?",
+  "positive_oracle": {
+    "source": "detached proof images with existing successful raw namespace comparisons",
+    "expected": "checkpoint map chain reaches CHECKPOINT_MAP_LAST and mapped ephemeral objects validate"
+  },
+  "negative_oracles": [
+    "missing CHECKPOINT_MAP_LAST",
+    "invalid cpm_count",
+    "descriptor ring wraps beyond configured limit",
+    "mapped object size is zero or not block-aligned",
+    "short read from checkpoint data area",
+    "bad ephemeral-object checksum",
+    "non-contiguous descriptor layout"
+  ],
+  "hard_stop_verdicts": [
+    "unsupported_non_contiguous_descriptors",
+    "malformed_checkpoint_map",
+    "bad_ephemeral_object",
+    "short_read"
+  ],
+  "not_proven": [
+    "OMAP lookup correctness",
+    "root discovery",
+    "namespace reconstruction"
+  ]
+}

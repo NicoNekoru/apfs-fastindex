@@ -1,0 +1,47 @@
+\chapter{Proof Skeleton}
+
+\section{Current Implementation Boundary}
+
+The current runnable implementation is a proof-backed parser skeleton, not the
+final native high-performance parser. Its implementation-facing spec is
+\path{docs/implementation/narrow-v1-proof-parser-skeleton.md}.
+
+The execution path is:
+
+\begin{enumerate}
+  \item source gate
+  \item scan-state summary
+  \item proof raw-walk backend
+  \item namespace entry normalization
+  \item directory aggregate construction
+  \item oracle diff
+\end{enumerate}
+
+\section{Regression Command}
+
+From the repository root:
+
+\begin{verbatim}
+PYTHONPATH=src python3 -m apfs_fastindex.poc_regression
+\end{verbatim}
+
+The regression creates a temporary APFS image, builds a small corpus, captures a
+mounted oracle, detaches the image, runs the proof parser, and compares output.
+
+\section{What Not To Infer}
+
+Do not infer native parser performance from the proof skeleton. The proof backend
+currently shells out through \texttt{go run} and exists to keep correctness
+experiments runnable while native root resolution and FS-record parsing are
+split out.
+
+Native implementation work should preserve the output contracts while replacing
+the proof backend in stages:
+
+\begin{enumerate}
+  \item native checkpoint and root resolver
+  \item native OMAP lookup with selected-XID enforcement
+  \item native FS-record reader
+  \item native namespace and logical-size extraction
+  \item regression against the existing oracle corpus
+\end{enumerate}

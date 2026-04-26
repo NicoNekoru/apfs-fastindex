@@ -1,0 +1,11 @@
+{
+  "checkpoint_map_count": 1,
+  "mapped_ephemeral_object_count": 4,
+  "next_gate": "EX-12 OMAP lookup validation may start from this validated checkpoint context",
+  "positive_source": "generated-proof-fixture",
+  "positive_verdict": "validated_checkpoint_context",
+  "status": "executed",
+  "synthetic_all_matched": true,
+  "synthetic_case_count": 7,
+  "validated_checkpoint_context_available": true
+}

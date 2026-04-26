@@ -1,0 +1,49 @@
+\chapter{Runtime Support}
+
+\section{Readable Is Not Supported}
+
+The read-path research separates four claims:
+
+\begin{description}
+  \item[Readable] Raw bytes can be opened and sampled.
+  \item[Parsable] Checkpoint/root discovery and raw traversal can run.
+  \item[Validatable] Output can be compared to a named oracle for the requested
+  mode.
+  \item[Supported] The source is inside the product allowlist for that mode.
+\end{description}
+
+This vocabulary comes from
+\path{docs/research/experiments/EX-08-read-path-matrix/README.md}.
+
+\section{Current Allowlist}
+
+The current raw-mode allowlist is narrow:
+
+\begin{itemize}
+  \item detached, unencrypted, image-backed APFS containers that match the tested
+  layout
+  \item explicitly stable APFS sources where one scan state can be selected and
+  held for the full run
+  \item mounted lab images only for documented experiments, not product support
+\end{itemize}
+
+The support-boundary source review is
+\path{docs/research/sources/SR-004-runtime-read-path-and-encryption.md}.
+
+\section{Fallback Conditions}
+
+Fallback or hard-stop conditions include:
+
+\begin{itemize}
+  \item ambiguous or malformed checkpoint state
+  \item unsupported checkpoint layout
+  \item unsupported incompatible feature bits
+  \item unsupported encryption or hardware-backed key requirements
+  \item Fusion or multi-device storage requirements
+  \item requested merged-root semantics
+  \item snapshot/sealed-volume semantics outside the target mode
+  \item no validated corpus for the source class
+\end{itemize}
+
+The rolling logs are \path{docs/research/RL-08-live-volume-encryption-and-read-path.md}
+and \path{docs/research/RL-13-format-drift-compatibility-and-fallback.md}.

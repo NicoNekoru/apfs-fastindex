@@ -55,6 +55,12 @@ Last Updated: TBD
   node-identity reuse produced zero false reuse across append, rename, move,
   delete/recreate, fanout growth, and fanout deletion transitions. Reusable
   current-node fractions ranged from `65.9%` to `90.3%`.
+- [2026-04-26] `EX-12` was designed to prove the native OMAP lookup step that
+  produces those node identities. Subtree reuse must remain downstream of native
+  `(omap context, oid, selected_xid)` validation.
+- [2026-04-26] `EX-12` was blocked by missing raw media for the `EX-06`/`EX-07`
+  identity artifacts. The subtree-reuse proof remains a proof-backend result
+  until the same states can be replayed through native OMAP lookup.
 
 ## Interim Decisions
 - Reuse should be proven at the node/subtree level before being trusted in production.
@@ -68,6 +74,10 @@ Last Updated: TBD
   rejected.
 - Do not implement persistent subtree skipping yet. The positive `EX-07` result
   must be rerun after native root/FS-record parsing exists.
+- Treat `EX-07` identities as proof-backend evidence until `EX-12` shows native
+  lookup reproduces them.
+- Preserve raw identity media in the next subtree/identity experiment so native
+  resolver replay can be compared against the same states.
 
 ## Exit Criteria
 - A precise reuse theorem for our implementation.
