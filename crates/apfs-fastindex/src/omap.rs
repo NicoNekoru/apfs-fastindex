@@ -97,6 +97,7 @@ pub struct OmapSummary {
     pub sample_mappings: Vec<OmapDumpEntry>,
 }
 
+#[derive(Debug)]
 pub(crate) struct OmapResolver {
     pub phys: OmapPhysSummary,
     pub tree_root_paddr: u64,
@@ -599,6 +600,131 @@ mod tests {
             .lookup(&mut cursor, BLOCK_SIZE, 200, 100)
             .expect("lookup ok");
         assert!(value.is_none());
+    }
+
+    #[test]
+    fn lookup_rejects_crypto_generation_value() {
+        let mappings = vec![(
+            100u64,
+            5u64,
+            OMAP_VAL_CRYPTO_GENERATION,
+            BLOCK_SIZE as u32,
+            1000u64,
+        )];
+        let image = build_image(2, 3, &mappings);
+        let mut cursor = Cursor::new(image);
+        let resolver = OmapResolver::open(&mut cursor, BLOCK_SIZE, 2).expect("omap opens");
+        let err = resolver
+            .lookup(&mut cursor, BLOCK_SIZE, 100, 100)
+            .expect_err("crypto-generation value forces a hard stop");
+        assert!(
+            matches!(&err, ScanError::InvalidObject(reason) if reason.contains("OMAP_VAL_CRYPTO_GENERATION")),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn lookup_rejects_unknown_value_flag_bits() {
+        let unknown_bit: u32 = 1 << 31;
+        let mappings = vec![(100u64, 5u64, unknown_bit, BLOCK_SIZE as u32, 1000u64)];
+        let image = build_image(2, 3, &mappings);
+        let mut cursor = Cursor::new(image);
+        let resolver = OmapResolver::open(&mut cursor, BLOCK_SIZE, 2).expect("omap opens");
+        let err = resolver
+            .lookup(&mut cursor, BLOCK_SIZE, 100, 100)
+            .expect_err("unknown value flag bits force a hard stop");
+        assert!(
+            matches!(&err, ScanError::InvalidObject(reason) if reason.contains("unknown OMAP value flag bits")),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn lookup_rejects_noheader_value() {
+        let mappings = vec![(
+            100u64,
+            5u64,
+            OMAP_VAL_NOHEADER,
+            BLOCK_SIZE as u32,
+            1000u64,
+        )];
+        let image = build_image(2, 3, &mappings);
+        let mut cursor = Cursor::new(image);
+        let resolver = OmapResolver::open(&mut cursor, BLOCK_SIZE, 2).expect("omap opens");
+        let err = resolver
+            .lookup(&mut cursor, BLOCK_SIZE, 100, 100)
+            .expect_err("no-header value forces a hard stop");
+        assert!(
+            matches!(&err, ScanError::InvalidObject(reason) if reason.contains("OMAP_VAL_NOHEADER")),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn open_rejects_phys_encrypting_flag() {
+        let mappings = vec![(100u64, 5u64, 0u32, BLOCK_SIZE as u32, 1000u64)];
+        let image = build_image_with_phys_flags(2, 3, &mappings, OMAP_PHYS_ENCRYPTING);
+        let mut cursor = Cursor::new(image);
+        let err = OmapResolver::open(&mut cursor, BLOCK_SIZE, 2)
+            .expect_err("ENCRYPTING phys flag must hard-stop");
+        assert!(
+            matches!(&err, ScanError::InvalidObject(reason) if reason.contains("OMAP_ENCRYPTING")),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn open_rejects_phys_decrypting_flag() {
+        let mappings = vec![(100u64, 5u64, 0u32, BLOCK_SIZE as u32, 1000u64)];
+        let image = build_image_with_phys_flags(2, 3, &mappings, OMAP_PHYS_DECRYPTING);
+        let mut cursor = Cursor::new(image);
+        let err = OmapResolver::open(&mut cursor, BLOCK_SIZE, 2)
+            .expect_err("DECRYPTING phys flag must hard-stop");
+        assert!(
+            matches!(&err, ScanError::InvalidObject(reason) if reason.contains("OMAP_DECRYPTING")),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn open_rejects_phys_keyrolling_flag() {
+        let mappings = vec![(100u64, 5u64, 0u32, BLOCK_SIZE as u32, 1000u64)];
+        let image = build_image_with_phys_flags(2, 3, &mappings, OMAP_PHYS_KEYROLLING);
+        let mut cursor = Cursor::new(image);
+        let err = OmapResolver::open(&mut cursor, BLOCK_SIZE, 2)
+            .expect_err("KEYROLLING phys flag must hard-stop");
+        assert!(
+            matches!(&err, ScanError::InvalidObject(reason) if reason.contains("OMAP_KEYROLLING")),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn open_rejects_phys_crypto_generation_flag() {
+        let mappings = vec![(100u64, 5u64, 0u32, BLOCK_SIZE as u32, 1000u64)];
+        let image =
+            build_image_with_phys_flags(2, 3, &mappings, OMAP_PHYS_CRYPTO_GENERATION_FLAG);
+        let mut cursor = Cursor::new(image);
+        let err = OmapResolver::open(&mut cursor, BLOCK_SIZE, 2)
+            .expect_err("CRYPTO_GENERATION_FLAG phys flag must hard-stop");
+        assert!(
+            matches!(&err, ScanError::InvalidObject(reason) if reason.contains("OMAP_CRYPTO_GENERATION_FLAG")),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn open_rejects_unknown_phys_flag_bits() {
+        let unknown: u32 = 1 << 31;
+        let mappings = vec![(100u64, 5u64, 0u32, BLOCK_SIZE as u32, 1000u64)];
+        let image = build_image_with_phys_flags(2, 3, &mappings, unknown);
+        let mut cursor = Cursor::new(image);
+        let err = OmapResolver::open(&mut cursor, BLOCK_SIZE, 2)
+            .expect_err("unknown phys flag bits must hard-stop");
+        assert!(
+            matches!(&err, ScanError::InvalidObject(reason) if reason.contains("unknown OMAP phys flag bits")),
+            "unexpected error: {err:?}"
+        );
     }
 
     #[test]

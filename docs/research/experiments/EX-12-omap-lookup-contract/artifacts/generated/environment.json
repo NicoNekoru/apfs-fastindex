@@ -1,0 +1,9 @@
+{
+  "cargo_available": true,
+  "cwd": "/Users/kai/Projects/apfs-fastindex",
+  "go_available": true,
+  "hdiutil_available": true,
+  "platform": "macOS-26.3.1-arm64-arm-64bit",
+  "python": "3.9.6",
+  "timestamp": "2026-04-26T09:32:40.091466+00:00"
+}

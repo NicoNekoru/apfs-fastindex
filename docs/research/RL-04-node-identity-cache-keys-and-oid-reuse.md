@@ -56,9 +56,22 @@ Last Updated: 2026-04-26
   explicit OMAP lookup contract. Cache identity must consume the mapping actually
   returned for `(omap domain, oid, selected_xid)`, including OMAP value flags,
   not a guessed latest mapping.
-- [2026-04-26] `EX-12` was blocked because the raw images corresponding to
-  `EX-06`/`EX-07` identity JSON were not preserved. Native cache identity proof
-  therefore still needs regenerated or preserved raw media.
+- [2026-04-26] Observation: the original `EX-12` route was blocked because the
+  raw images corresponding to `EX-06`/`EX-07` identity JSON were not preserved.
+  That blocker is historical for `EX-12` but remains a rule for future cache and
+  subtree-reuse experiments: identity JSON without matching raw media is not a
+  native replay oracle.
+- [2026-04-26] `EX-12` executed against a self-paired raw image plus
+  identity oracle generated in the same run; verdict
+  `validated_omap_lookup_contract`. Native OMAP lookup is now confirmed to
+  return the same `(oid, paddr, xid)` tuple SR-006 lower-bound replay
+  produces from Rust's own OMAP samples and to agree with `go-apfs
+  identitydump` on `root_tree.oid`. Native cache identity tuples may now
+  consume the resolver-returned `(omap domain, oid, paddr, xid)` plus a
+  validated obj-header (type/subtype/storage/checksum) for the proof
+  fixture; multi-state mutation churn (the EX-07 grid) still has to be
+  rerun through native FS-record parsing before any reuse decision is
+  promoted into a production cache.
 
 ## Interim Decisions
 - Cache identity should remain conservative until reuse safety is demonstrated.
@@ -69,7 +82,10 @@ Last Updated: 2026-04-26
   expected type/subtype with the raw identity tuple. Do not collapse the key to
   OID, paddr, or object XID alone for performance.
 - Do not promote any identity tuple from `EX-06`/`EX-07` into native cache code
-  until `EX-12` proves the native resolver returns the same identities.
+  until those mutation states are regenerated with preserved raw media and
+  replayed through the native resolver and FS-record body parser. `EX-12`
+  validates the resolver contract on a self-paired proof fixture, not the full
+  `EX-07` churn grid.
 - Future identity experiments must preserve the raw source or a reproducible
   fixture recipe that can regenerate the exact compared state.
 

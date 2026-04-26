@@ -220,7 +220,8 @@ Future execution should save:
 
 ## Next Exact Step
 
-- Implement `artifacts/probe_ex09.py` after native or probe-only field extraction
-  can emit inode dstream, inode uncompressed-size, xattr, and decmpfs metadata.
-  The first result should answer compressed logical-size precedence before any
-  physical/shared accounting formula is attempted.
+- Execute `EX-13` first or share its native field-dump machinery, then implement
+  `artifacts/probe_ex09.py` once inode dstream, inode uncompressed-size, xattr,
+  and decmpfs metadata can be emitted. The first `EX-09` result should answer
+  compressed logical-size precedence before any physical/shared accounting
+  formula is attempted.

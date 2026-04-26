@@ -255,8 +255,8 @@ encrypted/sealed/volume-group behavior.
 
 ## Next Exact Step
 
-- Implement read-only directory record decoding (`j_drec_*_key_t` /
-  `j_drec_val_t`) in Rust, with a Python oracle generated from the proof
-  fixture's `os.walk`/`os.lstat` output, and assert that the Rust dumper can
-  reconstruct the proof-fixture path table without yet emitting
-  `NamespaceEntry` rows or logical sizes.
+- Follow `SR-014`/`EX-13`: implement a read-only record-body dump for
+  `DIR_REC`, `INODE`, `XATTR`, `SIBLING_LINK`, `SIBLING_MAP`, and dstream fields
+  under the validated `EX-12` OMAP/root context, then compare those fields to a
+  same-run mounted/POSIX oracle before emitting `NamespaceEntry` rows or logical
+  sizes.

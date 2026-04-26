@@ -96,9 +96,28 @@ Last Updated: 2026-04-26
   separate from namespace reconstruction.
 - [2026-04-26] `EX-11` executed its positive checkpoint-map oracle on a generated
   detached proof fixture and matched all synthetic malformed-case expectations.
-- [2026-04-26] `EX-12` was marked blocked because `EX-06`/`EX-07` preserved
-  identity JSON but not the raw images needed to replay native OMAP lookup
-  against those identities.
+- [2026-04-26] Observation: the first `EX-12` route was marked blocked because
+  `EX-06`/`EX-07` preserved identity JSON but not the raw images needed to
+  replay native OMAP lookup against those identities.
+- [2026-04-26] `EX-12` was unblocked by replacing the stale-oracle pattern
+  with a self-paired probe: build a fresh proof fixture, attach it
+  `-nomount`, and run the native Rust scanner and `go-apfs identitydump`
+  against the same `/dev/rdiskN` in one execution. The probe also re-reads
+  every Rust-returned paddr and re-runs SR-006 lower-bound on Rust's own
+  OMAP sample lists, giving three independent observers for the same raw
+  bytes (on-disk replay, Python SR-006 replay, third-party identitydump).
+  This pattern is the new template for validating any future native
+  parser slice that needs a third-party oracle: the raw image and the
+  oracle must be produced from the same execution, and any cross-tool
+  divergence must be recorded with the oracle's `selected_xid` declared.
+- [2026-04-26] `EX-12` introduced an active-state-selection caveat for
+  third-party APFS oracles: `go-apfs identitydump` resolved a different
+  active-state checkpoint than the Rust scanner on the same proof
+  fixture, so cross-tool comparison can require `root_tree.oid` agreement
+  while documenting `(paddr, object_xid)` divergence as expected when
+  `selected_xid` differs. Every future cross-tool oracle must declare or
+  pin `selected_xid` before its results are diffed against the native
+  scanner.
 - [2026-04-26] `EX-09` was tightened so compressed logical-size precedence must
   compare public `st_size` with dstream size, inode uncompressed-size fields,
   and decmpfs metadata separately.
@@ -106,6 +125,11 @@ Last Updated: 2026-04-26
   valid oracle only for Rust `.dmg` source gating and checkpoint candidate
   discovery on the detached-image allowlist; it is not a namespace or
   logical-size oracle because Rust still emits no entries or aggregates.
+- [2026-04-26] Spec/Observation: `SR-014` and `EX-13` define the next
+  feature-specific oracle. A native record-body field dump must be compared
+  against a same-run mounted/POSIX namespace and ordinary logical-size oracle,
+  with any third-party APFS observer preserving the `selected_xid` caveat from
+  `EX-12`.
 
 ## Interim Decisions
 - Every optimization must be validated against a fresh full-scan oracle.
@@ -128,6 +152,9 @@ Last Updated: 2026-04-26
   discovery, FS-record decode, namespace/logical-size diff.
 - Identity-oracle artifacts must preserve or regenerate matching raw media. JSON
   identities alone are not enough to validate a native resolver on a later image.
+- Record-family counts are not a namespace oracle. The next validation unit is a
+  raw FS-record body dump with enough fields to explain path, type, file
+  identity, symlink target, hard-link grouping, and ordinary logical size.
 
 ## Oracle Matrix
 
@@ -156,11 +183,18 @@ Last Updated: 2026-04-26
   detached proof images plus synthetic malformed rings validate
   checkpoint-map/ephemeral-object handling before OMAP lookup.
 - `OMAP lookup`:
-  pinned identity artifacts validate `(omap context, oid, selected_xid)` mapping
-  before FS-record parsing.
-- `OMAP lookup blocker`:
-  if the raw media that produced pinned identities is absent, the OMAP lookup
-  experiment must be blocked rather than compared against a different image.
+  same-run raw media plus identity evidence validate `(omap context, oid,
+  selected_xid)` mapping before FS-record parsing; pinned identity artifacts are
+  valid only when their raw media is also preserved or regenerated.
+- `Historical OMAP lookup blocker`:
+  if raw media that produced pinned identities is absent, that specific replay
+  route must be blocked rather than compared against a different image. `EX-12`
+  superseded its initial blocker by generating raw media and identity evidence
+  in the same probe run.
+- `FS-record body oracle`:
+  same-run mounted/POSIX namespace and logical-size facts validate native
+  `DIR_REC`, `INODE`, `XATTR`, `SIBLING_LINK`, `SIBLING_MAP`, and dstream field
+  dumps only when the selected scan state is declared.
 - `Compression logical-size precedence`:
   public logical-size APIs must be compared to each raw candidate size source
   rather than collapsed into a global size pass/fail.

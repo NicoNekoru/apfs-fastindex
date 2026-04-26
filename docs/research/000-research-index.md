@@ -66,6 +66,7 @@ Current source reviews:
 - `SR-011` encryption and runtime read-path boundary
 - `SR-012` format drift and feature-bit allowlisting
 - `SR-013` checkpoint map integrity and ephemeral-object validation
+- `SR-014` native FS-record body contract
 
 ### `EX-*` Experiment Notes
 
@@ -102,6 +103,9 @@ Current oracle policy:
   POSIX/API traversal of the chosen volume or stable view
 - logical-size oracle:
   public file metadata APIs and tools that report logical size
+- FS-record body oracle:
+  same-run mounted/POSIX namespace and logical-size facts plus raw native field
+  dumps under a declared selected XID
 - allocated-size oracle:
   public file metadata APIs only for explicitly supported cases
 - incremental oracle:
@@ -194,9 +198,26 @@ Gate D: broader product semantics and optimization
   mapped ephemeral objects before native OMAP/root traversal. First execution
   validated a generated detached proof fixture and matched synthetic malformed
   checkpoint-map hard-stop cases.
-- `EX-12` OMAP lookup contract; currently blocked because `EX-06`/`EX-07`
-  preserved identity JSON but not replayable raw media for native lookup
-  comparison.
+- `EX-12` OMAP lookup contract; executed end-to-end via a self-paired probe
+  that builds a fresh proof fixture, runs the native Rust scanner and
+  `go-apfs identitydump` against the same `/dev/rdiskN`, replays
+  obj-header validation at every Rust-returned paddr, re-runs SR-006
+  lower-bound on Rust's published OMAP samples, and confirms cross-tool
+  agreement on `root_tree.oid`. Verdict: `validated_omap_lookup_contract`
+  for the proof fixture. `(paddr, object_xid)` divergence between Rust
+  (selected_xid 14) and `go-apfs` (apparent selected_xid 12) is recorded
+  as a `go_apfs_active_state_observation` caveat. Resolver hard stops now
+  cover `OMAP_VAL_DELETED` (negative result) plus `OMAP_VAL_ENCRYPTED`,
+  `OMAP_VAL_NOHEADER`, `OMAP_VAL_CRYPTO_GENERATION`, unknown
+  `omap_val_t.flags` bits, and OMAP-phys
+  `ENCRYPTING`/`DECRYPTING`/`KEYROLLING`/`CRYPTO_GENERATION_FLAG`/
+  unknown-bit hard stops at OMAP open time, all covered by Rust unit
+  tests on synthetic OMAPs.
+- `EX-13` native FS-record body oracle; designed as the next correctness gate
+  after `EX-12`. It will compare native `DIR_REC`, `INODE`, `XATTR`,
+  `SIBLING_LINK`, `SIBLING_MAP`, and dstream field dumps against same-run
+  mounted/POSIX namespace and ordinary logical-size facts, preserving
+  selected-XID caveats for any cross-tool APFS observer. Not executed.
 
 ## Research Tracks
 

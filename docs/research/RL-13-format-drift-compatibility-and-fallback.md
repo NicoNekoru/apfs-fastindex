@@ -125,10 +125,31 @@ Last Updated: 2026-04-26
   detached proof fixture and matched synthetic hard-stop verdicts for malformed
   map chains, invalid mapping counts/sizes, bad ephemeral checksums, and
   non-contiguous descriptors.
-- [2026-04-26] `EX-12` was blocked because the identity-oracle raw media was not
-  preserved. This is a compatibility/oracle gate: a source can pass checkpoint
-  context validation while still lacking the evidence required for OMAP/root
-  support.
+- [2026-04-26] Observation: the first `EX-12` route was blocked because the
+  identity-oracle raw media was not preserved. This remains a
+  compatibility/oracle rule for replaying old identities, but it is no longer
+  the current `EX-12` status.
+- [2026-04-26] `EX-12` was unblocked by a self-paired probe that builds a fresh
+  proof fixture, attaches it `-nomount`, and runs the native Rust scanner and
+  `go-apfs identitydump` against the same `/dev/rdiskN` in the same execution.
+  Verdict: `validated_omap_lookup_contract`. Oracle evidence: on-disk
+  obj-header replay at every paddr Rust returned passes type/subtype/storage/
+  oid/xid/Fletcher-64 checks; Python re-runs SR-006 lower-bound on Rust's
+  published OMAP samples and gets the same mapping; identitydump and Rust
+  agree on `root_tree.oid = 1028`. Cross-tool `(paddr, object_xid)`
+  divergence (go-apfs xid 12 / paddr 427 vs Rust xid 13 / paddr 433) is
+  recorded as a `go_apfs_active_state_observation` and constitutes a
+  compatibility caveat: third-party APFS parsers can resolve a different
+  active-state checkpoint than this scanner, so cross-tool oracles must
+  declare the same `selected_xid` to be comparable.
+- [2026-04-26] OMAP feature-allowlist enforcement was extended to fully
+  cover SR-006: the resolver now hard-stops on
+  `OMAP_VAL_CRYPTO_GENERATION` values, on unknown bits in
+  `omap_val_t.flags`, and on OMAP-phys flags
+  `OMAP_PHYS_ENCRYPTING`/`OMAP_PHYS_DECRYPTING`/`OMAP_PHYS_KEYROLLING`/
+  `OMAP_PHYS_CRYPTO_GENERATION_FLAG` plus any unknown `omap_phys.flags`
+  bit. `OMAP_MANUALLY_MANAGED` remains an allowed phys-flag bit. All
+  paths covered by Rust unit tests on synthetic OMAPs.
 - [2026-04-26] `EX-10` extended the Rust path with explicit feature-allowlist
   enforcement. The container decoder rejects any `incompatible_features` bit
   outside the v1 allowlist before checkpoint-map validation begins. The volume
@@ -139,6 +160,17 @@ Last Updated: 2026-04-26
   resolver. Unknown FS-record families are recorded as
   `unsupported_record_count` rather than silently ignored. The EX-10 probe
   asserts that all of these counters are zero for the proof fixture.
+- [2026-04-26] Spec/Observation: `SR-014` extends fail-closed compatibility
+  rules from record-family discovery into record-body decoding. Malformed
+  variable-length names, duplicate or impossible xfields, invalid UTF-8 where a
+  namespace string is required, unsupported xattr stream forms, unknown
+  directory or xattr flag bits, and mode-incompatible record groups must block
+  namespace/logical-size output until `EX-13` or a successor proves a narrower
+  behavior.
+- [2026-04-26] Hypothesis: `EX-13` should classify record-body failures as
+  `body_field_mismatch`, `selected_xid_mismatch`, `unsupported_record_body`,
+  `malformed_record_body`, or `oracle_inconclusive` instead of letting product
+  rows proceed with partial metadata.
 
 ## Interim Decisions
 - Compatibility boundaries must be explicit, not implied.
@@ -168,6 +200,9 @@ Last Updated: 2026-04-26
   before a source is promoted from one gate to the next.
 - Support promotion requires replayable evidence at the same gate. Do not use
   raw identities from one generated image as an oracle for another image.
+- Namespace/logical-size support promotion requires body-field evidence, not
+  just FS-record family counts. Sources with unsupported body encodings or
+  unaligned oracle state must stop before product rows are emitted.
 
 ## Exit Criteria
 - Supported-version matrix exists.

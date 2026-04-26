@@ -80,13 +80,14 @@ Last Updated: 2026-04-26
   `(oid, selected_xid)` and accept the greatest matching key with
   `xid <= selected_xid`; `OMAP_VAL_DELETED` is a negative lookup result, while
   encrypted/no-header/crypto-generation flags are unsupported hard stops.
-- [2026-04-26] `EX-12` was designed to compare native OMAP lookup output against
-  pinned identity artifacts from `EX-06` and `EX-07`, after `EX-11` supplies a
-  validated checkpoint context.
-- [2026-04-26] `EX-11` executed and produced a validated checkpoint context for a
-  generated detached proof fixture, but `EX-12` was blocked because the
-  `EX-06`/`EX-07` raw images that produced the pinned identity oracles were not
-  preserved.
+- [2026-04-26] Observation: `EX-12` was first designed to compare native OMAP
+  lookup output against pinned `EX-06`/`EX-07` identity artifacts, but that
+  route was blocked because those earlier artifacts did not preserve the
+  corresponding raw media.
+- [2026-04-26] Observation: `EX-11` executed and produced a validated checkpoint
+  context for a generated detached proof fixture. `EX-12` then superseded the
+  stale pinned-artifact route with a self-paired fixture that generated raw
+  media and identity evidence in the same run.
 - [2026-04-26] `EX-10` extended the Rust path with a native OMAP resolver
   (`crates/apfs-fastindex/src/omap.rs`). The resolver opens an `omap_phys_t`,
   walks the embedded B-tree, and performs the `(oid, max_xid)` lower-bound
@@ -100,6 +101,31 @@ Last Updated: 2026-04-26
   entries is the distance from the **end** of the value area to the
   **start** of the value (values run forward), which fixed an early misread of
   `flags=1114111` on real fixture data.
+- [2026-04-26] `EX-12` executed end-to-end against a self-paired raw image and
+  identity oracle generated in the same probe run, replacing the earlier
+  blocker. Verdict: `validated_omap_lookup_contract`. The probe re-reads each
+  paddr the Rust resolver returns and re-runs SR-006 lower-bound on Rust's
+  published OMAP sample lists. The container OMAP header validates as
+  `OBJECT_TYPE_OMAP` physical with valid Fletcher-64. The volume superblock at
+  paddr 439 validates as `OBJECT_TYPE_FS` (`0x0D`) virtual at oid 1026,
+  xid 14. The FS root tree at paddr 433 validates as `OBJECT_TYPE_BTREE`
+  virtual with subtype `OBJECT_TYPE_FSTREE` (`0x0E`) at oid 1028, xid 13,
+  with valid checksum. Cross-tool comparison with `go-apfs identitydump`
+  confirms agreement on `root_tree.oid = 1028`. `(paddr, object_xid)`
+  divergence is documented as a `go_apfs_active_state_observation` -
+  go-apfs's `apfs.Open` independently selects an earlier NXSB candidate
+  (xid 12) than the Rust resolver (xid 14) and therefore navigates a
+  different volume superblock and OMAP. SR-006 is parameterized by
+  `selected_xid`, so this is a caveat for any oracle, not a contract
+  violation.
+- [2026-04-26] OMAP resolver hard-stop coverage was extended to match SR-006
+  in full: in addition to `OMAP_VAL_ENCRYPTED`/`OMAP_VAL_NOHEADER`, the
+  resolver now hard-stops on `OMAP_VAL_CRYPTO_GENERATION` and on any unknown
+  bits in `omap_val_t.flags`; on OMAP open it hard-stops on
+  `OMAP_PHYS_ENCRYPTING`, `OMAP_PHYS_DECRYPTING`, `OMAP_PHYS_KEYROLLING`,
+  `OMAP_PHYS_CRYPTO_GENERATION_FLAG`, and any unknown bits in `omap_phys.flags`.
+  All paths covered by in-memory unit tests (8 new tests added in this run,
+  14 total OMAP unit tests, all passing).
 
 ## Interim Decisions
 - Do not assume `OID` alone is a sufficient cache identity until proven.
@@ -118,13 +144,22 @@ Last Updated: 2026-04-26
   XID.
 - OMAP snapshot lookup and encrypted OMAP values are deferred until their source
   and oracle semantics are probed.
-- The next resolver experiment should consume a `validated_checkpoint_context`
-  verdict from `EX-11`, not the preliminary `EX-10` checkpoint-candidate output.
+- The active-state resolver gate has now consumed a `validated_checkpoint_context`
+  from `EX-11` and produced `EX-12` verdict `validated_omap_lookup_contract` for
+  the proof fixture. The next native parser gate is FS-record body decoding under
+  the same selected-XID discipline.
 - Deleted mappings should be treated as absent at the selected scan state. Do not
   walk backward to an older mapping unless a separate recovery mode and oracle
   define that behavior.
 - OMAP validation requires the raw media and identity oracle to be paired. Stale
   JSON identities cannot validate native lookup on a different generated image.
+- Cross-tool OMAP oracles (e.g. `go-apfs identitydump`) must not be assumed to
+  share the native scanner's `selected_xid`. SR-006 lookup correctness is
+  parameterized by that XID, so cross-tool agreement is required on
+  `root_tree.oid` only; `(paddr, xid)` divergence is recorded as an
+  active-state-selection observation and does not itself fail the contract.
+  This caveat must be carried into any future EX that uses a third-party APFS
+  parser as an oracle.
 
 ## Exit Criteria
 - Documented resolver contract: input, output, validation steps.

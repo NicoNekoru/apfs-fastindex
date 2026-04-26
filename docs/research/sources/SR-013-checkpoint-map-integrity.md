@@ -83,5 +83,7 @@ required after candidate `NXSB` selection and before OMAP/root traversal?
 - `RL-13`: unsupported non-contiguous descriptor layouts, invalid checkpoint-map
   chains, missing `CHECKPOINT_MAP_LAST`, impossible `cpm_count`, invalid
   mapped-object size, or ephemeral-object checksum failure are fallback triggers.
-- Exact next step: add `EX-11` to design a checkpoint-map integrity probe over
-  detached proof images and synthetic malformed descriptor/data rings.
+- Exact next step: `EX-11` executed and validated the checkpoint-map gate for a
+  generated proof fixture; `EX-12` then validated the active OMAP/root contract.
+  Continue with `EX-13` FS-record body decoding under the selected-XID
+  discipline those probes established.

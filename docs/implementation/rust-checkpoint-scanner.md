@@ -30,8 +30,15 @@ What the Rust path currently proves on the proof fixture:
 - the per-checkpoint `checkpoint_map_phys_t` ring is walked, ephemeral OID
   mappings are reported, and `CHECKPOINT_MAP_LAST` is required,
 - the container OMAP is opened, traversed, and queried with the
-  `(oid, max_xid)` lower-bound semantics required by `SR-006`; encrypted,
-  no-header, and crypto-generation values force a hard stop,
+  `(oid, max_xid)` lower-bound semantics required by `SR-006`. At OMAP
+  open time the resolver hard-stops on
+  `OMAP_PHYS_ENCRYPTING`/`OMAP_PHYS_DECRYPTING`/`OMAP_PHYS_KEYROLLING`/
+  `OMAP_PHYS_CRYPTO_GENERATION_FLAG` and any unknown bits in
+  `omap_phys.flags`. At lookup time `OMAP_VAL_DELETED` is a negative
+  result, while `OMAP_VAL_ENCRYPTED`, `OMAP_VAL_NOHEADER`,
+  `OMAP_VAL_CRYPTO_GENERATION`, and any unknown bits in
+  `omap_val_t.flags` force a hard stop. Coverage is exercised by 14 unit
+  tests on synthetic OMAPs and confirmed end-to-end by `EX-12`,
 - every reachable volume superblock is decoded, its v1 allowlist is
   enforced (encryption, sealed volumes, normalization sensitivity, unknown
   incompatible features all flip the volume to `Unsupported(reason)`), and
@@ -97,6 +104,15 @@ Run the EX-10 probe (also asserts on the native dump structure):
 
 ```sh
 python3 docs/research/experiments/EX-10-rust-checkpoint-scanner/artifacts/probe_ex10.py
+```
+
+Run the EX-12 OMAP lookup contract probe (builds a fresh paired raw image
+plus identity oracle, runs the Rust scanner and `go-apfs identitydump`
+against the same `/dev/rdiskN`, and asserts SR-006 lower-bound semantics
+and obj-header replay at every Rust-returned paddr):
+
+```sh
+python3 docs/research/experiments/EX-12-omap-lookup-contract/artifacts/probe_ex12.py
 ```
 
 The Python proof regression is still the authority for parity:

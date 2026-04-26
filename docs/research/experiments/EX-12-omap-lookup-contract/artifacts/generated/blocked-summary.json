@@ -1,0 +1,9 @@
+{
+  "status": "blocked",
+  "reason": "Missing replayable raw media for EX-06/EX-07 identity oracle artifacts",
+  "ex11_validated_checkpoint_context_available": true,
+  "ex11_context_source": "generated proof fixture",
+  "can_compare_to_ex06_ex07_identities": false,
+  "blocked_verdict": "blocked_missing_raw_identity_media",
+  "next_gate": "Regenerate or preserve EX-06/EX-07 raw images before running native OMAP lookup validation"
+}

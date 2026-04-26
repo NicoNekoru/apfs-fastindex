@@ -57,6 +57,7 @@ fail-closed parsing?
 - `RL-02`: resolved objects must carry validation status, not just paddr.
 - `RL-13`: unexpected type/subtype, checksum mismatch, newer-than-scan XID, and
   unsupported zero-header objects are fallback triggers.
-- Exact next step: wire checksum/type validation into the Rust checkpoint
-  scanner now; add OID-vs-paddr and multi-block validation probes before making
-  those checks universal.
+- Exact next step: object-header checksum/type validation is now part of the
+  native checkpoint/OMAP/root proof path. Carry those validation notes into
+  `EX-13` record-body dumps, and keep OID-vs-paddr and multi-block validation
+  probes separate from namespace/logical-size emission.

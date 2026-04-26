@@ -3,7 +3,7 @@
 Status: Open
 Priority: P0
 Owner: TBD
-Last Updated: TBD
+Last Updated: 2026-04-26
 
 ## Core Question
 - Under what exact conditions does "unchanged node => unchanged subtree" hold in APFS in a way safe for indexing?
@@ -58,9 +58,19 @@ Last Updated: TBD
 - [2026-04-26] `EX-12` was designed to prove the native OMAP lookup step that
   produces those node identities. Subtree reuse must remain downstream of native
   `(omap context, oid, selected_xid)` validation.
-- [2026-04-26] `EX-12` was blocked by missing raw media for the `EX-06`/`EX-07`
-  identity artifacts. The subtree-reuse proof remains a proof-backend result
-  until the same states can be replayed through native OMAP lookup.
+- [2026-04-26] Observation: the first `EX-12` route was blocked by missing raw
+  media for the `EX-06`/`EX-07` identity artifacts. That is now historical for
+  `EX-12`, which executed on a self-paired fixture, but the subtree-reuse proof
+  still remains a proof-backend result until the same mutation grid can be
+  replayed through native OMAP lookup and native FS-record body parsing.
+- [2026-04-26] `EX-12` executed end-to-end on a self-paired raw image plus
+  identity oracle and produced verdict `validated_omap_lookup_contract`.
+  The OMAP lookup step that supplies node identities (OMAP domain, OID,
+  object XID, paddr) is therefore validated for the proof fixture under
+  `selected_xid = container.xid`. The subtree-reuse theorem is still
+  pending: it requires native FS-record body decoding and a multi-state
+  rerun of the EX-07 mutation grid through the native parser before any
+  reuse claim is allowed in production.
 
 ## Interim Decisions
 - Reuse should be proven at the node/subtree level before being trusted in production.
@@ -74,8 +84,10 @@ Last Updated: TBD
   rejected.
 - Do not implement persistent subtree skipping yet. The positive `EX-07` result
   must be rerun after native root/FS-record parsing exists.
-- Treat `EX-07` identities as proof-backend evidence until `EX-12` shows native
-  lookup reproduces them.
+- Treat `EX-07` identities as proof-backend evidence until a regenerated
+  subtree/identity experiment preserves raw media and native parsing reproduces
+  the mutation states. `EX-12` validates the OMAP lookup contract on a
+  self-paired fixture, not the `EX-07` reuse theorem.
 - Preserve raw identity media in the next subtree/identity experiment so native
   resolver replay can be compared against the same states.
 

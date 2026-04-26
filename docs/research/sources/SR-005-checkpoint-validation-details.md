@@ -134,7 +134,7 @@ minimum validation that belongs before the Rust scanner reports a pinned
   scanning, and fail-closed unsupported-layout errors now, but must not claim
   native APFS parsing until checkpoint maps, container OMAP, volume OMAP, FS
   root, and required FS records are implemented and oracle-validated.
-- Exact next step: run the Rust scanner from `EX-10` against detached APFS images
-  from the existing proof loop and compare its selected highest candidate XID
-  against saved pinned-state artifacts before integrating it with the Python
-  skeleton.
+- Exact next step: `EX-10`, `EX-11`, and `EX-12` have carried the native path
+  through checkpoint candidates, checkpoint-map validation, and OMAP/root lookup
+  on a self-paired proof fixture. Continue with `EX-13` FS-record body decoding;
+  keep non-contiguous checkpoint descriptors as a future targeted probe.

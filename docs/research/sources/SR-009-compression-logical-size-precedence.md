@@ -79,5 +79,7 @@ This review answers one question: how should compression affect v1 size parsing?
 - `EX-09`: must capture public `st_size`, raw dstream size, inode
   uncompressed-size fields, decmpfs xattr/resource-fork headers, and allocated
   observations separately.
-- Exact next step: update `EX-09` so compressed logical-size precedence can be
-  tested before native FS-record output claims compressed-file support.
+- Exact next step: keep `EX-09` as the compression/logical-size precedence
+  probe, but execute it only after `EX-13` or shared field-dump machinery can
+  emit inode dstream, inode uncompressed-size, xattr, and decmpfs metadata from
+  native record bodies.

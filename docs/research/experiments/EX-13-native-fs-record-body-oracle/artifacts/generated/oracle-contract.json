@@ -1,0 +1,55 @@
+{
+  "id": "EX-13",
+  "title": "Native FS-record body oracle",
+  "status": "designed_not_executed",
+  "primary_question": "Can native record-body field dumps reproduce mounted/POSIX namespace and ordinary logical-size facts for the same generated APFS proof fixture under a declared selected_xid?",
+  "valid_verdicts": [
+    "validated_native_record_body_contract",
+    "body_field_mismatch",
+    "selected_xid_mismatch",
+    "unsupported_record_body",
+    "malformed_record_body",
+    "oracle_inconclusive",
+    "not_executed"
+  ],
+  "required_observers": [
+    "mounted_posix_namespace_logical_size_oracle",
+    "native_raw_record_body_dump",
+    "same_run_cross_tool_record_observer"
+  ],
+  "selected_xid_rule": "Native and cross-tool structural comparisons must declare selected_xid. If selected_xid differs or cannot be inferred, paddr/object_xid differences are caveats or inconclusive results, not native field-decoding failures.",
+  "in_scope_fields": [
+    "DIR_REC key parent object id",
+    "DIR_REC key name",
+    "DIR_REC file_id",
+    "DIR_REC flags and DREC_TYPE_MASK",
+    "DREC_EXT_TYPE_SIBLING_ID",
+    "INODE parent_id",
+    "INODE private_id",
+    "INODE mode",
+    "INODE nchildren_or_nlink",
+    "INODE internal_flags",
+    "INODE bsd_flags",
+    "INODE uncompressed_size with INODE_HAS_UNCOMPRESSED_SIZE",
+    "INO_EXT_TYPE_DSTREAM j_dstream_t",
+    "INO_EXT_TYPE_NAME",
+    "INO_EXT_TYPE_SPARSE_BYTES",
+    "DSTREAM_ID refcnt",
+    "XATTR key name",
+    "XATTR flags",
+    "XATTR xdata_len",
+    "XATTR embedded payload or stream object id",
+    "SIBLING_LINK sibling_id parent_id name",
+    "SIBLING_MAP file_id"
+  ],
+  "out_of_scope_metrics": [
+    "allocated_size_formula",
+    "shared_size_formula",
+    "exclusive_size_formula",
+    "snapshot_retained_size_formula",
+    "compression_precedence_finalization",
+    "product_namespace_aggregation",
+    "persistent_cache_reuse"
+  ],
+  "why_oracle_is_valid": "The fixture is generated and observed in one run. POSIX owns visible namespace and logical size for the quiescent mounted state; native raw output owns selected-XID field extraction after detach; the cross-tool observer supplies record-shape evidence only when its selected state is declared."
+}

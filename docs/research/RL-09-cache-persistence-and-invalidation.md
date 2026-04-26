@@ -65,9 +65,21 @@ Last Updated: 2026-04-26
 - [2026-04-26] `EX-12` was designed as a prerequisite for native cache identity:
   prove native OMAP lookup returns the same mapped object identities as the
   pinned proof artifacts before any persistent cache consumes those identities.
-- [2026-04-26] `EX-12` was blocked because the raw media for the pinned identity
-  artifacts was not preserved. Persistent cache identity remains unproven for
-  native lookup.
+- [2026-04-26] Observation: the first `EX-12` route was blocked because the raw
+  media for the pinned identity artifacts was not preserved. That blocker is
+  historical for `EX-12`, which executed with a self-paired fixture, but it
+  remains an invalidation/oracle rule for persistent-cache work: cache identity
+  evidence must be replayable against matching raw media.
+- [2026-04-26] `EX-12` executed against a self-paired raw image plus
+  identity oracle and produced verdict `validated_omap_lookup_contract`
+  for the proof fixture under `selected_xid = container.xid`. Native
+  OMAP lookup output (OMAP domain, OID, object XID, paddr, plus a
+  validated obj-header) is therefore now an acceptable starting point
+  for cache identity design. Persistent cache validation across mutation
+  churn still has to follow native FS-record decoding and a rerun of
+  EX-07 through the native parser; identitydump's active-state choice
+  may differ from the scanner's, so any persistent cache invalidation
+  experiment must also pin or declare `selected_xid`.
 
 ## Interim Decisions
 - Prefer conservative invalidation over aggressive reuse.
@@ -79,8 +91,10 @@ Last Updated: 2026-04-26
 - A future persistent cache entry for parsed node summaries must include parser
   version and summary schema version in addition to the exact raw node identity.
   If any field is absent, changed, or unvalidated, reuse is forbidden.
-- Cache writes remain out of scope until checkpoint-map validation and native
-  OMAP lookup both have executed proof artifacts.
+- Cache writes remain out of scope even though checkpoint-map validation and
+  native OMAP lookup now both have executed proof artifacts. Persistent cache
+  design must wait for native FS-record body decoding and a native rerun of the
+  subtree-reuse mutation grid.
 - Cache validation artifacts must pair identity JSON with replayable raw media;
   otherwise they can document behavior but cannot validate native reuse.
 

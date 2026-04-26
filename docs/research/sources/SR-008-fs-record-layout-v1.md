@@ -61,6 +61,7 @@ before the repo claims native namespace output?
 - `RL-03`: the record matrix is source-backed enough to drive native parser
   modules after checkpoint and OMAP are native.
 - `RL-06`: hard links remain core, not a UI polish pass.
-- Exact next step: after native OMAP lookup, implement a read-only FS-tree
-  record dumper that records raw key type, object ID, decoded record family, and
-  unsupported record counts before emitting product namespace entries.
+- Exact next step: `EX-10` has completed the read-only FS-tree record-family
+  dumper. Continue with `SR-014`/`EX-13`: decode record bodies as a field dump
+  and compare those fields against same-run mounted/POSIX namespace and
+  logical-size oracles before emitting product namespace entries.

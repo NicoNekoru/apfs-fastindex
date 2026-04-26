@@ -173,12 +173,15 @@ namespace output.
 - The generated detached fixture proves the next native gate shape: candidate
   `NXSB` selection can be strengthened into a validated checkpoint context by
   walking checkpoint maps and validating mapped ephemeral objects.
-- Native OMAP/root parsing remains blocked on an OMAP lookup proof, but no longer
-  on the checkpoint-map gate for the generated proof fixture shape.
+- Observation: Native OMAP/root parsing is no longer blocked on the
+  checkpoint-map gate or on the active-state OMAP lookup contract for the
+  generated proof fixture shape; `EX-12` superseded the earlier OMAP blocker
+  with verdict `validated_omap_lookup_contract`.
 - `EX-10` output remains a candidate scan state, not a complete coherent scan
   state.
-- Existing `EX-06`/`EX-07` identity artifacts cannot be directly consumed by
-  `EX-12` because their raw images were not preserved.
+- Observation: Existing `EX-06`/`EX-07` identity artifacts still cannot be
+  replayed directly because their raw images were not preserved, but that is now
+  historical context rather than the current `EX-12` status.
 
 ## What This Rules Out
 
@@ -199,6 +202,6 @@ namespace output.
 
 ## Next Exact Step
 
-- Preserve or regenerate raw media for `EX-06`/`EX-07`, then run `EX-12` OMAP
-  lookup validation against a validated checkpoint context and the corresponding
-  identity oracle.
+- Begin `EX-13` native FS-record body oracle design/execution under the
+  `EX-12` selected-XID discipline. Any future replay of `EX-06`/`EX-07`
+  subtree/identity states must preserve raw media in the same run.

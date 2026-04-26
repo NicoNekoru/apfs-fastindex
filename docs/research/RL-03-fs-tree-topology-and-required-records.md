@@ -94,6 +94,17 @@ Last Updated: 2026-04-26
   into the code: the FS-tree root is reached via the volume OMAP and
   therefore carries a virtual `obj_phys_t`, not physical, so the validator
   must not require `o_oid == paddr` for FS-tree blocks.
+- [2026-04-26] Spec/Observation: `SR-014` narrows the next native parser surface
+  from record families to required record-body fields. `DIR_REC` must provide
+  parent-directory key identity, name, child `file_id`, entry type, and optional
+  sibling ID; `INODE` must provide identity, parent/private IDs, mode, link or
+  child count, flags, xfields, and dstream metadata; `XATTR` must provide names
+  and embedded/stream payload metadata; sibling link/map records must preserve
+  hard-link path identity versus target inode identity.
+- [2026-04-26] Hypothesis: `EX-13` is the next FS-tree gate. It should dump those
+  body fields under the `EX-12` validated OMAP/root context and compare them to
+  same-run mounted/POSIX and cross-tool observers before product namespace rows
+  are emitted.
 
 ## Interim Decisions
 - Separate "required for namespace" from "required for accounting."
@@ -110,6 +121,9 @@ Last Updated: 2026-04-26
 - Native FS-record parsing should begin as a record dumper with raw key type,
   object ID, decoded family, and unsupported-record counts before it emits
   product namespace entries.
+- Native FS-record parsing can now advance to a body-field dumper. Product
+  namespace entry emission remains blocked until `EX-13` validates the body
+  fields needed for namespace and ordinary logical-size rows.
 
 ## Exit Criteria
 - A required-record matrix exists for each product mode.

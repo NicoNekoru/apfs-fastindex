@@ -3,7 +3,7 @@
 Status: Open
 Priority: P0
 Owner: TBD
-Last Updated: TBD
+Last Updated: 2026-04-26
 
 ## Core Question
 - How do we reconstruct an exact directory tree and stable parent/child relationships from APFS metadata?
@@ -64,6 +64,15 @@ Last Updated: TBD
   case-insensitive and case-sensitive images with cross-directory hard links,
   symlinks, Unicode names, case-collision behavior, and a FIFO; both images
   matched the mounted oracle with zero path or field mismatches.
+- [2026-04-26] Spec/Observation: `SR-014` defines the native field inputs for
+  namespace rows. Directory placement comes from `DIR_REC` key parent identity,
+  key name, and `j_drec_val.file_id`; entry type comes from `DIR_REC.flags` and
+  inode `mode`; symlink target comes from the `com.apple.fs.symlink` xattr; hard
+  links require `DREC_EXT_TYPE_SIBLING_ID`, `SIBLING_LINK`, and `SIBLING_MAP` so
+  path identity and file identity are not collapsed.
+- [2026-04-26] Hypothesis: `EX-13` should compare native field dumps to a
+  same-run mounted/POSIX namespace oracle before any Rust output is promoted to
+  product namespace rows.
 
 ## Interim Decisions
 - Keep namespace reconstruction separate from storage traversal logic.
@@ -74,6 +83,9 @@ Last Updated: TBD
 - Symlink target extraction belongs in the active v1 namespace surface for the
   tested allowlist, but future environments that break the known xattr path
   should fail closed until a targeted probe explains them.
+- Native namespace reconstruction must remain a two-step proof: first validate
+  record-body fields in `EX-13`, then assemble product rows and aggregates. A
+  family-count dump alone is not namespace evidence.
 
 ## Exit Criteria
 - Exact reconstruction algorithm for paths and parent-child graph.

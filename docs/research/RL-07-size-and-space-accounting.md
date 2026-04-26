@@ -79,6 +79,14 @@ Last Updated: 2026-04-26
 - [2026-04-26] `SR-009` and `EX-09` were tightened around compressed logical-size
   precedence. Ordinary dstream size, inode `uncompressed_size`, and decmpfs
   header uncompressed size must be compared separately to public `st_size`.
+- [2026-04-26] Spec/Observation: `SR-014` identifies `INO_EXT_TYPE_DSTREAM`
+  `j_dstream_t.size` as the primary ordinary logical-size field for native body
+  decoding. `DSTREAM_ID.refcnt`, `j_dstream_t.alloced_size`, file extents, and
+  physical extent records are validation or future-accounting inputs, not v1
+  logical-size formulas.
+- [2026-04-26] Hypothesis: `EX-13` should validate ordinary logical-size rows
+  against public `st_size` for uncompressed fixture files, while `EX-09` remains
+  responsible for compression precedence and allocated/shared/exclusive metrics.
 
 ## Interim Decisions
 - v1 may need to distinguish "logical size" mode from "physical accounting" mode.
@@ -99,6 +107,9 @@ Last Updated: 2026-04-26
 - If ordinary dstream size is zero or inconsistent for a compressed file, v1
   must use an oracle-backed uncompressed-size source or reject the file/source
   class for raw output.
+- The native record-body oracle should pass ordinary logical-size cases without
+  settling compression or physical accounting. Any compressed-size mismatch
+  should refine `EX-09`, not broaden `EX-13` into an accounting probe.
 
 ## Exit Criteria
 - Defined product-facing size semantics.

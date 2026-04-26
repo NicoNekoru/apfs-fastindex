@@ -50,6 +50,10 @@ parser encode without inventing semantics?
   XID-aware OMAP lookup.
 - `EX-06` showed the FS root tree OID can remain stable while paddr, object XID,
   checksum, and block hash change after each mutation.
+- `EX-12` executed a self-paired proof fixture and validated the native
+  `(omap context, oid, selected_xid)` lower-bound lookup contract against
+  on-disk object-header replay, Python replay of Rust-published OMAP samples,
+  and cross-tool `root_tree.oid` agreement.
 
 ### Hypothesis
 
@@ -62,7 +66,7 @@ parser encode without inventing semantics?
 
 ## Open Limits
 
-- The exact B-tree cursor rule should be proved in a probe: seek to
+- The exact B-tree cursor rule has proof-fixture coverage from `EX-12`: seek to
   `(oid, selected_xid)` and accept only the greatest key with matching `oid` and
   `xid <= selected_xid`.
 - OMAP snapshot trees and pending revert ranges remain outside v1.
@@ -78,6 +82,6 @@ parser encode without inventing semantics?
 - `RL-05`: subtree reuse can only consume resolved identities after OMAP lookup,
   never bare object IDs.
 - `RL-13`: unsupported OMAP flags and value flags are fail-closed parser gates.
-- Exact next step: execute `EX-12` after `EX-11` can provide a validated
-  checkpoint context, using pinned `EX-06`/`EX-07` artifacts to test
-  `(oid, selected_xid)` lookup, deleted mappings, and resolved-object identity.
+- Exact next step: carry the `EX-12` selected-XID discipline into `EX-13`
+  FS-record body decoding; separately design a churn probe for repeated
+  delete/reuse histories and direct deleted-mapping evidence.

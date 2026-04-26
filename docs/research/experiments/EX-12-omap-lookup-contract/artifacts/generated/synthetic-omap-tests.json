@@ -1,0 +1,21 @@
+{
+  "summary_line": "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 28 filtered out; finished in 0.00s",
+  "test_count": 14,
+  "test_names": [
+    "omap::tests::lookup_rejects_crypto_generation_value",
+    "omap::tests::lookup_rejects_encrypted_value",
+    "omap::tests::lookup_rejects_noheader_value",
+    "omap::tests::lookup_rejects_unknown_value_flag_bits",
+    "omap::tests::lookup_returns_largest_xid_at_or_below_max",
+    "omap::tests::lookup_returns_none_when_max_xid_below_smallest",
+    "omap::tests::lookup_returns_none_when_oid_missing",
+    "omap::tests::lookup_skips_deleted_value",
+    "omap::tests::open_rejects_phys_crypto_generation_flag",
+    "omap::tests::open_rejects_phys_decrypting_flag",
+    "omap::tests::open_rejects_phys_encrypting_flag",
+    "omap::tests::open_rejects_phys_keyrolling_flag",
+    "omap::tests::open_rejects_unknown_phys_flag_bits",
+    "omap::tests::summarize_records_flagged_values"
+  ],
+  "verdict": "all_passed"
+}
