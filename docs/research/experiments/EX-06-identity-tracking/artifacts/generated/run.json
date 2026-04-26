@@ -1,0 +1,1638 @@
+{
+  "image_name": "ex06-identity.dmg",
+  "states": [
+    {
+      "label": "00-initial-empty",
+      "mounted_oracle": [
+        {
+          "inode": 2,
+          "nlink": 4,
+          "path": ".",
+          "type": "dir"
+        },
+        {
+          "inode": 16,
+          "nlink": 2,
+          "path": "work",
+          "type": "dir"
+        }
+      ],
+      "mutation": {
+        "operation": "initial empty state"
+      },
+      "nomount_entities": [
+        {
+          "content-hint": "GUID_partition_scheme",
+          "dev-entry": "/dev/disk4",
+          "potentially-mountable": false,
+          "unmapped-content-hint": "GUID_partition_scheme"
+        },
+        {
+          "content-hint": "Apple_APFS",
+          "dev-entry": "/dev/disk4s1",
+          "potentially-mountable": false,
+          "unmapped-content-hint": "7C3457EF-0000-11AA-AA11-00306543ECAC"
+        },
+        {
+          "content-hint": "41504653-0000-11AA-AA11-00306543ECAC",
+          "dev-entry": "/dev/disk5s1",
+          "potentially-mountable": true,
+          "unmapped-content-hint": "41504653-0000-11AA-AA11-00306543ECAC",
+          "volume-kind": "apfs"
+        },
+        {
+          "content-hint": "EF57347C-0000-11AA-AA11-00306543ECAC",
+          "dev-entry": "/dev/disk5",
+          "potentially-mountable": false,
+          "unmapped-content-hint": "EF57347C-0000-11AA-AA11-00306543ECAC"
+        }
+      ],
+      "pinned_state": {
+        "block_size": 4096,
+        "candidate_count": 4,
+        "candidates": [
+          {
+            "descriptor_index": 1,
+            "obj_type": 2147483649,
+            "xid": 5
+          },
+          {
+            "descriptor_index": 3,
+            "obj_type": 2147483649,
+            "xid": 6
+          },
+          {
+            "descriptor_index": 5,
+            "obj_type": 2147483649,
+            "xid": 3
+          },
+          {
+            "descriptor_index": 7,
+            "obj_type": 2147483649,
+            "xid": 4
+          }
+        ],
+        "descriptor_base": 1,
+        "descriptor_base_non_contiguous": false,
+        "descriptor_blocks": 8,
+        "highest_xid": 6
+      },
+      "raw_identity": {
+        "device": "/dev/rdisk5",
+        "entries": [
+          {
+            "file_id": 16,
+            "path": "work",
+            "type": "dir"
+          }
+        ],
+        "nodes": [
+          {
+            "checksum": 3730457189931076283,
+            "content_hash": "82b49391361d47a5026def01f09315fe964766e67fdb0de42d324928610881b0",
+            "domain": "volume_omap",
+            "flags": "OBJ_VIRTUAL",
+            "is_leaf": true,
+            "is_root": true,
+            "key_count": 23,
+            "object_xid": 4,
+            "oid": 1028,
+            "paddr": 370,
+            "role": "fs_root_tree",
+            "subtype": "OBJECT_TYPE_FSTREE",
+            "type": "OBJECT_TYPE_BTREE"
+          }
+        ],
+        "record_groups": [
+          {
+            "file_id": 2,
+            "link_count": 2,
+            "names": [
+              ".fseventsd",
+              "purgeable-drecs-fixed",
+              "work"
+            ],
+            "record_types": [
+              "APFS_TYPE_DIR_REC",
+              "APFS_TYPE_DIR_REC",
+              "APFS_TYPE_INODE",
+              "APFS_TYPE_XATTR"
+            ]
+          },
+          {
+            "file_id": 16,
+            "names": [
+              "com.apple.provenance"
+            ],
+            "record_types": [
+              "APFS_TYPE_INODE",
+              "APFS_TYPE_XATTR"
+            ]
+          }
+        ],
+        "root_tree": {
+          "checksum": 3730457189931076283,
+          "content_hash": "82b49391361d47a5026def01f09315fe964766e67fdb0de42d324928610881b0",
+          "domain": "volume_omap",
+          "flags": "OBJ_VIRTUAL",
+          "is_leaf": true,
+          "is_root": true,
+          "key_count": 23,
+          "object_xid": 4,
+          "oid": 1028,
+          "paddr": 370,
+          "role": "fs_root_tree",
+          "subtype": "OBJECT_TYPE_FSTREE",
+          "type": "OBJECT_TYPE_BTREE"
+        },
+        "volume": "EX06Identity"
+      }
+    },
+    {
+      "label": "01-create-alpha",
+      "mounted_oracle": [
+        {
+          "inode": 2,
+          "nlink": 4,
+          "path": ".",
+          "type": "dir"
+        },
+        {
+          "inode": 16,
+          "nlink": 3,
+          "path": "work",
+          "type": "dir"
+        },
+        {
+          "allocated_bytes": 4096,
+          "inode": 21,
+          "logical_size": 6,
+          "nlink": 1,
+          "path": "work/alpha.txt",
+          "type": "file"
+        }
+      ],
+      "mutation": {
+        "operation": "create work/alpha.txt"
+      },
+      "nomount_entities": [
+        {
+          "content-hint": "GUID_partition_scheme",
+          "dev-entry": "/dev/disk4",
+          "potentially-mountable": false,
+          "unmapped-content-hint": "GUID_partition_scheme"
+        },
+        {
+          "content-hint": "Apple_APFS",
+          "dev-entry": "/dev/disk4s1",
+          "potentially-mountable": false,
+          "unmapped-content-hint": "7C3457EF-0000-11AA-AA11-00306543ECAC"
+        },
+        {
+          "content-hint": "41504653-0000-11AA-AA11-00306543ECAC",
+          "dev-entry": "/dev/disk5s1",
+          "potentially-mountable": true,
+          "unmapped-content-hint": "41504653-0000-11AA-AA11-00306543ECAC",
+          "volume-kind": "apfs"
+        },
+        {
+          "content-hint": "EF57347C-0000-11AA-AA11-00306543ECAC",
+          "dev-entry": "/dev/disk5",
+          "potentially-mountable": false,
+          "unmapped-content-hint": "EF57347C-0000-11AA-AA11-00306543ECAC"
+        }
+      ],
+      "pinned_state": {
+        "block_size": 4096,
+        "candidate_count": 4,
+        "candidates": [
+          {
+            "descriptor_index": 1,
+            "obj_type": 2147483649,
+            "xid": 9
+          },
+          {
+            "descriptor_index": 3,
+            "obj_type": 2147483649,
+            "xid": 10
+          },
+          {
+            "descriptor_index": 5,
+            "obj_type": 2147483649,
+            "xid": 7
+          },
+          {
+            "descriptor_index": 7,
+            "obj_type": 2147483649,
+            "xid": 8
+          }
+        ],
+        "descriptor_base": 1,
+        "descriptor_base_non_contiguous": false,
+        "descriptor_blocks": 8,
+        "highest_xid": 10
+      },
+      "raw_identity": {
+        "device": "/dev/rdisk5",
+        "entries": [
+          {
+            "file_id": 16,
+            "path": "work",
+            "type": "dir"
+          },
+          {
+            "file_id": 21,
+            "logical_size": 6,
+            "path": "work/alpha.txt",
+            "type": "file"
+          }
+        ],
+        "nodes": [
+          {
+            "checksum": 15950746109938155730,
+            "content_hash": "44e13cbd45853cb2890d15ddf5d2c34ce571698652528f89974af98b46a47027",
+            "domain": "volume_omap",
+            "flags": "OBJ_VIRTUAL",
+            "is_leaf": true,
+            "is_root": true,
+            "key_count": 36,
+            "object_xid": 8,
+            "oid": 1028,
+            "paddr": 396,
+            "role": "fs_root_tree",
+            "subtype": "OBJECT_TYPE_FSTREE",
+            "type": "OBJECT_TYPE_BTREE"
+          }
+        ],
+        "record_groups": [
+          {
+            "file_id": 2,
+            "link_count": 2,
+            "names": [
+              ".fseventsd",
+              "purgeable-drecs-fixed",
+              "work"
+            ],
+            "record_types": [
+              "APFS_TYPE_DIR_REC",
+              "APFS_TYPE_DIR_REC",
+              "APFS_TYPE_INODE",
+              "APFS_TYPE_XATTR"
+            ]
+          },
+          {
+            "file_id": 16,
+            "link_count": 1,
+            "names": [
+              "alpha.txt",
+              "com.apple.provenance"
+            ],
+            "record_types": [
+              "APFS_TYPE_DIR_REC",
+              "APFS_TYPE_INODE",
+              "APFS_TYPE_XATTR"
+            ]
+          },
+          {
+            "file_id": 21,
+            "link_count": 1,
+            "logical_size": 6,
+            "names": [
+              "com.apple.provenance"
+            ],
+            "record_types": [
+              "APFS_TYPE_DSTREAM_ID",
+              "APFS_TYPE_FILE_EXTENT",
+              "APFS_TYPE_INODE",
+              "APFS_TYPE_XATTR"
+            ]
+          }
+        ],
+        "root_tree": {
+          "checksum": 15950746109938155730,
+          "content_hash": "44e13cbd45853cb2890d15ddf5d2c34ce571698652528f89974af98b46a47027",
+          "domain": "volume_omap",
+          "flags": "OBJ_VIRTUAL",
+          "is_leaf": true,
+          "is_root": true,
+          "key_count": 36,
+          "object_xid": 8,
+          "oid": 1028,
+          "paddr": 396,
+          "role": "fs_root_tree",
+          "subtype": "OBJECT_TYPE_FSTREE",
+          "type": "OBJECT_TYPE_BTREE"
+        },
+        "volume": "EX06Identity"
+      }
+    },
+    {
+      "label": "02-append-alpha",
+      "mounted_oracle": [
+        {
+          "inode": 2,
+          "nlink": 4,
+          "path": ".",
+          "type": "dir"
+        },
+        {
+          "inode": 16,
+          "nlink": 3,
+          "path": "work",
+          "type": "dir"
+        },
+        {
+          "allocated_bytes": 4096,
+          "inode": 21,
+          "logical_size": 11,
+          "nlink": 1,
+          "path": "work/alpha.txt",
+          "type": "file"
+        }
+      ],
+      "mutation": {
+        "operation": "append to work/alpha.txt"
+      },
+      "nomount_entities": [
+        {
+          "content-hint": "GUID_partition_scheme",
+          "dev-entry": "/dev/disk4",
+          "potentially-mountable": false,
+          "unmapped-content-hint": "GUID_partition_scheme"
+        },
+        {
+          "content-hint": "41504653-0000-11AA-AA11-00306543ECAC",
+          "dev-entry": "/dev/disk5s1",
+          "potentially-mountable": true,
+          "unmapped-content-hint": "41504653-0000-11AA-AA11-00306543ECAC",
+          "volume-kind": "apfs"
+        },
+        {
+          "content-hint": "EF57347C-0000-11AA-AA11-00306543ECAC",
+          "dev-entry": "/dev/disk5",
+          "potentially-mountable": false,
+          "unmapped-content-hint": "EF57347C-0000-11AA-AA11-00306543ECAC"
+        },
+        {
+          "content-hint": "Apple_APFS",
+          "dev-entry": "/dev/disk4s1",
+          "potentially-mountable": false,
+          "unmapped-content-hint": "7C3457EF-0000-11AA-AA11-00306543ECAC"
+        }
+      ],
+      "pinned_state": {
+        "block_size": 4096,
+        "candidate_count": 4,
+        "candidates": [
+          {
+            "descriptor_index": 1,
+            "obj_type": 2147483649,
+            "xid": 13
+          },
+          {
+            "descriptor_index": 3,
+            "obj_type": 2147483649,
+            "xid": 14
+          },
+          {
+            "descriptor_index": 5,
+            "obj_type": 2147483649,
+            "xid": 11
+          },
+          {
+            "descriptor_index": 7,
+            "obj_type": 2147483649,
+            "xid": 12
+          }
+        ],
+        "descriptor_base": 1,
+        "descriptor_base_non_contiguous": false,
+        "descriptor_blocks": 8,
+        "highest_xid": 14
+      },
+      "raw_identity": {
+        "device": "/dev/rdisk5",
+        "entries": [
+          {
+            "file_id": 16,
+            "path": "work",
+            "type": "dir"
+          },
+          {
+            "file_id": 21,
+            "logical_size": 11,
+            "path": "work/alpha.txt",
+            "type": "file"
+          }
+        ],
+        "nodes": [
+          {
+            "checksum": 4326692610658153792,
+            "content_hash": "c82c0378a5dcb01f3c465cdb76a9352378b185c5b9fe6545d4a48b9ce30820ab",
+            "domain": "volume_omap",
+            "flags": "OBJ_VIRTUAL",
+            "is_leaf": true,
+            "is_root": true,
+            "key_count": 44,
+            "object_xid": 12,
+            "oid": 1028,
+            "paddr": 420,
+            "role": "fs_root_tree",
+            "subtype": "OBJECT_TYPE_FSTREE",
+            "type": "OBJECT_TYPE_BTREE"
+          }
+        ],
+        "record_groups": [
+          {
+            "file_id": 2,
+            "link_count": 2,
+            "names": [
+              ".fseventsd",
+              "purgeable-drecs-fixed",
+              "work"
+            ],
+            "record_types": [
+              "APFS_TYPE_DIR_REC",
+              "APFS_TYPE_DIR_REC",
+              "APFS_TYPE_INODE",
+              "APFS_TYPE_XATTR"
+            ]
+          },
+          {
+            "file_id": 16,
+            "link_count": 1,
+            "names": [
+              "alpha.txt",
+              "com.apple.provenance"
+            ],
+            "record_types": [
+              "APFS_TYPE_DIR_REC",
+              "APFS_TYPE_INODE",
+              "APFS_TYPE_XATTR"
+            ]
+          },
+          {
+            "file_id": 21,
+            "link_count": 1,
+            "logical_size": 11,
+            "names": [
+              "com.apple.provenance"
+            ],
+            "record_types": [
+              "APFS_TYPE_DSTREAM_ID",
+              "APFS_TYPE_FILE_EXTENT",
+              "APFS_TYPE_INODE",
+              "APFS_TYPE_XATTR"
+            ]
+          }
+        ],
+        "root_tree": {
+          "checksum": 4326692610658153792,
+          "content_hash": "c82c0378a5dcb01f3c465cdb76a9352378b185c5b9fe6545d4a48b9ce30820ab",
+          "domain": "volume_omap",
+          "flags": "OBJ_VIRTUAL",
+          "is_leaf": true,
+          "is_root": true,
+          "key_count": 44,
+          "object_xid": 12,
+          "oid": 1028,
+          "paddr": 420,
+          "role": "fs_root_tree",
+          "subtype": "OBJECT_TYPE_FSTREE",
+          "type": "OBJECT_TYPE_BTREE"
+        },
+        "volume": "EX06Identity"
+      }
+    },
+    {
+      "label": "03-rename-alpha",
+      "mounted_oracle": [
+        {
+          "inode": 2,
+          "nlink": 4,
+          "path": ".",
+          "type": "dir"
+        },
+        {
+          "inode": 16,
+          "nlink": 3,
+          "path": "work",
+          "type": "dir"
+        },
+        {
+          "allocated_bytes": 4096,
+          "inode": 21,
+          "logical_size": 11,
+          "nlink": 1,
+          "path": "work/renamed.txt",
+          "type": "file"
+        }
+      ],
+      "mutation": {
+        "operation": "rename work/alpha.txt -> work/renamed.txt"
+      },
+      "nomount_entities": [
+        {
+          "content-hint": "GUID_partition_scheme",
+          "dev-entry": "/dev/disk4",
+          "potentially-mountable": false,
+          "unmapped-content-hint": "GUID_partition_scheme"
+        },
+        {
+          "content-hint": "Apple_APFS",
+          "dev-entry": "/dev/disk4s1",
+          "potentially-mountable": false,
+          "unmapped-content-hint": "7C3457EF-0000-11AA-AA11-00306543ECAC"
+        },
+        {
+          "content-hint": "41504653-0000-11AA-AA11-00306543ECAC",
+          "dev-entry": "/dev/disk5s1",
+          "potentially-mountable": true,
+          "unmapped-content-hint": "41504653-0000-11AA-AA11-00306543ECAC",
+          "volume-kind": "apfs"
+        },
+        {
+          "content-hint": "EF57347C-0000-11AA-AA11-00306543ECAC",
+          "dev-entry": "/dev/disk5",
+          "potentially-mountable": false,
+          "unmapped-content-hint": "EF57347C-0000-11AA-AA11-00306543ECAC"
+        }
+      ],
+      "pinned_state": {
+        "block_size": 4096,
+        "candidate_count": 4,
+        "candidates": [
+          {
+            "descriptor_index": 1,
+            "obj_type": 2147483649,
+            "xid": 17
+          },
+          {
+            "descriptor_index": 3,
+            "obj_type": 2147483649,
+            "xid": 18
+          },
+          {
+            "descriptor_index": 5,
+            "obj_type": 2147483649,
+            "xid": 15
+          },
+          {
+            "descriptor_index": 7,
+            "obj_type": 2147483649,
+            "xid": 16
+          }
+        ],
+        "descriptor_base": 1,
+        "descriptor_base_non_contiguous": false,
+        "descriptor_blocks": 8,
+        "highest_xid": 18
+      },
+      "raw_identity": {
+        "device": "/dev/rdisk5",
+        "entries": [
+          {
+            "file_id": 16,
+            "path": "work",
+            "type": "dir"
+          },
+          {
+            "file_id": 21,
+            "logical_size": 11,
+            "path": "work/renamed.txt",
+            "type": "file"
+          }
+        ],
+        "nodes": [
+          {
+            "checksum": 11480872826653689027,
+            "content_hash": "7fa7b7db86f4444eedf0d064fe749a45793cf4ec3c526f000d0ee3943884c413",
+            "domain": "volume_omap",
+            "flags": "OBJ_VIRTUAL",
+            "is_root": true,
+            "key_count": 2,
+            "level": 1,
+            "object_xid": 16,
+            "oid": 1028,
+            "paddr": 444,
+            "role": "fs_root_tree",
+            "subtype": "OBJECT_TYPE_FSTREE",
+            "type": "OBJECT_TYPE_BTREE"
+          },
+          {
+            "checksum": 7554076375835556504,
+            "content_hash": "202d46e7c264eb56c8e17026f5972f4807f81a8dbde186f027c088636f2cdf10",
+            "domain": "volume_omap",
+            "flags": "OBJ_VIRTUAL",
+            "is_leaf": true,
+            "key_count": 51,
+            "lookup_xid": 16,
+            "object_xid": 16,
+            "oid": 1031,
+            "paddr": 448,
+            "role": "fs_tree_child_depth_1_index_0",
+            "subtype": "OBJECT_TYPE_FSTREE",
+            "type": "OBJECT_TYPE_BTREE_NODE"
+          },
+          {
+            "checksum": 18019191385728803520,
+            "content_hash": "6d10ec8673518216997bfe9acfd442d44cb886637d941a9bdf2282e3d04f4e33",
+            "domain": "volume_omap",
+            "flags": "OBJ_VIRTUAL",
+            "is_leaf": true,
+            "key_count": 1,
+            "lookup_xid": 16,
+            "object_xid": 16,
+            "oid": 1030,
+            "paddr": 447,
+            "role": "fs_tree_child_depth_1_index_1",
+            "subtype": "OBJECT_TYPE_FSTREE",
+            "type": "OBJECT_TYPE_BTREE_NODE"
+          }
+        ],
+        "record_groups": [
+          {
+            "file_id": 2,
+            "link_count": 2,
+            "names": [
+              ".fseventsd",
+              "purgeable-drecs-fixed",
+              "work"
+            ],
+            "record_types": [
+              "APFS_TYPE_DIR_REC",
+              "APFS_TYPE_DIR_REC",
+              "APFS_TYPE_INODE",
+              "APFS_TYPE_XATTR"
+            ]
+          },
+          {
+            "file_id": 16,
+            "link_count": 1,
+            "names": [
+              "com.apple.provenance",
+              "renamed.txt"
+            ],
+            "record_types": [
+              "APFS_TYPE_DIR_REC",
+              "APFS_TYPE_INODE",
+              "APFS_TYPE_XATTR"
+            ]
+          },
+          {
+            "file_id": 21,
+            "link_count": 1,
+            "logical_size": 11,
+            "names": [
+              "com.apple.provenance"
+            ],
+            "record_types": [
+              "APFS_TYPE_DSTREAM_ID",
+              "APFS_TYPE_FILE_EXTENT",
+              "APFS_TYPE_INODE",
+              "APFS_TYPE_XATTR"
+            ]
+          }
+        ],
+        "root_tree": {
+          "checksum": 11480872826653689027,
+          "content_hash": "7fa7b7db86f4444eedf0d064fe749a45793cf4ec3c526f000d0ee3943884c413",
+          "domain": "volume_omap",
+          "flags": "OBJ_VIRTUAL",
+          "is_root": true,
+          "key_count": 2,
+          "level": 1,
+          "object_xid": 16,
+          "oid": 1028,
+          "paddr": 444,
+          "role": "fs_root_tree",
+          "subtype": "OBJECT_TYPE_FSTREE",
+          "type": "OBJECT_TYPE_BTREE"
+        },
+        "volume": "EX06Identity"
+      }
+    },
+    {
+      "label": "04-create-beta",
+      "mounted_oracle": [
+        {
+          "inode": 2,
+          "nlink": 4,
+          "path": ".",
+          "type": "dir"
+        },
+        {
+          "inode": 16,
+          "nlink": 4,
+          "path": "work",
+          "type": "dir"
+        },
+        {
+          "allocated_bytes": 4096,
+          "inode": 28,
+          "logical_size": 5,
+          "nlink": 1,
+          "path": "work/beta.txt",
+          "type": "file"
+        },
+        {
+          "allocated_bytes": 4096,
+          "inode": 21,
+          "logical_size": 11,
+          "nlink": 1,
+          "path": "work/renamed.txt",
+          "type": "file"
+        }
+      ],
+      "mutation": {
+        "operation": "create work/beta.txt"
+      },
+      "nomount_entities": [
+        {
+          "content-hint": "GUID_partition_scheme",
+          "dev-entry": "/dev/disk4",
+          "potentially-mountable": false,
+          "unmapped-content-hint": "GUID_partition_scheme"
+        },
+        {
+          "content-hint": "Apple_APFS",
+          "dev-entry": "/dev/disk4s1",
+          "potentially-mountable": false,
+          "unmapped-content-hint": "7C3457EF-0000-11AA-AA11-00306543ECAC"
+        },
+        {
+          "content-hint": "41504653-0000-11AA-AA11-00306543ECAC",
+          "dev-entry": "/dev/disk5s1",
+          "potentially-mountable": true,
+          "unmapped-content-hint": "41504653-0000-11AA-AA11-00306543ECAC",
+          "volume-kind": "apfs"
+        },
+        {
+          "content-hint": "EF57347C-0000-11AA-AA11-00306543ECAC",
+          "dev-entry": "/dev/disk5",
+          "potentially-mountable": false,
+          "unmapped-content-hint": "EF57347C-0000-11AA-AA11-00306543ECAC"
+        }
+      ],
+      "pinned_state": {
+        "block_size": 4096,
+        "candidate_count": 4,
+        "candidates": [
+          {
+            "descriptor_index": 1,
+            "obj_type": 2147483649,
+            "xid": 21
+          },
+          {
+            "descriptor_index": 3,
+            "obj_type": 2147483649,
+            "xid": 22
+          },
+          {
+            "descriptor_index": 5,
+            "obj_type": 2147483649,
+            "xid": 19
+          },
+          {
+            "descriptor_index": 7,
+            "obj_type": 2147483649,
+            "xid": 20
+          }
+        ],
+        "descriptor_base": 1,
+        "descriptor_base_non_contiguous": false,
+        "descriptor_blocks": 8,
+        "highest_xid": 22
+      },
+      "raw_identity": {
+        "device": "/dev/rdisk5",
+        "entries": [
+          {
+            "file_id": 16,
+            "path": "work",
+            "type": "dir"
+          },
+          {
+            "file_id": 28,
+            "logical_size": 5,
+            "path": "work/beta.txt",
+            "type": "file"
+          },
+          {
+            "file_id": 21,
+            "logical_size": 11,
+            "path": "work/renamed.txt",
+            "type": "file"
+          }
+        ],
+        "nodes": [
+          {
+            "checksum": 5632541382813038345,
+            "content_hash": "5f3988d3a751595dc598f0537380f8636920054a620bd0287693858d0d9df105",
+            "domain": "volume_omap",
+            "flags": "OBJ_VIRTUAL",
+            "is_root": true,
+            "key_count": 2,
+            "level": 1,
+            "object_xid": 20,
+            "oid": 1028,
+            "paddr": 478,
+            "role": "fs_root_tree",
+            "subtype": "OBJECT_TYPE_FSTREE",
+            "type": "OBJECT_TYPE_BTREE"
+          },
+          {
+            "checksum": 17252435751467666776,
+            "content_hash": "011ee50a8429d761a76294638878837a08d0d8d723c739ce960d27af0ea9d9eb",
+            "domain": "volume_omap",
+            "flags": "OBJ_VIRTUAL",
+            "is_leaf": true,
+            "key_count": 52,
+            "lookup_xid": 20,
+            "object_xid": 20,
+            "oid": 1031,
+            "paddr": 477,
+            "role": "fs_tree_child_depth_1_index_0",
+            "subtype": "OBJECT_TYPE_FSTREE",
+            "type": "OBJECT_TYPE_BTREE_NODE"
+          },
+          {
+            "checksum": 9852401534091160008,
+            "content_hash": "a3f2e1551b4f345094244905e007aef561d70dd022cab30688fce16d203da8ba",
+            "domain": "volume_omap",
+            "flags": "OBJ_VIRTUAL",
+            "is_leaf": true,
+            "key_count": 13,
+            "lookup_xid": 20,
+            "object_xid": 20,
+            "oid": 1030,
+            "paddr": 474,
+            "role": "fs_tree_child_depth_1_index_1",
+            "subtype": "OBJECT_TYPE_FSTREE",
+            "type": "OBJECT_TYPE_BTREE_NODE"
+          }
+        ],
+        "record_groups": [
+          {
+            "file_id": 2,
+            "link_count": 2,
+            "names": [
+              ".fseventsd",
+              "purgeable-drecs-fixed",
+              "work"
+            ],
+            "record_types": [
+              "APFS_TYPE_DIR_REC",
+              "APFS_TYPE_DIR_REC",
+              "APFS_TYPE_INODE",
+              "APFS_TYPE_XATTR"
+            ]
+          },
+          {
+            "file_id": 16,
+            "link_count": 2,
+            "names": [
+              "beta.txt",
+              "com.apple.provenance",
+              "renamed.txt"
+            ],
+            "record_types": [
+              "APFS_TYPE_DIR_REC",
+              "APFS_TYPE_DIR_REC",
+              "APFS_TYPE_INODE",
+              "APFS_TYPE_XATTR"
+            ]
+          },
+          {
+            "file_id": 21,
+            "link_count": 1,
+            "logical_size": 11,
+            "names": [
+              "com.apple.provenance"
+            ],
+            "record_types": [
+              "APFS_TYPE_DSTREAM_ID",
+              "APFS_TYPE_FILE_EXTENT",
+              "APFS_TYPE_INODE",
+              "APFS_TYPE_XATTR"
+            ]
+          },
+          {
+            "file_id": 28,
+            "link_count": 1,
+            "logical_size": 5,
+            "names": [
+              "com.apple.provenance"
+            ],
+            "record_types": [
+              "APFS_TYPE_DSTREAM_ID",
+              "APFS_TYPE_FILE_EXTENT",
+              "APFS_TYPE_INODE",
+              "APFS_TYPE_XATTR"
+            ]
+          }
+        ],
+        "root_tree": {
+          "checksum": 5632541382813038345,
+          "content_hash": "5f3988d3a751595dc598f0537380f8636920054a620bd0287693858d0d9df105",
+          "domain": "volume_omap",
+          "flags": "OBJ_VIRTUAL",
+          "is_root": true,
+          "key_count": 2,
+          "level": 1,
+          "object_xid": 20,
+          "oid": 1028,
+          "paddr": 478,
+          "role": "fs_root_tree",
+          "subtype": "OBJECT_TYPE_FSTREE",
+          "type": "OBJECT_TYPE_BTREE"
+        },
+        "volume": "EX06Identity"
+      }
+    },
+    {
+      "label": "05-delete-beta",
+      "mounted_oracle": [
+        {
+          "inode": 2,
+          "nlink": 4,
+          "path": ".",
+          "type": "dir"
+        },
+        {
+          "inode": 16,
+          "nlink": 3,
+          "path": "work",
+          "type": "dir"
+        },
+        {
+          "allocated_bytes": 4096,
+          "inode": 21,
+          "logical_size": 11,
+          "nlink": 1,
+          "path": "work/renamed.txt",
+          "type": "file"
+        }
+      ],
+      "mutation": {
+        "operation": "delete work/beta.txt"
+      },
+      "nomount_entities": [
+        {
+          "content-hint": "GUID_partition_scheme",
+          "dev-entry": "/dev/disk4",
+          "potentially-mountable": false,
+          "unmapped-content-hint": "GUID_partition_scheme"
+        },
+        {
+          "content-hint": "Apple_APFS",
+          "dev-entry": "/dev/disk4s1",
+          "potentially-mountable": false,
+          "unmapped-content-hint": "7C3457EF-0000-11AA-AA11-00306543ECAC"
+        },
+        {
+          "content-hint": "41504653-0000-11AA-AA11-00306543ECAC",
+          "dev-entry": "/dev/disk5s1",
+          "potentially-mountable": true,
+          "unmapped-content-hint": "41504653-0000-11AA-AA11-00306543ECAC",
+          "volume-kind": "apfs"
+        },
+        {
+          "content-hint": "EF57347C-0000-11AA-AA11-00306543ECAC",
+          "dev-entry": "/dev/disk5",
+          "potentially-mountable": false,
+          "unmapped-content-hint": "EF57347C-0000-11AA-AA11-00306543ECAC"
+        }
+      ],
+      "pinned_state": {
+        "block_size": 4096,
+        "candidate_count": 4,
+        "candidates": [
+          {
+            "descriptor_index": 1,
+            "obj_type": 2147483649,
+            "xid": 25
+          },
+          {
+            "descriptor_index": 3,
+            "obj_type": 2147483649,
+            "xid": 26
+          },
+          {
+            "descriptor_index": 5,
+            "obj_type": 2147483649,
+            "xid": 23
+          },
+          {
+            "descriptor_index": 7,
+            "obj_type": 2147483649,
+            "xid": 24
+          }
+        ],
+        "descriptor_base": 1,
+        "descriptor_base_non_contiguous": false,
+        "descriptor_blocks": 8,
+        "highest_xid": 26
+      },
+      "raw_identity": {
+        "device": "/dev/rdisk5",
+        "entries": [
+          {
+            "file_id": 16,
+            "path": "work",
+            "type": "dir"
+          },
+          {
+            "file_id": 21,
+            "logical_size": 11,
+            "path": "work/renamed.txt",
+            "type": "file"
+          }
+        ],
+        "nodes": [
+          {
+            "checksum": 5632558957819209478,
+            "content_hash": "6c042ccea61bc88e521a6ca0da26527ceb20cb6c162c1ab4857c58b9032301b7",
+            "domain": "volume_omap",
+            "flags": "OBJ_VIRTUAL",
+            "is_root": true,
+            "key_count": 2,
+            "level": 1,
+            "object_xid": 24,
+            "oid": 1028,
+            "paddr": 507,
+            "role": "fs_root_tree",
+            "subtype": "OBJECT_TYPE_FSTREE",
+            "type": "OBJECT_TYPE_BTREE"
+          },
+          {
+            "checksum": 17347662545048152437,
+            "content_hash": "cf695aec8fc0637232611f6304bab06d58f9308a285d0038c29ed1b3a2e00cb3",
+            "domain": "volume_omap",
+            "flags": "OBJ_VIRTUAL",
+            "is_leaf": true,
+            "key_count": 53,
+            "lookup_xid": 24,
+            "object_xid": 24,
+            "oid": 1031,
+            "paddr": 504,
+            "role": "fs_tree_child_depth_1_index_0",
+            "subtype": "OBJECT_TYPE_FSTREE",
+            "type": "OBJECT_TYPE_BTREE_NODE"
+          },
+          {
+            "checksum": 7724061706652544136,
+            "content_hash": "17e38c97ed5741cea85f1b3b839489be2d14193778f405f288887d93cd14af26",
+            "domain": "volume_omap",
+            "flags": "OBJ_VIRTUAL",
+            "is_leaf": true,
+            "key_count": 15,
+            "lookup_xid": 24,
+            "object_xid": 24,
+            "oid": 1030,
+            "paddr": 508,
+            "role": "fs_tree_child_depth_1_index_1",
+            "subtype": "OBJECT_TYPE_FSTREE",
+            "type": "OBJECT_TYPE_BTREE_NODE"
+          }
+        ],
+        "record_groups": [
+          {
+            "file_id": 2,
+            "link_count": 2,
+            "names": [
+              ".fseventsd",
+              "purgeable-drecs-fixed",
+              "work"
+            ],
+            "record_types": [
+              "APFS_TYPE_DIR_REC",
+              "APFS_TYPE_DIR_REC",
+              "APFS_TYPE_INODE",
+              "APFS_TYPE_XATTR"
+            ]
+          },
+          {
+            "file_id": 16,
+            "link_count": 1,
+            "names": [
+              "com.apple.provenance",
+              "renamed.txt"
+            ],
+            "record_types": [
+              "APFS_TYPE_DIR_REC",
+              "APFS_TYPE_INODE",
+              "APFS_TYPE_XATTR"
+            ]
+          },
+          {
+            "file_id": 21,
+            "link_count": 1,
+            "logical_size": 11,
+            "names": [
+              "com.apple.provenance"
+            ],
+            "record_types": [
+              "APFS_TYPE_DSTREAM_ID",
+              "APFS_TYPE_FILE_EXTENT",
+              "APFS_TYPE_INODE",
+              "APFS_TYPE_XATTR"
+            ]
+          }
+        ],
+        "root_tree": {
+          "checksum": 5632558957819209478,
+          "content_hash": "6c042ccea61bc88e521a6ca0da26527ceb20cb6c162c1ab4857c58b9032301b7",
+          "domain": "volume_omap",
+          "flags": "OBJ_VIRTUAL",
+          "is_root": true,
+          "key_count": 2,
+          "level": 1,
+          "object_xid": 24,
+          "oid": 1028,
+          "paddr": 507,
+          "role": "fs_root_tree",
+          "subtype": "OBJECT_TYPE_FSTREE",
+          "type": "OBJECT_TYPE_BTREE"
+        },
+        "volume": "EX06Identity"
+      }
+    },
+    {
+      "label": "06-recreate-beta",
+      "mounted_oracle": [
+        {
+          "inode": 2,
+          "nlink": 4,
+          "path": ".",
+          "type": "dir"
+        },
+        {
+          "inode": 16,
+          "nlink": 4,
+          "path": "work",
+          "type": "dir"
+        },
+        {
+          "allocated_bytes": 4096,
+          "inode": 33,
+          "logical_size": 15,
+          "nlink": 1,
+          "path": "work/beta.txt",
+          "type": "file"
+        },
+        {
+          "allocated_bytes": 4096,
+          "inode": 21,
+          "logical_size": 11,
+          "nlink": 1,
+          "path": "work/renamed.txt",
+          "type": "file"
+        }
+      ],
+      "mutation": {
+        "operation": "recreate work/beta.txt"
+      },
+      "nomount_entities": [
+        {
+          "content-hint": "GUID_partition_scheme",
+          "dev-entry": "/dev/disk4",
+          "potentially-mountable": false,
+          "unmapped-content-hint": "GUID_partition_scheme"
+        },
+        {
+          "content-hint": "Apple_APFS",
+          "dev-entry": "/dev/disk4s1",
+          "potentially-mountable": false,
+          "unmapped-content-hint": "7C3457EF-0000-11AA-AA11-00306543ECAC"
+        },
+        {
+          "content-hint": "EF57347C-0000-11AA-AA11-00306543ECAC",
+          "dev-entry": "/dev/disk5",
+          "potentially-mountable": false,
+          "unmapped-content-hint": "EF57347C-0000-11AA-AA11-00306543ECAC"
+        },
+        {
+          "content-hint": "41504653-0000-11AA-AA11-00306543ECAC",
+          "dev-entry": "/dev/disk5s1",
+          "potentially-mountable": true,
+          "unmapped-content-hint": "41504653-0000-11AA-AA11-00306543ECAC",
+          "volume-kind": "apfs"
+        }
+      ],
+      "pinned_state": {
+        "block_size": 4096,
+        "candidate_count": 4,
+        "candidates": [
+          {
+            "descriptor_index": 1,
+            "obj_type": 2147483649,
+            "xid": 29
+          },
+          {
+            "descriptor_index": 3,
+            "obj_type": 2147483649,
+            "xid": 30
+          },
+          {
+            "descriptor_index": 5,
+            "obj_type": 2147483649,
+            "xid": 27
+          },
+          {
+            "descriptor_index": 7,
+            "obj_type": 2147483649,
+            "xid": 28
+          }
+        ],
+        "descriptor_base": 1,
+        "descriptor_base_non_contiguous": false,
+        "descriptor_blocks": 8,
+        "highest_xid": 30
+      },
+      "raw_identity": {
+        "device": "/dev/rdisk5",
+        "entries": [
+          {
+            "file_id": 16,
+            "path": "work",
+            "type": "dir"
+          },
+          {
+            "file_id": 33,
+            "logical_size": 15,
+            "path": "work/beta.txt",
+            "type": "file"
+          },
+          {
+            "file_id": 21,
+            "logical_size": 11,
+            "path": "work/renamed.txt",
+            "type": "file"
+          }
+        ],
+        "nodes": [
+          {
+            "checksum": 836480594954239642,
+            "content_hash": "a17c54f5f91d427c0d07d326f5114c8fc87a45f769f540ed744f904e82fe6ebd",
+            "domain": "volume_omap",
+            "flags": "OBJ_VIRTUAL",
+            "is_root": true,
+            "key_count": 2,
+            "level": 1,
+            "object_xid": 28,
+            "oid": 1028,
+            "paddr": 539,
+            "role": "fs_root_tree",
+            "subtype": "OBJECT_TYPE_FSTREE",
+            "type": "OBJECT_TYPE_BTREE"
+          },
+          {
+            "checksum": 9986721432327132439,
+            "content_hash": "266a0b1329f03af963df7eff967de77dbd4c07264b93a3d3c0a6b889d03072dc",
+            "domain": "volume_omap",
+            "flags": "OBJ_VIRTUAL",
+            "is_leaf": true,
+            "key_count": 53,
+            "lookup_xid": 28,
+            "object_xid": 28,
+            "oid": 1031,
+            "paddr": 538,
+            "role": "fs_tree_child_depth_1_index_0",
+            "subtype": "OBJECT_TYPE_FSTREE",
+            "type": "OBJECT_TYPE_BTREE_NODE"
+          },
+          {
+            "checksum": 4787834193998026889,
+            "content_hash": "d7fc908a829a40af6c16430614f94f968e4e8654125d6152022329919f7428ef",
+            "domain": "volume_omap",
+            "flags": "OBJ_VIRTUAL",
+            "is_leaf": true,
+            "key_count": 28,
+            "lookup_xid": 28,
+            "object_xid": 28,
+            "oid": 1030,
+            "paddr": 535,
+            "role": "fs_tree_child_depth_1_index_1",
+            "subtype": "OBJECT_TYPE_FSTREE",
+            "type": "OBJECT_TYPE_BTREE_NODE"
+          }
+        ],
+        "record_groups": [
+          {
+            "file_id": 2,
+            "link_count": 2,
+            "names": [
+              ".fseventsd",
+              "purgeable-drecs-fixed",
+              "work"
+            ],
+            "record_types": [
+              "APFS_TYPE_DIR_REC",
+              "APFS_TYPE_DIR_REC",
+              "APFS_TYPE_INODE",
+              "APFS_TYPE_XATTR"
+            ]
+          },
+          {
+            "file_id": 16,
+            "link_count": 2,
+            "names": [
+              "beta.txt",
+              "com.apple.provenance",
+              "renamed.txt"
+            ],
+            "record_types": [
+              "APFS_TYPE_DIR_REC",
+              "APFS_TYPE_DIR_REC",
+              "APFS_TYPE_INODE",
+              "APFS_TYPE_XATTR"
+            ]
+          },
+          {
+            "file_id": 21,
+            "link_count": 1,
+            "logical_size": 11,
+            "names": [
+              "com.apple.provenance"
+            ],
+            "record_types": [
+              "APFS_TYPE_DSTREAM_ID",
+              "APFS_TYPE_FILE_EXTENT",
+              "APFS_TYPE_INODE",
+              "APFS_TYPE_XATTR"
+            ]
+          },
+          {
+            "file_id": 33,
+            "link_count": 1,
+            "logical_size": 15,
+            "names": [
+              "com.apple.provenance"
+            ],
+            "record_types": [
+              "APFS_TYPE_DSTREAM_ID",
+              "APFS_TYPE_FILE_EXTENT",
+              "APFS_TYPE_INODE",
+              "APFS_TYPE_XATTR"
+            ]
+          }
+        ],
+        "root_tree": {
+          "checksum": 836480594954239642,
+          "content_hash": "a17c54f5f91d427c0d07d326f5114c8fc87a45f769f540ed744f904e82fe6ebd",
+          "domain": "volume_omap",
+          "flags": "OBJ_VIRTUAL",
+          "is_root": true,
+          "key_count": 2,
+          "level": 1,
+          "object_xid": 28,
+          "oid": 1028,
+          "paddr": 539,
+          "role": "fs_root_tree",
+          "subtype": "OBJECT_TYPE_FSTREE",
+          "type": "OBJECT_TYPE_BTREE"
+        },
+        "volume": "EX06Identity"
+      }
+    },
+    {
+      "label": "07-truncate-renamed",
+      "mounted_oracle": [
+        {
+          "inode": 2,
+          "nlink": 4,
+          "path": ".",
+          "type": "dir"
+        },
+        {
+          "inode": 16,
+          "nlink": 4,
+          "path": "work",
+          "type": "dir"
+        },
+        {
+          "allocated_bytes": 4096,
+          "inode": 33,
+          "logical_size": 15,
+          "nlink": 1,
+          "path": "work/beta.txt",
+          "type": "file"
+        },
+        {
+          "allocated_bytes": 4096,
+          "inode": 21,
+          "logical_size": 3,
+          "nlink": 1,
+          "path": "work/renamed.txt",
+          "type": "file"
+        }
+      ],
+      "mutation": {
+        "operation": "truncate work/renamed.txt"
+      },
+      "nomount_entities": [
+        {
+          "content-hint": "GUID_partition_scheme",
+          "dev-entry": "/dev/disk4",
+          "potentially-mountable": false,
+          "unmapped-content-hint": "GUID_partition_scheme"
+        },
+        {
+          "content-hint": "Apple_APFS",
+          "dev-entry": "/dev/disk4s1",
+          "potentially-mountable": false,
+          "unmapped-content-hint": "7C3457EF-0000-11AA-AA11-00306543ECAC"
+        },
+        {
+          "content-hint": "41504653-0000-11AA-AA11-00306543ECAC",
+          "dev-entry": "/dev/disk5s1",
+          "potentially-mountable": true,
+          "unmapped-content-hint": "41504653-0000-11AA-AA11-00306543ECAC",
+          "volume-kind": "apfs"
+        },
+        {
+          "content-hint": "EF57347C-0000-11AA-AA11-00306543ECAC",
+          "dev-entry": "/dev/disk5",
+          "potentially-mountable": false,
+          "unmapped-content-hint": "EF57347C-0000-11AA-AA11-00306543ECAC"
+        }
+      ],
+      "pinned_state": {
+        "block_size": 4096,
+        "candidate_count": 4,
+        "candidates": [
+          {
+            "descriptor_index": 1,
+            "obj_type": 2147483649,
+            "xid": 33
+          },
+          {
+            "descriptor_index": 3,
+            "obj_type": 2147483649,
+            "xid": 34
+          },
+          {
+            "descriptor_index": 5,
+            "obj_type": 2147483649,
+            "xid": 31
+          },
+          {
+            "descriptor_index": 7,
+            "obj_type": 2147483649,
+            "xid": 32
+          }
+        ],
+        "descriptor_base": 1,
+        "descriptor_base_non_contiguous": false,
+        "descriptor_blocks": 8,
+        "highest_xid": 34
+      },
+      "raw_identity": {
+        "device": "/dev/rdisk5",
+        "entries": [
+          {
+            "file_id": 16,
+            "path": "work",
+            "type": "dir"
+          },
+          {
+            "file_id": 33,
+            "logical_size": 15,
+            "path": "work/beta.txt",
+            "type": "file"
+          },
+          {
+            "file_id": 21,
+            "logical_size": 3,
+            "path": "work/renamed.txt",
+            "type": "file"
+          }
+        ],
+        "nodes": [
+          {
+            "checksum": 836498255859756670,
+            "content_hash": "a7735992a3d19a9ad7d361d8f7abfdba06b58a34aa25de0c0b53624ce65c1129",
+            "domain": "volume_omap",
+            "flags": "OBJ_VIRTUAL",
+            "is_root": true,
+            "key_count": 2,
+            "level": 1,
+            "object_xid": 32,
+            "oid": 1028,
+            "paddr": 565,
+            "role": "fs_root_tree",
+            "subtype": "OBJECT_TYPE_FSTREE",
+            "type": "OBJECT_TYPE_BTREE"
+          },
+          {
+            "checksum": 16920834597912728628,
+            "content_hash": "f92a849df8f0bbac0d7533f0c5f8a35982bcd4b0df623823e79d99215059eb75",
+            "domain": "volume_omap",
+            "flags": "OBJ_VIRTUAL",
+            "is_leaf": true,
+            "key_count": 55,
+            "lookup_xid": 32,
+            "object_xid": 32,
+            "oid": 1031,
+            "paddr": 562,
+            "role": "fs_tree_child_depth_1_index_0",
+            "subtype": "OBJECT_TYPE_FSTREE",
+            "type": "OBJECT_TYPE_BTREE_NODE"
+          },
+          {
+            "checksum": 2978056349587656041,
+            "content_hash": "a4020e55e9e219e96f17ba369a90fad84918511327aa668c7d02ca314afc35b7",
+            "domain": "volume_omap",
+            "flags": "OBJ_VIRTUAL",
+            "is_leaf": true,
+            "key_count": 34,
+            "lookup_xid": 32,
+            "object_xid": 32,
+            "oid": 1030,
+            "paddr": 566,
+            "role": "fs_tree_child_depth_1_index_1",
+            "subtype": "OBJECT_TYPE_FSTREE",
+            "type": "OBJECT_TYPE_BTREE_NODE"
+          }
+        ],
+        "record_groups": [
+          {
+            "file_id": 2,
+            "link_count": 2,
+            "names": [
+              ".fseventsd",
+              "purgeable-drecs-fixed",
+              "work"
+            ],
+            "record_types": [
+              "APFS_TYPE_DIR_REC",
+              "APFS_TYPE_DIR_REC",
+              "APFS_TYPE_INODE",
+              "APFS_TYPE_XATTR"
+            ]
+          },
+          {
+            "file_id": 16,
+            "link_count": 2,
+            "names": [
+              "beta.txt",
+              "com.apple.provenance",
+              "renamed.txt"
+            ],
+            "record_types": [
+              "APFS_TYPE_DIR_REC",
+              "APFS_TYPE_DIR_REC",
+              "APFS_TYPE_INODE",
+              "APFS_TYPE_XATTR"
+            ]
+          },
+          {
+            "file_id": 21,
+            "link_count": 1,
+            "logical_size": 3,
+            "names": [
+              "com.apple.provenance"
+            ],
+            "record_types": [
+              "APFS_TYPE_DSTREAM_ID",
+              "APFS_TYPE_FILE_EXTENT",
+              "APFS_TYPE_INODE",
+              "APFS_TYPE_XATTR"
+            ]
+          },
+          {
+            "file_id": 33,
+            "link_count": 1,
+            "logical_size": 15,
+            "names": [
+              "com.apple.provenance"
+            ],
+            "record_types": [
+              "APFS_TYPE_DSTREAM_ID",
+              "APFS_TYPE_FILE_EXTENT",
+              "APFS_TYPE_INODE",
+              "APFS_TYPE_XATTR"
+            ]
+          }
+        ],
+        "root_tree": {
+          "checksum": 836498255859756670,
+          "content_hash": "a7735992a3d19a9ad7d361d8f7abfdba06b58a34aa25de0c0b53624ce65c1129",
+          "domain": "volume_omap",
+          "flags": "OBJ_VIRTUAL",
+          "is_root": true,
+          "key_count": 2,
+          "level": 1,
+          "object_xid": 32,
+          "oid": 1028,
+          "paddr": 565,
+          "role": "fs_root_tree",
+          "subtype": "OBJECT_TYPE_FSTREE",
+          "type": "OBJECT_TYPE_BTREE"
+        },
+        "volume": "EX06Identity"
+      }
+    }
+  ]
+}

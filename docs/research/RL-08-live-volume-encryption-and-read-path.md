@@ -63,6 +63,10 @@ Last Updated: TBD
 - [2026-04-24] `EX-01` found that the startup container on this machine blocked
   unprivileged raw reads of `/dev/rdisk3`, while a mounted image-backed APFS lab
   volume remained probeable. That supports a narrow initial raw-mode allowlist.
+- [2026-04-25] `SR-004` consolidated runtime evidence into a support matrix:
+  detached unencrypted image-backed sources remain the initial allowlist, while
+  live startup disks, unsupported encryption, snapshot entitlement assumptions,
+  Fusion, and merged-root requirements are fallback or hard-stop conditions.
 
 ## Interim Decisions
 - Deployment constraints are first-class product constraints, not implementation
@@ -72,6 +76,9 @@ Last Updated: TBD
   experiments prove a narrower safe path.
 - Image-backed APFS volumes are valid early research targets because they let us
   probe raw semantics without assuming startup-disk viability.
+- Snapshot-assisted online scanning should not be assumed as a generic
+  third-party pinning primitive until entitlement and oracle constraints are
+  proven.
 
 ## Exit Criteria
 - Supported environment matrix.

@@ -56,6 +56,10 @@ Last Updated: TBD
   implementation rule set: resolver input must include OMAP context and chosen
   scan state, and resolved objects must pass checksum, header, and type/subtype
   validation before use.
+- [2026-04-25] `EX-06` captured raw identity traces across eight pinned mutation
+  states. The FS root tree OID stayed stable while resolved paddr, object XID,
+  checksum, and block hash changed after every mutation, reinforcing that OMAP
+  resolution output must carry version/content identity, not just OID.
 
 ## Interim Decisions
 - Do not assume `OID` alone is a sufficient cache identity until proven.
@@ -63,6 +67,8 @@ Last Updated: TBD
   cache design is attempted.
 - V1 resolver validation must fail closed on checksum, OID, XID, or expected
   type mismatches.
+- Incremental identity observations should record OMAP domain, OID, object XID,
+  paddr, checksum/hash, and scan-state context until a cheaper tuple is proven.
 
 ## Exit Criteria
 - Documented resolver contract: input, output, validation steps.

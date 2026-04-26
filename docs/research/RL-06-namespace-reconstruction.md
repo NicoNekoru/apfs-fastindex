@@ -56,6 +56,14 @@ Last Updated: TBD
   pinned raw state in the tested allowlist: raw output matched the mounted
   oracle for path set, entry type, shared file identity across hard links, and
   symlink target fidelity.
+- [2026-04-25] `SR-003` reinforced the namespace contract from outside sources:
+  directory records define hierarchy placement and visible names, inode records
+  define file identity and link count, and hard links require keeping path
+  graph and file identity as separate concepts.
+- [2026-04-25] `EX-04` broadened the raw-vs-oracle namespace proof to
+  case-insensitive and case-sensitive images with cross-directory hard links,
+  symlinks, Unicode names, case-collision behavior, and a FIFO; both images
+  matched the mounted oracle with zero path or field mismatches.
 
 ## Interim Decisions
 - Keep namespace reconstruction separate from storage traversal logic.
@@ -63,6 +71,9 @@ Last Updated: TBD
   in a later polish pass.
 - V1 namespace correctness requires both a path graph and stable file identity;
   the parser must not collapse those into one concept.
+- Symlink target extraction belongs in the active v1 namespace surface for the
+  tested allowlist, but future environments that break the known xattr path
+  should fail closed until a targeted probe explains them.
 
 ## Exit Criteria
 - Exact reconstruction algorithm for paths and parent-child graph.

@@ -50,9 +50,21 @@ Last Updated: TBD
 - [TBD] Cache key design notes.
 - [TBD] Crash-safety notes.
 - [TBD] Invalidation trigger notes.
+- [2026-04-25] `EX-06` provided the first cache-key evidence: root tree OID was
+  stable while object XID, paddr, checksum, and block hash changed across each
+  mutation. Any persistent cache that cannot prove continuity for those fields
+  should invalidate rather than reuse.
+- [2026-04-25] `EX-07` defined the next incremental oracle: simulate reuse
+  decisions between two pinned raw states and compare the result to a fresh full
+  raw summary of the same state.
 
 ## Interim Decisions
 - Prefer conservative invalidation over aggressive reuse.
+- Persistent cache design should wait for subtree-reuse proof, but current
+  invalidation inputs must include parser version, volume/source identity,
+  scan-state continuity, OMAP domain, object XID, paddr, and checksum/hash.
+- Incremental correctness should be validated independently from cache storage
+  format; first prove reuse decisions, then design persistence.
 
 ## Exit Criteria
 - Cache schema defined.

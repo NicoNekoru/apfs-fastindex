@@ -1,0 +1,108 @@
+{
+  "device": "/dev/rdisk5",
+  "entries": [
+    {
+      "file_id": 34,
+      "logical_size": 2,
+      "path": "CaseName.txt",
+      "type": "file"
+    },
+    {
+      "file_id": 17,
+      "path": "dst",
+      "type": "dir"
+    },
+    {
+      "file_id": 29,
+      "logical_size": 6,
+      "path": "dst/clone.txt",
+      "type": "file"
+    },
+    {
+      "file_id": 36,
+      "logical_size": 9216,
+      "path": "dst/compress-source.txt",
+      "type": "file"
+    },
+    {
+      "file_id": 37,
+      "logical_size": 9216,
+      "path": "dst/compressed-candidate.txt",
+      "type": "file"
+    },
+    {
+      "file_id": 31,
+      "logical_size": 41,
+      "path": "dst/link.txt",
+      "symlink_target": "../nested/branch/leaf/hard-across-dir.txt",
+      "type": "symlink"
+    },
+    {
+      "file_id": 25,
+      "logical_size": 11,
+      "path": "dst/moved.txt",
+      "type": "file"
+    },
+    {
+      "file_id": 28,
+      "logical_size": 2097152,
+      "path": "dst/sparse-2m.bin",
+      "type": "file"
+    },
+    {
+      "file_id": 18,
+      "path": "nested",
+      "type": "dir"
+    },
+    {
+      "file_id": 19,
+      "path": "nested/branch",
+      "type": "dir"
+    },
+    {
+      "file_id": 20,
+      "path": "nested/branch/leaf",
+      "type": "dir"
+    },
+    {
+      "file_id": 25,
+      "logical_size": 11,
+      "path": "nested/branch/leaf/hard-across-dir.txt",
+      "type": "file"
+    },
+    {
+      "file_id": 22,
+      "path": "special",
+      "type": "dir"
+    },
+    {
+      "file_id": 35,
+      "path": "special/queue.fifo",
+      "type": "other(DT_FIFO)"
+    },
+    {
+      "file_id": 16,
+      "path": "src",
+      "type": "dir"
+    },
+    {
+      "file_id": 21,
+      "path": "unicode",
+      "type": "dir"
+    },
+    {
+      "file_id": 32,
+      "logical_size": 12,
+      "path": "unicode/cafe-\u00e9.txt",
+      "type": "file"
+    },
+    {
+      "file_id": 33,
+      "logical_size": 6,
+      "path": "unicode/\u6771\u4eac.txt",
+      "type": "file"
+    }
+  ],
+  "entry_count": 18,
+  "volume": "EX04CI"
+}

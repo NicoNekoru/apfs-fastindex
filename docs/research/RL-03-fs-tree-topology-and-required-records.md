@@ -72,6 +72,14 @@ Last Updated: TBD
 - [2026-04-24] `EX-03` closed that remaining gap inside the tested image-backed
   allowlist: the raw walker matched the mounted oracle for hard links, sparse
   files, clones, and symlink target fidelity with zero path or field mismatches.
+- [2026-04-25] `SR-003` turned the narrow-v1 record matrix into a source-backed
+  contract: `DIR_REC`, `INODE`, dstream or equivalent logical-size fields,
+  symlink-bearing `XATTR`, and hard-link `SIBLING_LINK` / `SIBLING_MAP` records
+  are in scope; file extents, extent-reference, snapshot metadata, and
+  physical/shared accounting remain future modes.
+- [2026-04-25] `EX-04` validated that matrix against a broader pinned
+  raw-vs-oracle corpus on both case-insensitive and case-sensitive APFS images:
+  raw and oracle path sets matched with zero mismatches.
 
 ## Interim Decisions
 - Separate "required for namespace" from "required for accounting."
@@ -83,6 +91,8 @@ Last Updated: TBD
   satisfy the narrow v1 contract.
 - In the tested narrow-v1 allowlist, symlink target extraction can now be
   treated as part of the active parser surface rather than a speculative add-on.
+- The next parser-surface proof should be a broader pinned raw-vs-oracle corpus,
+  not more broad taxonomy research.
 
 ## Exit Criteria
 - A required-record matrix exists for each product mode.

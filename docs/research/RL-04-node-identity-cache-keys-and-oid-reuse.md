@@ -43,9 +43,17 @@ Last Updated: TBD
 - [TBD] Node identity observations.
 - [TBD] OID reuse observations.
 - [TBD] Block reuse observations.
+- [2026-04-25] `EX-06` ruled out bare `oid` as a safe parsed-object cache key
+  in the tested corpus: the FS root tree OID remained `1028` across all
+  mutations, while paddr, object XID, checksum, and block hash changed at every
+  step. Delete/recreate of `work/beta.txt` produced a new file id in this short
+  run, but that does not prove file-id reuse impossible.
 
 ## Interim Decisions
 - Cache identity should remain conservative until reuse safety is demonstrated.
+- A candidate raw object identity for future probes is at least:
+  `omap domain + oid + object_xid + paddr + checksum/hash + scan state`.
+- File identity and B-tree node identity must remain separate concepts.
 
 ## Exit Criteria
 - Final cache-key definition for node cache.

@@ -1,0 +1,9 @@
+{
+  "matched": true,
+  "mismatch_count": 0,
+  "mismatches": [],
+  "missing_paths": [],
+  "oracle_path_count": 19,
+  "raw_path_count": 19,
+  "unexpected_paths": []
+}

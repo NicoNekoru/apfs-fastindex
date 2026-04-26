@@ -55,6 +55,8 @@ Current source reviews:
 
 - `SR-001` V1 support boundary
 - `SR-002` checkpoint, OMAP, and root-discovery contract
+- `SR-003` FS record taxonomy for narrow v1
+- `SR-004` runtime read path and encryption boundary
 
 ### `EX-*` Experiment Notes
 
@@ -155,6 +157,9 @@ Gate D: broader product semantics and optimization
 - `EX-01` live checkpoint consistency and runtime boundary
 - `EX-02` required-record taxonomy for narrow v1
 - `EX-03` pinned-state raw-vs-oracle proof loop
+- `EX-04` expanded pinned raw-vs-oracle corpus
+- `EX-06` OID, paddr, XID, checksum identity tracking
+- `EX-07` subtree reuse proof probe
 
 ## Research Tracks
 

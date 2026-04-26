@@ -1,0 +1,268 @@
+{
+  "path_histories": {
+    "work": [
+      {
+        "file_id": 16,
+        "label": "00-initial-empty",
+        "logical_size": null,
+        "type": "dir"
+      },
+      {
+        "file_id": 16,
+        "label": "01-create-alpha",
+        "logical_size": null,
+        "type": "dir"
+      },
+      {
+        "file_id": 16,
+        "label": "02-append-alpha",
+        "logical_size": null,
+        "type": "dir"
+      },
+      {
+        "file_id": 16,
+        "label": "03-rename-alpha",
+        "logical_size": null,
+        "type": "dir"
+      },
+      {
+        "file_id": 16,
+        "label": "04-create-beta",
+        "logical_size": null,
+        "type": "dir"
+      },
+      {
+        "file_id": 16,
+        "label": "05-delete-beta",
+        "logical_size": null,
+        "type": "dir"
+      },
+      {
+        "file_id": 16,
+        "label": "06-recreate-beta",
+        "logical_size": null,
+        "type": "dir"
+      },
+      {
+        "file_id": 16,
+        "label": "07-truncate-renamed",
+        "logical_size": null,
+        "type": "dir"
+      }
+    ],
+    "work/alpha.txt": [
+      {
+        "file_id": 21,
+        "label": "01-create-alpha",
+        "logical_size": 6,
+        "type": "file"
+      },
+      {
+        "file_id": 21,
+        "label": "02-append-alpha",
+        "logical_size": 11,
+        "type": "file"
+      }
+    ],
+    "work/beta.txt": [
+      {
+        "file_id": 28,
+        "label": "04-create-beta",
+        "logical_size": 5,
+        "type": "file"
+      },
+      {
+        "file_id": 33,
+        "label": "06-recreate-beta",
+        "logical_size": 15,
+        "type": "file"
+      },
+      {
+        "file_id": 33,
+        "label": "07-truncate-renamed",
+        "logical_size": 15,
+        "type": "file"
+      }
+    ],
+    "work/renamed.txt": [
+      {
+        "file_id": 21,
+        "label": "03-rename-alpha",
+        "logical_size": 11,
+        "type": "file"
+      },
+      {
+        "file_id": 21,
+        "label": "04-create-beta",
+        "logical_size": 11,
+        "type": "file"
+      },
+      {
+        "file_id": 21,
+        "label": "05-delete-beta",
+        "logical_size": 11,
+        "type": "file"
+      },
+      {
+        "file_id": 21,
+        "label": "06-recreate-beta",
+        "logical_size": 11,
+        "type": "file"
+      },
+      {
+        "file_id": 21,
+        "label": "07-truncate-renamed",
+        "logical_size": 3,
+        "type": "file"
+      }
+    ]
+  },
+  "root_changes": [
+    {
+      "from": "00-initial-empty",
+      "same_checksum": false,
+      "same_content_hash": false,
+      "same_object_xid": false,
+      "same_oid": true,
+      "same_paddr": false,
+      "to": "01-create-alpha"
+    },
+    {
+      "from": "01-create-alpha",
+      "same_checksum": false,
+      "same_content_hash": false,
+      "same_object_xid": false,
+      "same_oid": true,
+      "same_paddr": false,
+      "to": "02-append-alpha"
+    },
+    {
+      "from": "02-append-alpha",
+      "same_checksum": false,
+      "same_content_hash": false,
+      "same_object_xid": false,
+      "same_oid": true,
+      "same_paddr": false,
+      "to": "03-rename-alpha"
+    },
+    {
+      "from": "03-rename-alpha",
+      "same_checksum": false,
+      "same_content_hash": false,
+      "same_object_xid": false,
+      "same_oid": true,
+      "same_paddr": false,
+      "to": "04-create-beta"
+    },
+    {
+      "from": "04-create-beta",
+      "same_checksum": false,
+      "same_content_hash": false,
+      "same_object_xid": false,
+      "same_oid": true,
+      "same_paddr": false,
+      "to": "05-delete-beta"
+    },
+    {
+      "from": "05-delete-beta",
+      "same_checksum": false,
+      "same_content_hash": false,
+      "same_object_xid": false,
+      "same_oid": true,
+      "same_paddr": false,
+      "to": "06-recreate-beta"
+    },
+    {
+      "from": "06-recreate-beta",
+      "same_checksum": false,
+      "same_content_hash": false,
+      "same_object_xid": false,
+      "same_oid": true,
+      "same_paddr": false,
+      "to": "07-truncate-renamed"
+    }
+  ],
+  "root_identities": [
+    {
+      "checkpoint_xid": 6,
+      "label": "00-initial-empty",
+      "node_count": 1,
+      "root_checksum": 3730457189931076283,
+      "root_content_hash": "82b49391361d47a5026def01f09315fe964766e67fdb0de42d324928610881b0",
+      "root_object_xid": 4,
+      "root_oid": 1028,
+      "root_paddr": 370
+    },
+    {
+      "checkpoint_xid": 10,
+      "label": "01-create-alpha",
+      "node_count": 1,
+      "root_checksum": 15950746109938155730,
+      "root_content_hash": "44e13cbd45853cb2890d15ddf5d2c34ce571698652528f89974af98b46a47027",
+      "root_object_xid": 8,
+      "root_oid": 1028,
+      "root_paddr": 396
+    },
+    {
+      "checkpoint_xid": 14,
+      "label": "02-append-alpha",
+      "node_count": 1,
+      "root_checksum": 4326692610658153792,
+      "root_content_hash": "c82c0378a5dcb01f3c465cdb76a9352378b185c5b9fe6545d4a48b9ce30820ab",
+      "root_object_xid": 12,
+      "root_oid": 1028,
+      "root_paddr": 420
+    },
+    {
+      "checkpoint_xid": 18,
+      "label": "03-rename-alpha",
+      "node_count": 3,
+      "root_checksum": 11480872826653689027,
+      "root_content_hash": "7fa7b7db86f4444eedf0d064fe749a45793cf4ec3c526f000d0ee3943884c413",
+      "root_object_xid": 16,
+      "root_oid": 1028,
+      "root_paddr": 444
+    },
+    {
+      "checkpoint_xid": 22,
+      "label": "04-create-beta",
+      "node_count": 3,
+      "root_checksum": 5632541382813038345,
+      "root_content_hash": "5f3988d3a751595dc598f0537380f8636920054a620bd0287693858d0d9df105",
+      "root_object_xid": 20,
+      "root_oid": 1028,
+      "root_paddr": 478
+    },
+    {
+      "checkpoint_xid": 26,
+      "label": "05-delete-beta",
+      "node_count": 3,
+      "root_checksum": 5632558957819209478,
+      "root_content_hash": "6c042ccea61bc88e521a6ca0da26527ceb20cb6c162c1ab4857c58b9032301b7",
+      "root_object_xid": 24,
+      "root_oid": 1028,
+      "root_paddr": 507
+    },
+    {
+      "checkpoint_xid": 30,
+      "label": "06-recreate-beta",
+      "node_count": 3,
+      "root_checksum": 836480594954239642,
+      "root_content_hash": "a17c54f5f91d427c0d07d326f5114c8fc87a45f769f540ed744f904e82fe6ebd",
+      "root_object_xid": 28,
+      "root_oid": 1028,
+      "root_paddr": 539
+    },
+    {
+      "checkpoint_xid": 34,
+      "label": "07-truncate-renamed",
+      "node_count": 3,
+      "root_checksum": 836498255859756670,
+      "root_content_hash": "a7735992a3d19a9ad7d361d8f7abfdba06b58a34aa25de0c0b53624ce65c1129",
+      "root_object_xid": 32,
+      "root_oid": 1028,
+      "root_paddr": 565
+    }
+  ],
+  "state_count": 8
+}

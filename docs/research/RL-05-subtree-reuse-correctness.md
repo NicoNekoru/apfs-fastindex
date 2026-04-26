@@ -46,9 +46,17 @@ Last Updated: TBD
 - [TBD] Rename propagation notes.
 - [TBD] File growth propagation notes.
 - [TBD] Rebalance observations.
+- [2026-04-25] `EX-07` was designed from `EX-06` identity results as a
+  falsifiable subtree-reuse probe. It will test reuse only when a parent child
+  pointer resolves to the same child tuple: OMAP domain, OID, object XID, paddr,
+  checksum/hash, and type/subtype.
 
 ## Interim Decisions
 - Reuse should be proven at the node/subtree level before being trusted in production.
+- The candidate theorem is scoped only to raw single-volume namespace plus
+  logical size. Physical/shared/snapshot accounting requires a separate theorem.
+- Any changed identity field, unsupported side metadata, parser-version change,
+  or unproven metric dependency should force descent or full reparse.
 
 ## Exit Criteria
 - A precise reuse theorem for our implementation.

@@ -1,0 +1,30 @@
+{
+  "block_size": 4096,
+  "candidate_count": 4,
+  "candidates": [
+    {
+      "descriptor_index": 1,
+      "obj_type": 2147483649,
+      "xid": 21
+    },
+    {
+      "descriptor_index": 3,
+      "obj_type": 2147483649,
+      "xid": 18
+    },
+    {
+      "descriptor_index": 5,
+      "obj_type": 2147483649,
+      "xid": 19
+    },
+    {
+      "descriptor_index": 7,
+      "obj_type": 2147483649,
+      "xid": 20
+    }
+  ],
+  "descriptor_base": 1,
+  "descriptor_base_non_contiguous": false,
+  "descriptor_blocks": 8,
+  "highest_xid": 21
+}

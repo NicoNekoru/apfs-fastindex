@@ -1,0 +1,437 @@
+{
+  "comparison": {
+    "matched": true,
+    "mismatch_count": 0,
+    "mismatches": [],
+    "missing_paths": [],
+    "oracle_path_count": 19,
+    "raw_path_count": 19,
+    "unexpected_paths": []
+  },
+  "fs_name": "Case-sensitive APFS",
+  "image_name": "EX04CS.dmg",
+  "mounted_oracle": {
+    "entries": [
+      {
+        "inode": 2,
+        "nlink": 10,
+        "path": ".",
+        "type": "dir"
+      },
+      {
+        "allocated_bytes": 4096,
+        "inode": 34,
+        "logical_size": 2,
+        "nlink": 1,
+        "path": "CaseName.txt",
+        "type": "file"
+      },
+      {
+        "allocated_bytes": 4096,
+        "inode": 35,
+        "logical_size": 2,
+        "nlink": 1,
+        "path": "casename.txt",
+        "type": "file"
+      },
+      {
+        "inode": 17,
+        "nlink": 8,
+        "path": "dst",
+        "type": "dir"
+      },
+      {
+        "allocated_bytes": 4096,
+        "inode": 29,
+        "logical_size": 6,
+        "nlink": 1,
+        "path": "dst/clone.txt",
+        "type": "file"
+      },
+      {
+        "allocated_bytes": 12288,
+        "inode": 37,
+        "logical_size": 9216,
+        "nlink": 1,
+        "path": "dst/compress-source.txt",
+        "type": "file"
+      },
+      {
+        "allocated_bytes": 12288,
+        "inode": 38,
+        "logical_size": 9216,
+        "nlink": 1,
+        "path": "dst/compressed-candidate.txt",
+        "type": "file"
+      },
+      {
+        "inode": 31,
+        "logical_size": 41,
+        "nlink": 1,
+        "path": "dst/link.txt",
+        "symlink_target": "../nested/branch/leaf/hard-across-dir.txt",
+        "type": "symlink"
+      },
+      {
+        "allocated_bytes": 4096,
+        "inode": 25,
+        "logical_size": 11,
+        "nlink": 2,
+        "path": "dst/moved.txt",
+        "type": "file"
+      },
+      {
+        "allocated_bytes": 32768,
+        "inode": 28,
+        "logical_size": 2097152,
+        "nlink": 1,
+        "path": "dst/sparse-2m.bin",
+        "type": "file"
+      },
+      {
+        "inode": 18,
+        "nlink": 3,
+        "path": "nested",
+        "type": "dir"
+      },
+      {
+        "inode": 19,
+        "nlink": 3,
+        "path": "nested/branch",
+        "type": "dir"
+      },
+      {
+        "inode": 20,
+        "nlink": 3,
+        "path": "nested/branch/leaf",
+        "type": "dir"
+      },
+      {
+        "allocated_bytes": 4096,
+        "inode": 25,
+        "logical_size": 11,
+        "nlink": 2,
+        "path": "nested/branch/leaf/hard-across-dir.txt",
+        "type": "file"
+      },
+      {
+        "inode": 22,
+        "nlink": 3,
+        "path": "special",
+        "type": "dir"
+      },
+      {
+        "inode": 36,
+        "nlink": 1,
+        "path": "special/queue.fifo",
+        "type": "other(DT_FIFO)"
+      },
+      {
+        "inode": 16,
+        "nlink": 2,
+        "path": "src",
+        "type": "dir"
+      },
+      {
+        "inode": 21,
+        "nlink": 4,
+        "path": "unicode",
+        "type": "dir"
+      },
+      {
+        "allocated_bytes": 4096,
+        "inode": 32,
+        "logical_size": 12,
+        "nlink": 1,
+        "path": "unicode/cafe-\u00e9.txt",
+        "type": "file"
+      },
+      {
+        "allocated_bytes": 4096,
+        "inode": 33,
+        "logical_size": 6,
+        "nlink": 1,
+        "path": "unicode/\u6771\u4eac.txt",
+        "type": "file"
+      }
+    ],
+    "summary": {
+      "entry_count": 20,
+      "file_count": 10,
+      "hard_link_paths": [
+        "dst/moved.txt",
+        "nested/branch/leaf/hard-across-dir.txt"
+      ],
+      "naive_logical_total": 2115634,
+      "other_count": 1,
+      "sparse_candidates": [
+        "dst/sparse-2m.bin"
+      ],
+      "symlink_count": 1,
+      "unique_inode_logical_total": 2115623
+    }
+  },
+  "nomount_entities": [
+    {
+      "content-hint": "GUID_partition_scheme",
+      "dev-entry": "/dev/disk4",
+      "potentially-mountable": false,
+      "unmapped-content-hint": "GUID_partition_scheme"
+    },
+    {
+      "content-hint": "Apple_APFS",
+      "dev-entry": "/dev/disk4s1",
+      "potentially-mountable": false,
+      "unmapped-content-hint": "7C3457EF-0000-11AA-AA11-00306543ECAC"
+    },
+    {
+      "content-hint": "41504653-0000-11AA-AA11-00306543ECAC",
+      "dev-entry": "/dev/disk5s1",
+      "potentially-mountable": true,
+      "unmapped-content-hint": "41504653-0000-11AA-AA11-00306543ECAC",
+      "volume-kind": "apfs"
+    },
+    {
+      "content-hint": "EF57347C-0000-11AA-AA11-00306543ECAC",
+      "dev-entry": "/dev/disk5",
+      "potentially-mountable": false,
+      "unmapped-content-hint": "EF57347C-0000-11AA-AA11-00306543ECAC"
+    }
+  ],
+  "operations": [
+    {
+      "step": "create base directories"
+    },
+    {
+      "step": "create src/base.txt"
+    },
+    {
+      "step": "rename src/base.txt -> src/renamed.txt"
+    },
+    {
+      "step": "move src/renamed.txt -> dst/moved.txt"
+    },
+    {
+      "step": "create hard link nested/branch/leaf/hard-across-dir.txt"
+    },
+    {
+      "step": "create sparse file dst/sparse-2m.bin"
+    },
+    {
+      "returncode": 0,
+      "stderr": "",
+      "step": "clone dst/moved.txt -> dst/clone.txt"
+    },
+    {
+      "step": "append to dst/moved.txt after clone"
+    },
+    {
+      "step": "create symlink dst/link.txt"
+    },
+    {
+      "results": [
+        {
+          "created": true,
+          "error": null,
+          "path": "cafe-\u00e9.txt"
+        },
+        {
+          "created": false,
+          "error": "FileExistsError: [Errno 17] File exists: '/tmp/apfsfi-ex04-ex04cs-lzuf0z51/mnt/unicode/cafe-e\u0301.txt'",
+          "path": "cafe-e\u0301.txt"
+        },
+        {
+          "created": true,
+          "error": null,
+          "path": "\u6771\u4eac.txt"
+        }
+      ],
+      "step": "unicode name probe"
+    },
+    {
+      "results": [
+        {
+          "created": true,
+          "error": null,
+          "path": "CaseName.txt"
+        },
+        {
+          "created": true,
+          "error": null,
+          "path": "casename.txt"
+        }
+      ],
+      "step": "case collision probe"
+    },
+    {
+      "fifo": {
+        "created": true,
+        "error": null
+      },
+      "step": "special file probe"
+    },
+    {
+      "created": true,
+      "returncode": 0,
+      "stderr": "",
+      "step": "compressed candidate via ditto --hfsCompression"
+    }
+  ],
+  "pinned_state": {
+    "block_size": 4096,
+    "candidate_count": 4,
+    "candidates": [
+      {
+        "descriptor_index": 1,
+        "obj_type": 2147483649,
+        "xid": 21
+      },
+      {
+        "descriptor_index": 3,
+        "obj_type": 2147483649,
+        "xid": 22
+      },
+      {
+        "descriptor_index": 5,
+        "obj_type": 2147483649,
+        "xid": 19
+      },
+      {
+        "descriptor_index": 7,
+        "obj_type": 2147483649,
+        "xid": 20
+      }
+    ],
+    "descriptor_base": 1,
+    "descriptor_base_non_contiguous": false,
+    "descriptor_blocks": 8,
+    "highest_xid": 22
+  },
+  "raw_summary": {
+    "entry_count": 19,
+    "file_count": 10,
+    "hard_link_paths": [
+      "dst/moved.txt",
+      "nested/branch/leaf/hard-across-dir.txt"
+    ],
+    "naive_logical_total": 2115634,
+    "other_count": 1,
+    "symlink_count": 1,
+    "unique_inode_logical_total": 2115623
+  },
+  "raw_walk": {
+    "device": "/dev/rdisk5",
+    "entries": [
+      {
+        "file_id": 34,
+        "logical_size": 2,
+        "path": "CaseName.txt",
+        "type": "file"
+      },
+      {
+        "file_id": 35,
+        "logical_size": 2,
+        "path": "casename.txt",
+        "type": "file"
+      },
+      {
+        "file_id": 17,
+        "path": "dst",
+        "type": "dir"
+      },
+      {
+        "file_id": 29,
+        "logical_size": 6,
+        "path": "dst/clone.txt",
+        "type": "file"
+      },
+      {
+        "file_id": 37,
+        "logical_size": 9216,
+        "path": "dst/compress-source.txt",
+        "type": "file"
+      },
+      {
+        "file_id": 38,
+        "logical_size": 9216,
+        "path": "dst/compressed-candidate.txt",
+        "type": "file"
+      },
+      {
+        "file_id": 31,
+        "logical_size": 41,
+        "path": "dst/link.txt",
+        "symlink_target": "../nested/branch/leaf/hard-across-dir.txt",
+        "type": "symlink"
+      },
+      {
+        "file_id": 25,
+        "logical_size": 11,
+        "path": "dst/moved.txt",
+        "type": "file"
+      },
+      {
+        "file_id": 28,
+        "logical_size": 2097152,
+        "path": "dst/sparse-2m.bin",
+        "type": "file"
+      },
+      {
+        "file_id": 18,
+        "path": "nested",
+        "type": "dir"
+      },
+      {
+        "file_id": 19,
+        "path": "nested/branch",
+        "type": "dir"
+      },
+      {
+        "file_id": 20,
+        "path": "nested/branch/leaf",
+        "type": "dir"
+      },
+      {
+        "file_id": 25,
+        "logical_size": 11,
+        "path": "nested/branch/leaf/hard-across-dir.txt",
+        "type": "file"
+      },
+      {
+        "file_id": 22,
+        "path": "special",
+        "type": "dir"
+      },
+      {
+        "file_id": 36,
+        "path": "special/queue.fifo",
+        "type": "other(DT_FIFO)"
+      },
+      {
+        "file_id": 16,
+        "path": "src",
+        "type": "dir"
+      },
+      {
+        "file_id": 21,
+        "path": "unicode",
+        "type": "dir"
+      },
+      {
+        "file_id": 32,
+        "logical_size": 12,
+        "path": "unicode/cafe-\u00e9.txt",
+        "type": "file"
+      },
+      {
+        "file_id": 33,
+        "logical_size": 6,
+        "path": "unicode/\u6771\u4eac.txt",
+        "type": "file"
+      }
+    ],
+    "entry_count": 19,
+    "volume": "EX04CS"
+  },
+  "volume_label": "EX04CS"
+}

@@ -1,0 +1,161 @@
+{
+  "entries": [
+    {
+      "inode": 2,
+      "nlink": 10,
+      "path": ".",
+      "type": "dir"
+    },
+    {
+      "allocated_bytes": 4096,
+      "inode": 34,
+      "logical_size": 2,
+      "nlink": 1,
+      "path": "CaseName.txt",
+      "type": "file"
+    },
+    {
+      "allocated_bytes": 4096,
+      "inode": 35,
+      "logical_size": 2,
+      "nlink": 1,
+      "path": "casename.txt",
+      "type": "file"
+    },
+    {
+      "inode": 17,
+      "nlink": 8,
+      "path": "dst",
+      "type": "dir"
+    },
+    {
+      "allocated_bytes": 4096,
+      "inode": 29,
+      "logical_size": 6,
+      "nlink": 1,
+      "path": "dst/clone.txt",
+      "type": "file"
+    },
+    {
+      "allocated_bytes": 12288,
+      "inode": 37,
+      "logical_size": 9216,
+      "nlink": 1,
+      "path": "dst/compress-source.txt",
+      "type": "file"
+    },
+    {
+      "allocated_bytes": 12288,
+      "inode": 38,
+      "logical_size": 9216,
+      "nlink": 1,
+      "path": "dst/compressed-candidate.txt",
+      "type": "file"
+    },
+    {
+      "inode": 31,
+      "logical_size": 41,
+      "nlink": 1,
+      "path": "dst/link.txt",
+      "symlink_target": "../nested/branch/leaf/hard-across-dir.txt",
+      "type": "symlink"
+    },
+    {
+      "allocated_bytes": 4096,
+      "inode": 25,
+      "logical_size": 11,
+      "nlink": 2,
+      "path": "dst/moved.txt",
+      "type": "file"
+    },
+    {
+      "allocated_bytes": 32768,
+      "inode": 28,
+      "logical_size": 2097152,
+      "nlink": 1,
+      "path": "dst/sparse-2m.bin",
+      "type": "file"
+    },
+    {
+      "inode": 18,
+      "nlink": 3,
+      "path": "nested",
+      "type": "dir"
+    },
+    {
+      "inode": 19,
+      "nlink": 3,
+      "path": "nested/branch",
+      "type": "dir"
+    },
+    {
+      "inode": 20,
+      "nlink": 3,
+      "path": "nested/branch/leaf",
+      "type": "dir"
+    },
+    {
+      "allocated_bytes": 4096,
+      "inode": 25,
+      "logical_size": 11,
+      "nlink": 2,
+      "path": "nested/branch/leaf/hard-across-dir.txt",
+      "type": "file"
+    },
+    {
+      "inode": 22,
+      "nlink": 3,
+      "path": "special",
+      "type": "dir"
+    },
+    {
+      "inode": 36,
+      "nlink": 1,
+      "path": "special/queue.fifo",
+      "type": "other(DT_FIFO)"
+    },
+    {
+      "inode": 16,
+      "nlink": 2,
+      "path": "src",
+      "type": "dir"
+    },
+    {
+      "inode": 21,
+      "nlink": 4,
+      "path": "unicode",
+      "type": "dir"
+    },
+    {
+      "allocated_bytes": 4096,
+      "inode": 32,
+      "logical_size": 12,
+      "nlink": 1,
+      "path": "unicode/cafe-\u00e9.txt",
+      "type": "file"
+    },
+    {
+      "allocated_bytes": 4096,
+      "inode": 33,
+      "logical_size": 6,
+      "nlink": 1,
+      "path": "unicode/\u6771\u4eac.txt",
+      "type": "file"
+    }
+  ],
+  "summary": {
+    "entry_count": 20,
+    "file_count": 10,
+    "hard_link_paths": [
+      "dst/moved.txt",
+      "nested/branch/leaf/hard-across-dir.txt"
+    ],
+    "naive_logical_total": 2115634,
+    "other_count": 1,
+    "sparse_candidates": [
+      "dst/sparse-2m.bin"
+    ],
+    "symlink_count": 1,
+    "unique_inode_logical_total": 2115623
+  }
+}

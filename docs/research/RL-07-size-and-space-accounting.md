@@ -59,6 +59,15 @@ Last Updated: TBD
 - [2026-04-24] `EX-03` matched raw and oracle `logical size` output exactly for
   the tested corpus, including sparse-file size, cloned-file size, and hard-link
   aggregate summaries.
+- [2026-04-25] `SR-003` confirmed the source-backed v1 boundary: inode dstream
+  or equivalent size-bearing fields are enough for the logical-size target,
+  while file extents, extent-reference records, clone/shared interpretation, and
+  snapshot-retained bytes belong to later accounting modes.
+- [2026-04-25] `EX-04` matched raw and oracle logical-size output across a
+  broader corpus, including a 2 MiB sparse file, a cloned file whose source was
+  later mutated, cross-directory hard links, and symlink target size. The
+  compression candidate did not prove compressed storage semantics and remains a
+  future accounting probe.
 
 ## Interim Decisions
 - v1 may need to distinguish "logical size" mode from "physical accounting" mode.
@@ -67,6 +76,8 @@ Last Updated: TBD
   detail.
 - The current v1 decision is to avoid obvious hard-link overcounting in
   directory aggregates, even at the cost of strict additive child sums.
+- Compressed-file logical size still needs a focused corpus check before the
+  parser encodes broad field-precedence rules beyond the current allowlist.
 
 ## Exit Criteria
 - Defined product-facing size semantics.

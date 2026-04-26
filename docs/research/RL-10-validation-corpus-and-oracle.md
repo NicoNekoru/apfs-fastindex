@@ -73,6 +73,10 @@ Last Updated: TBD
   matching path, entry type, stable file identity, and `logical size`.
 - [2026-04-24] `EX-03` implemented that proof target directly with a reusable
   loop: mounted oracle -> detach to pin state -> raw walk -> normalized diff.
+- [2026-04-25] `EX-04` extended that proof loop to two image-backed APFS
+  variants and a broader corpus. Both case-insensitive and case-sensitive
+  images matched the mounted oracle exactly for path, type, file identity,
+  logical size, and symlink target fields.
 
 ## Interim Decisions
 - Every optimization must be validated against a fresh full-scan oracle.
@@ -82,6 +86,9 @@ Last Updated: TBD
   experiment `README.md` and then back in the relevant `RL-*` logs.
 - The current narrow-v1 regression pattern is now explicit and runnable, not a
   future TODO.
+- Broader corpus additions should keep using the same mounted oracle -> detach
+  -> raw walk -> normalized diff pattern unless the question is specifically
+  about live-state behavior.
 
 ## Oracle Matrix
 

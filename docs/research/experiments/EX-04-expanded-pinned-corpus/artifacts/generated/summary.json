@@ -1,0 +1,80 @@
+{
+  "all_matched": true,
+  "case_count": 2,
+  "cases": [
+    {
+      "fs_name": "APFS",
+      "matched": true,
+      "mismatch_count": 0,
+      "mismatches": [],
+      "missing_paths": [],
+      "oracle_summary": {
+        "entry_count": 19,
+        "file_count": 9,
+        "hard_link_paths": [
+          "dst/moved.txt",
+          "nested/branch/leaf/hard-across-dir.txt"
+        ],
+        "naive_logical_total": 2115632,
+        "other_count": 1,
+        "sparse_candidates": [
+          "dst/sparse-2m.bin"
+        ],
+        "symlink_count": 1,
+        "unique_inode_logical_total": 2115621
+      },
+      "pinned_highest_xid": 21,
+      "raw_summary": {
+        "entry_count": 18,
+        "file_count": 9,
+        "hard_link_paths": [
+          "dst/moved.txt",
+          "nested/branch/leaf/hard-across-dir.txt"
+        ],
+        "naive_logical_total": 2115632,
+        "other_count": 1,
+        "symlink_count": 1,
+        "unique_inode_logical_total": 2115621
+      },
+      "unexpected_paths": [],
+      "volume_label": "EX04CI"
+    },
+    {
+      "fs_name": "Case-sensitive APFS",
+      "matched": true,
+      "mismatch_count": 0,
+      "mismatches": [],
+      "missing_paths": [],
+      "oracle_summary": {
+        "entry_count": 20,
+        "file_count": 10,
+        "hard_link_paths": [
+          "dst/moved.txt",
+          "nested/branch/leaf/hard-across-dir.txt"
+        ],
+        "naive_logical_total": 2115634,
+        "other_count": 1,
+        "sparse_candidates": [
+          "dst/sparse-2m.bin"
+        ],
+        "symlink_count": 1,
+        "unique_inode_logical_total": 2115623
+      },
+      "pinned_highest_xid": 22,
+      "raw_summary": {
+        "entry_count": 19,
+        "file_count": 10,
+        "hard_link_paths": [
+          "dst/moved.txt",
+          "nested/branch/leaf/hard-across-dir.txt"
+        ],
+        "naive_logical_total": 2115634,
+        "other_count": 1,
+        "symlink_count": 1,
+        "unique_inode_logical_total": 2115623
+      },
+      "unexpected_paths": [],
+      "volume_label": "EX04CS"
+    }
+  ]
+}

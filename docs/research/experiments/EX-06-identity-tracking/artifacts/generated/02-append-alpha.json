@@ -1,0 +1,178 @@
+{
+  "label": "02-append-alpha",
+  "mounted_oracle": [
+    {
+      "inode": 2,
+      "nlink": 4,
+      "path": ".",
+      "type": "dir"
+    },
+    {
+      "inode": 16,
+      "nlink": 3,
+      "path": "work",
+      "type": "dir"
+    },
+    {
+      "allocated_bytes": 4096,
+      "inode": 21,
+      "logical_size": 11,
+      "nlink": 1,
+      "path": "work/alpha.txt",
+      "type": "file"
+    }
+  ],
+  "mutation": {
+    "operation": "append to work/alpha.txt"
+  },
+  "nomount_entities": [
+    {
+      "content-hint": "GUID_partition_scheme",
+      "dev-entry": "/dev/disk4",
+      "potentially-mountable": false,
+      "unmapped-content-hint": "GUID_partition_scheme"
+    },
+    {
+      "content-hint": "41504653-0000-11AA-AA11-00306543ECAC",
+      "dev-entry": "/dev/disk5s1",
+      "potentially-mountable": true,
+      "unmapped-content-hint": "41504653-0000-11AA-AA11-00306543ECAC",
+      "volume-kind": "apfs"
+    },
+    {
+      "content-hint": "EF57347C-0000-11AA-AA11-00306543ECAC",
+      "dev-entry": "/dev/disk5",
+      "potentially-mountable": false,
+      "unmapped-content-hint": "EF57347C-0000-11AA-AA11-00306543ECAC"
+    },
+    {
+      "content-hint": "Apple_APFS",
+      "dev-entry": "/dev/disk4s1",
+      "potentially-mountable": false,
+      "unmapped-content-hint": "7C3457EF-0000-11AA-AA11-00306543ECAC"
+    }
+  ],
+  "pinned_state": {
+    "block_size": 4096,
+    "candidate_count": 4,
+    "candidates": [
+      {
+        "descriptor_index": 1,
+        "obj_type": 2147483649,
+        "xid": 13
+      },
+      {
+        "descriptor_index": 3,
+        "obj_type": 2147483649,
+        "xid": 14
+      },
+      {
+        "descriptor_index": 5,
+        "obj_type": 2147483649,
+        "xid": 11
+      },
+      {
+        "descriptor_index": 7,
+        "obj_type": 2147483649,
+        "xid": 12
+      }
+    ],
+    "descriptor_base": 1,
+    "descriptor_base_non_contiguous": false,
+    "descriptor_blocks": 8,
+    "highest_xid": 14
+  },
+  "raw_identity": {
+    "device": "/dev/rdisk5",
+    "entries": [
+      {
+        "file_id": 16,
+        "path": "work",
+        "type": "dir"
+      },
+      {
+        "file_id": 21,
+        "logical_size": 11,
+        "path": "work/alpha.txt",
+        "type": "file"
+      }
+    ],
+    "nodes": [
+      {
+        "checksum": 4326692610658153792,
+        "content_hash": "c82c0378a5dcb01f3c465cdb76a9352378b185c5b9fe6545d4a48b9ce30820ab",
+        "domain": "volume_omap",
+        "flags": "OBJ_VIRTUAL",
+        "is_leaf": true,
+        "is_root": true,
+        "key_count": 44,
+        "object_xid": 12,
+        "oid": 1028,
+        "paddr": 420,
+        "role": "fs_root_tree",
+        "subtype": "OBJECT_TYPE_FSTREE",
+        "type": "OBJECT_TYPE_BTREE"
+      }
+    ],
+    "record_groups": [
+      {
+        "file_id": 2,
+        "link_count": 2,
+        "names": [
+          ".fseventsd",
+          "purgeable-drecs-fixed",
+          "work"
+        ],
+        "record_types": [
+          "APFS_TYPE_DIR_REC",
+          "APFS_TYPE_DIR_REC",
+          "APFS_TYPE_INODE",
+          "APFS_TYPE_XATTR"
+        ]
+      },
+      {
+        "file_id": 16,
+        "link_count": 1,
+        "names": [
+          "alpha.txt",
+          "com.apple.provenance"
+        ],
+        "record_types": [
+          "APFS_TYPE_DIR_REC",
+          "APFS_TYPE_INODE",
+          "APFS_TYPE_XATTR"
+        ]
+      },
+      {
+        "file_id": 21,
+        "link_count": 1,
+        "logical_size": 11,
+        "names": [
+          "com.apple.provenance"
+        ],
+        "record_types": [
+          "APFS_TYPE_DSTREAM_ID",
+          "APFS_TYPE_FILE_EXTENT",
+          "APFS_TYPE_INODE",
+          "APFS_TYPE_XATTR"
+        ]
+      }
+    ],
+    "root_tree": {
+      "checksum": 4326692610658153792,
+      "content_hash": "c82c0378a5dcb01f3c465cdb76a9352378b185c5b9fe6545d4a48b9ce30820ab",
+      "domain": "volume_omap",
+      "flags": "OBJ_VIRTUAL",
+      "is_leaf": true,
+      "is_root": true,
+      "key_count": 44,
+      "object_xid": 12,
+      "oid": 1028,
+      "paddr": 420,
+      "role": "fs_root_tree",
+      "subtype": "OBJECT_TYPE_FSTREE",
+      "type": "OBJECT_TYPE_BTREE"
+    },
+    "volume": "EX06Identity"
+  }
+}
