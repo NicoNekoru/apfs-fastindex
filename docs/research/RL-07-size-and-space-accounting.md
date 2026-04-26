@@ -87,11 +87,12 @@ Last Updated: 2026-04-26
 - [2026-04-26] Hypothesis: `EX-13` should validate ordinary logical-size rows
   against public `st_size` for uncompressed fixture files, while `EX-09` remains
   responsible for compression precedence and allocated/shared/exclusive metrics.
-- [2026-04-26] Observation: Python `EX-13` matched ordinary non-sparse file and
-  symlink logical sizes but failed the sparse-file logical-size row. Public
-  `st_size` for `dst/sparse.bin` was `1048576`, while the Python-decoded inode
-  dstream size was `4503599627370496`. This localizes the next size blocker to
-  xfield/dstream body decoding, not physical/shared accounting.
+- [2026-04-26] Observation: Python `EX-13` matched ordinary file, hard-link,
+  symlink, clone, and sparse logical-size rows after the probe preserved explicit
+  xfield layout candidates. Public `st_size` for `dst/sparse.bin` was `1048576`,
+  and the Python-decoded inode dstream size matched `1048576`; the sparse-bytes
+  xfield decoded to `1015808`. This validates ordinary logical-size extraction
+  for the proof fixture while leaving physical/shared accounting out of scope.
 
 ## Interim Decisions
 - v1 may need to distinguish "logical size" mode from "physical accounting" mode.
@@ -115,9 +116,10 @@ Last Updated: 2026-04-26
 - The native record-body oracle should pass ordinary logical-size cases without
   settling compression or physical accounting. Any compressed-size mismatch
   should refine `EX-09`, not broaden `EX-13` into an accounting probe.
-- Sparse logical size cannot be promoted into Rust from the current Python
-  parser. Resolve APFS xfield alignment/layout first, then rerun `EX-13`; keep
-  `EX-09` dependent on corrected dstream/xattr extraction.
+- Sparse logical size is now validated for the proof fixture through inode
+  dstream metadata, but sparse allocated/exclusive/shared semantics remain
+  `EX-09` work. Keep the next accounting pass dependent on the corrected Python
+  body dump, not on Rust record-body parsing.
 
 ## Exit Criteria
 - Defined product-facing size semantics.

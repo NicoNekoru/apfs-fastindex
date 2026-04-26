@@ -109,9 +109,10 @@ Last Updated: 2026-04-26
   probe. It decoded `53` FS-tree records with family counts matching `EX-10`
   (`inode=12`, `dir_rec=13`, `dstream_id=6`, `xattr=9`, `sibling_link=2`,
   `sibling_map=2`, `file_extent=9`) and reconstructed all `8` mounted paths with
-  no path/type/file-identity mismatches. Verdict remained
-  `body_field_mismatch` because sparse-file inode dstream size decoded
-  incorrectly.
+  no path/type/file-identity mismatches. After the probe recorded and scored
+  explicit xfield layout candidates, the sparse-file inode dstream decoded to
+  the public logical size and the verdict became
+  `validated_native_record_body_contract`.
 
 ## Interim Decisions
 - Separate "required for namespace" from "required for accounting."
@@ -128,12 +129,12 @@ Last Updated: 2026-04-26
 - Native FS-record parsing should begin as a record dumper with raw key type,
   object ID, decoded family, and unsupported-record counts before it emits
   product namespace entries.
-- Native FS-record parsing can now advance to a body-field dumper. Product
-  namespace entry emission remains blocked until `EX-13` validates the body
-  fields needed for namespace and ordinary logical-size rows.
-- Keep the next body-field work in Python. The record-family surface is stable
-  enough for experiments, but sparse xfield/dstream layout is not stable enough
-  to encode in Rust.
+- Native FS-record parsing has enough proof-fixture evidence to advance from a
+  family dump to a Python body-field oracle. Product namespace entry emission is
+  still a later implementation step, not a claim made by `EX-13`.
+- Keep the next body-field variant work in Python. The record-family surface is
+  stable enough for experiments, but xfield layout selection should be exercised
+  across more field orderings before it is encoded in Rust.
 
 ## Exit Criteria
 - A required-record matrix exists for each product mode.

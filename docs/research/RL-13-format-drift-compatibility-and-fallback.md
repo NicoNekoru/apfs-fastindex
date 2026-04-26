@@ -171,11 +171,12 @@ Last Updated: 2026-04-26
   `body_field_mismatch`, `selected_xid_mismatch`, `unsupported_record_body`,
   `malformed_record_body`, or `oracle_inconclusive` instead of letting product
   rows proceed with partial metadata.
-- [2026-04-26] Observation: Python `EX-13` produced exactly this kind of gate:
-  verdict `body_field_mismatch` after a sparse-file dstream/xfield decode
-  mismatch. The supported Rust surface must therefore stay at record-family
-  dumping; record-body decoding remains an experiment-only Python surface until
-  the mismatch is resolved.
+- [2026-04-26] Observation: Python `EX-13` produced exactly this kind of gate and
+  then resolved the first negative case in Python: the verdict is now
+  `validated_native_record_body_contract` for the proof fixture after xfield
+  layout candidates are recorded and scored. Rust support should still wait for
+  a Python fixture-variant pass because the successful decoder relies on
+  observed layout selection rather than a single settled rule.
 
 ## Interim Decisions
 - Compatibility boundaries must be explicit, not implied.
@@ -208,8 +209,10 @@ Last Updated: 2026-04-26
 - Namespace/logical-size support promotion requires body-field evidence, not
   just FS-record family counts. Sources with unsupported body encodings or
   unaligned oracle state must stop before product rows are emitted.
-- Rust parser support must not broaden while the Python body oracle is negative.
-  The immediate compatibility gate is xfield layout for sparse dstream metadata.
+- Rust parser support should not broaden until the Python body oracle exercises
+  xfield layout selection across additional fixture variants. The immediate
+  compatibility gate moved from sparse dstream mismatch to deterministic
+  xfield-layout policy.
 
 ## Exit Criteria
 - Supported-version matrix exists.

@@ -56,7 +56,7 @@
     },
     {
       "file_id": 23,
-      "logical_size": 4503599627370496,
+      "logical_size": 1048576,
       "path": "dst/sparse.bin",
       "type": "file"
     },
@@ -83,7 +83,7 @@
       "raw_type": 9,
       "validation_notes": [],
       "value": {
-        "date_added": 1777197481345082309,
+        "date_added": 1777198161056914292,
         "entry_type": 4,
         "file_id": 3,
         "flags": 4,
@@ -109,7 +109,7 @@
       "raw_type": 9,
       "validation_notes": [],
       "value": {
-        "date_added": 1777197481345079059,
+        "date_added": 1777198161056911250,
         "entry_type": 4,
         "file_id": 2,
         "flags": 4,
@@ -152,7 +152,7 @@
               "note": null,
               "value": "root"
             },
-            "layout": "unpacked_metadata_end",
+            "layout": "unpacked_start_record_relative_fields",
             "value_hex": "726f6f7400",
             "x_flags": 2,
             "x_size": 5,
@@ -206,7 +206,7 @@
       "raw_type": 9,
       "validation_notes": [],
       "value": {
-        "date_added": 1777197482269665897,
+        "date_added": 1777198161887069280,
         "entry_type": 4,
         "file_id": 17,
         "flags": 4,
@@ -232,7 +232,7 @@
       "raw_type": 9,
       "validation_notes": [],
       "value": {
-        "date_added": 1777197482316415050,
+        "date_added": 1777198161935266688,
         "entry_type": 4,
         "file_id": 18,
         "flags": 4,
@@ -258,7 +258,7 @@
       "raw_type": 9,
       "validation_notes": [],
       "value": {
-        "date_added": 1777197482269577605,
+        "date_added": 1777198161887001862,
         "entry_type": 4,
         "file_id": 16,
         "flags": 4,
@@ -301,7 +301,7 @@
               "note": null,
               "value": "ate-dir\u0000\u0000\u0000\u0000"
             },
-            "layout": "record_relative_aligned_metadata_end",
+            "layout": "record_relative_start_record_relative_fields",
             "value_hex": "6174652d6469720000000000",
             "x_flags": 2,
             "x_size": 12,
@@ -327,7 +327,7 @@
         "dstream": null,
         "group": 99,
         "has_uncompressed_size": false,
-        "inode_name": "\u0000\u0000\u0000",
+        "inode_name": "src",
         "internal_flags": 32768,
         "kind": "inode",
         "mode": 16877,
@@ -342,10 +342,10 @@
             "interpreted": {
               "kind": "utf8",
               "note": null,
-              "value": "\u0000\u0000\u0000"
+              "value": "src"
             },
-            "layout": "record_relative_aligned_metadata_end",
-            "value_hex": "00000000",
+            "layout": "unpacked_start_record_relative_fields",
+            "value_hex": "73726300",
             "x_flags": 2,
             "x_size": 4,
             "x_type": 4
@@ -398,7 +398,7 @@
         "dstream": null,
         "group": 99,
         "has_uncompressed_size": false,
-        "inode_name": "\u0000\u0000\u0000",
+        "inode_name": "dst",
         "internal_flags": 32768,
         "kind": "inode",
         "mode": 16877,
@@ -413,10 +413,10 @@
             "interpreted": {
               "kind": "utf8",
               "note": null,
-              "value": "\u0000\u0000\u0000"
+              "value": "dst"
             },
-            "layout": "record_relative_aligned_metadata_end",
-            "value_hex": "00000000",
+            "layout": "unpacked_start_record_relative_fields",
+            "value_hex": "64737400",
             "x_flags": 2,
             "x_size": 4,
             "x_type": 4
@@ -469,7 +469,7 @@
       "raw_type": 9,
       "validation_notes": [],
       "value": {
-        "date_added": 1777197483550786299,
+        "date_added": 1777198163101734738,
         "entry_type": 8,
         "file_id": 24,
         "flags": 8,
@@ -495,7 +495,7 @@
       "raw_type": 9,
       "validation_notes": [],
       "value": {
-        "date_added": 1777197483336935453,
+        "date_added": 1777198162898712229,
         "entry_type": 8,
         "file_id": 23,
         "flags": 8,
@@ -521,7 +521,7 @@
       "raw_type": 9,
       "validation_notes": [],
       "value": {
-        "date_added": 1777197482909737971,
+        "date_added": 1777198162493494297,
         "entry_type": 8,
         "file_id": 20,
         "flags": 8,
@@ -533,7 +533,7 @@
               "kind": "u64",
               "value": 21
             },
-            "layout": "unpacked_metadata_end",
+            "layout": "unpacked_start_record_relative_fields",
             "value_hex": "1500000000000000",
             "x_flags": 2,
             "x_size": 8,
@@ -559,7 +559,7 @@
       "raw_type": 9,
       "validation_notes": [],
       "value": {
-        "date_added": 1777197483976292273,
+        "date_added": 1777198163511000396,
         "entry_type": 10,
         "file_id": 26,
         "flags": 10,
@@ -585,7 +585,7 @@
       "raw_type": 9,
       "validation_notes": [],
       "value": {
-        "date_added": 1777197483123660817,
+        "date_added": 1777198162691142701,
         "entry_type": 8,
         "file_id": 20,
         "flags": 8,
@@ -597,7 +597,7 @@
               "kind": "u64",
               "value": 22
             },
-            "layout": "unpacked_metadata_end",
+            "layout": "unpacked_start_record_relative_fields",
             "value_hex": "1600000000000000",
             "x_flags": 2,
             "x_size": 8,
@@ -640,7 +640,7 @@
               "note": null,
               "value": "ventsd\u0000\u0000\u0000\u0000"
             },
-            "layout": "record_relative_aligned_metadata_end",
+            "layout": "record_relative_start_record_relative_fields",
             "value_hex": "76656e7473640000000000",
             "x_flags": 2,
             "x_size": 11,
@@ -694,7 +694,7 @@
       "raw_type": 9,
       "validation_notes": [],
       "value": {
-        "date_added": 1777197482316680801,
+        "date_added": 1777198161935534939,
         "entry_type": 8,
         "file_id": 19,
         "flags": 8,
@@ -709,8 +709,8 @@
       "family": "dir_rec",
       "key": {
         "kind": "named",
-        "name": "00000000056dd30f",
-        "name_bytes_hex": "3030303030303030303536646433306600",
+        "name": "00000000056e45ca",
+        "name_bytes_hex": "3030303030303030303536653435636100",
         "name_len": 17,
         "raw_key_form": "hashed"
       },
@@ -720,7 +720,7 @@
       "raw_type": 9,
       "validation_notes": [],
       "value": {
-        "date_added": 1777197484276911188,
+        "date_added": 1777198163783930279,
         "entry_type": 8,
         "file_id": 28,
         "flags": 8,
@@ -735,8 +735,8 @@
       "family": "dir_rec",
       "key": {
         "kind": "named",
-        "name": "00000000056dd30e",
-        "name_bytes_hex": "3030303030303030303536646433306500",
+        "name": "00000000056e45c9",
+        "name_bytes_hex": "3030303030303030303536653435633900",
         "name_len": 17,
         "raw_key_form": "hashed"
       },
@@ -746,7 +746,7 @@
       "raw_type": 9,
       "validation_notes": [],
       "value": {
-        "date_added": 1777197484276036268,
+        "date_added": 1777198163783442485,
         "entry_type": 8,
         "file_id": 27,
         "flags": 8,
@@ -795,7 +795,7 @@
               "note": null,
               "value": "fseventsd-uuid"
             },
-            "layout": "record_relative_aligned_metadata_end",
+            "layout": "record_relative_start_record_relative_fields",
             "value_hex": "66736576656e7473642d7575696400",
             "x_flags": 2,
             "x_size": 15,
@@ -812,7 +812,7 @@
                 "total_bytes_written": 36
               }
             },
-            "layout": "record_relative_aligned_metadata_end",
+            "layout": "record_relative_start_record_relative_fields",
             "value_hex": "24000000000000000010000000000000000000000000000024000000000000000000000000000000",
             "x_flags": 32,
             "x_size": 40,
@@ -894,7 +894,7 @@
               "note": null,
               "value": "moved.txt"
             },
-            "layout": "record_relative_aligned_metadata_end",
+            "layout": "record_relative_start_record_relative_fields",
             "value_hex": "6d6f7665642e74787400",
             "x_flags": 2,
             "x_size": 10,
@@ -911,7 +911,7 @@
                 "total_bytes_written": 11
               }
             },
-            "layout": "record_relative_aligned_metadata_end",
+            "layout": "record_relative_start_record_relative_fields",
             "value_hex": "0b00000000000000001000000000000000000000000000000b000000000000000000000000000000",
             "x_flags": 32,
             "x_size": 40,
@@ -1072,11 +1072,11 @@
       "value": {
         "bsd_flags": 0,
         "dstream": {
-          "alloced_size": 4503599627370496,
+          "alloced_size": 1048576,
           "default_crypto_id": 0,
-          "size": 4503599627370496,
+          "size": 1048576,
           "total_bytes_read": 0,
-          "total_bytes_written": 34359738368
+          "total_bytes_written": 8
         },
         "group": 99,
         "has_uncompressed_size": false,
@@ -1088,7 +1088,7 @@
         "owner": 99,
         "parent_id": 17,
         "private_id": 23,
-        "sparse_bytes": 4362862139015168,
+        "sparse_bytes": 1015808,
         "uncompressed_size": 0,
         "xfields": [
           {
@@ -1097,7 +1097,7 @@
               "note": null,
               "value": "sparse.bin"
             },
-            "layout": "unpacked_metadata_end",
+            "layout": "unpacked_start_blob_relative_fields",
             "value_hex": "7370617273652e62696e00",
             "x_flags": 2,
             "x_size": 11,
@@ -1107,15 +1107,15 @@
             "interpreted": {
               "kind": "dstream",
               "value": {
-                "alloced_size": 4503599627370496,
+                "alloced_size": 1048576,
                 "default_crypto_id": 0,
-                "size": 4503599627370496,
+                "size": 1048576,
                 "total_bytes_read": 0,
-                "total_bytes_written": 34359738368
+                "total_bytes_written": 8
               }
             },
-            "layout": "unpacked_metadata_end",
-            "value_hex": "00000000000010000000000000001000000000000000000000000000080000000000000000000000",
+            "layout": "unpacked_start_blob_relative_fields",
+            "value_hex": "00001000000000000000100000000000000000000000000008000000000000000000000000000000",
             "x_flags": 32,
             "x_size": 40,
             "x_type": 8
@@ -1123,10 +1123,10 @@
           {
             "interpreted": {
               "kind": "u64",
-              "value": 4362862139015168
+              "value": 1015808
             },
-            "layout": "unpacked_metadata_end",
-            "value_hex": "0000000000800f00",
+            "layout": "unpacked_start_blob_relative_fields",
+            "value_hex": "00800f0000000000",
             "x_flags": 40,
             "x_size": 8,
             "x_type": 13
@@ -1288,7 +1288,7 @@
                 "total_bytes_written": 6
               }
             },
-            "layout": "record_relative_aligned_metadata_end",
+            "layout": "record_relative_start_record_relative_fields",
             "value_hex": "06000000000000000010000000000000000000000000000006000000000000000000000000000000",
             "x_flags": 32,
             "x_size": 40,
@@ -1300,7 +1300,7 @@
               "note": null,
               "value": "clone.txt"
             },
-            "layout": "record_relative_aligned_metadata_end",
+            "layout": "record_relative_start_record_relative_fields",
             "value_hex": "636c6f6e652e74787400",
             "x_flags": 2,
             "x_size": 10,
@@ -1404,7 +1404,7 @@
               "note": null,
               "value": ".txt\u0000\u0000\u0000\u0000"
             },
-            "layout": "record_relative_aligned_metadata_end",
+            "layout": "record_relative_start_record_relative_fields",
             "value_hex": "2e7478740000000000",
             "x_flags": 2,
             "x_size": 9,
@@ -1486,13 +1486,13 @@
         "dstream": {
           "alloced_size": 4096,
           "default_crypto_id": 0,
-          "size": 201,
+          "size": 198,
           "total_bytes_read": 0,
-          "total_bytes_written": 201
+          "total_bytes_written": 198
         },
         "group": 99,
         "has_uncompressed_size": false,
-        "inode_name": "00000000056dd30e",
+        "inode_name": "00000000056e45c9",
         "internal_flags": 32768,
         "kind": "inode",
         "mode": 33152,
@@ -1507,10 +1507,10 @@
             "interpreted": {
               "kind": "utf8",
               "note": null,
-              "value": "00000000056dd30e"
+              "value": "00000000056e45c9"
             },
-            "layout": "record_relative_aligned_metadata_end",
-            "value_hex": "3030303030303030303536646433306500",
+            "layout": "record_relative_start_record_relative_fields",
+            "value_hex": "3030303030303030303536653435633900",
             "x_flags": 2,
             "x_size": 17,
             "x_type": 4
@@ -1521,13 +1521,13 @@
               "value": {
                 "alloced_size": 4096,
                 "default_crypto_id": 0,
-                "size": 201,
+                "size": 198,
                 "total_bytes_read": 0,
-                "total_bytes_written": 201
+                "total_bytes_written": 198
               }
             },
-            "layout": "record_relative_aligned_metadata_end",
-            "value_hex": "c90000000000000000100000000000000000000000000000c9000000000000000000000000000000",
+            "layout": "record_relative_start_record_relative_fields",
+            "value_hex": "c60000000000000000100000000000000000000000000000c6000000000000000000000000000000",
             "x_flags": 32,
             "x_size": 40,
             "x_type": 8
@@ -1591,7 +1591,7 @@
         },
         "group": 99,
         "has_uncompressed_size": false,
-        "inode_name": "00000000056dd30f",
+        "inode_name": "00000000056e45ca",
         "internal_flags": 32768,
         "kind": "inode",
         "mode": 33152,
@@ -1606,10 +1606,10 @@
             "interpreted": {
               "kind": "utf8",
               "note": null,
-              "value": "00000000056dd30f"
+              "value": "00000000056e45ca"
             },
-            "layout": "record_relative_aligned_metadata_end",
-            "value_hex": "3030303030303030303536646433306600",
+            "layout": "record_relative_start_record_relative_fields",
+            "value_hex": "3030303030303030303536653435636100",
             "x_flags": 2,
             "x_size": 17,
             "x_type": 4
@@ -1625,7 +1625,7 @@
                 "total_bytes_written": 72
               }
             },
-            "layout": "record_relative_aligned_metadata_end",
+            "layout": "record_relative_start_record_relative_fields",
             "value_hex": "48000000000000000010000000000000000000000000000048000000000000000000000000000000",
             "x_flags": 32,
             "x_size": 40,

@@ -135,5 +135,7 @@ rows?
 - `RL-13`: malformed variable-length fields, unknown flags, unsupported xattr
   stream forms, and mode-incompatible record families are hard-stop conditions.
 - Exact next step: `EX-13` executed as a Python-first raw-byte probe and produced
-  `body_field_mismatch` on sparse-file dstream size. Resolve inode xfield data
-  alignment/layout in Python before any Rust record-body implementation.
+  `validated_native_record_body_contract` for the proof fixture after recording
+  and scoring xfield layout candidates. Run a second Python fixture variant to
+  prove deterministic xfield-layout policy before any Rust record-body
+  implementation.

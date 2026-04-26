@@ -1,6 +1,6 @@
 {
   "block_size": 4096,
-  "comparison_matched": false,
+  "comparison_matched": true,
   "family_counts": {
     "dir_rec": 13,
     "dstream_id": 6,
@@ -11,7 +11,7 @@
     "xattr": 9
   },
   "implementation_note": "Record bodies were decoded by Python from raw FS-tree bytes. Rust was used only as the existing EX-12 context provider for selected checkpoint and root-tree paddr; no new Rust parser behavior was added.",
-  "mismatch_count": 1,
+  "mismatch_count": 0,
   "missing_path_count": 0,
   "mounted_entry_count": 8,
   "node_count": 1,
@@ -20,5 +20,5 @@
   "selected_xid": 14,
   "status": "executed",
   "unexpected_path_count": 0,
-  "verdict": "body_field_mismatch"
+  "verdict": "validated_native_record_body_contract"
 }

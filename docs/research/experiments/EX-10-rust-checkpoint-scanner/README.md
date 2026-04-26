@@ -255,6 +255,7 @@ encrypted/sealed/volume-group behavior.
 
 ## Next Exact Step
 
-- Keep Rust at this record-family gate. `EX-13` should continue in Python until
-  sparse-file xfield/dstream layout matches the same-run mounted/POSIX oracle;
-  only then should a Rust record-body dump be considered.
+- Keep Rust at this record-family gate for now. `EX-13` validated the first
+  Python record-body contract, but xfield layout selection should be exercised
+  through a second Python fixture variant before a Rust record-body dump is
+  considered.

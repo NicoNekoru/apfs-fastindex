@@ -1,22 +1,6 @@
 {
-  "matched": false,
-  "mismatches": [
-    {
-      "actual": {
-        "file_id": 23,
-        "logical_size": 4503599627370496,
-        "path": "dst/sparse.bin",
-        "type": "file"
-      },
-      "expected": {
-        "file_id": 23,
-        "logical_size": 1048576,
-        "path": "dst/sparse.bin",
-        "type": "file"
-      },
-      "path": "dst/sparse.bin"
-    }
-  ],
+  "matched": true,
+  "mismatches": [],
   "missing_paths": [],
   "unexpected_paths": []
 }

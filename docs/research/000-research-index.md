@@ -217,9 +217,11 @@ Gate D: broader product semantics and optimization
   experiment after `EX-12`. It decoded `DIR_REC`, `INODE`, `XATTR`,
   `SIBLING_LINK`, `SIBLING_MAP`, and dstream field candidates, reconstructed all
   mounted paths, and preserved same-run mounted/POSIX plus `go-apfs` observer
-  artifacts. Verdict: `body_field_mismatch` because sparse-file inode dstream
-  logical size did not match public `st_size`; keep record-body decoding in
-  Python until xfield layout is resolved.
+  artifacts. Verdict: `validated_native_record_body_contract`; the sparse-file
+  mismatch was resolved by recording candidate xfield layouts and selecting the
+  blob-relative data alignment that matches `j_dstream_t.size` and
+  `INO_EXT_TYPE_SPARSE_BYTES`. Keep the next fixture-variant pass in Python
+  before moving this rule into Rust.
 
 ## Research Tracks
 

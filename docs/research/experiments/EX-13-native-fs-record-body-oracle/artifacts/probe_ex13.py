@@ -461,16 +461,32 @@ def parse_xfields(value: bytes, base_offset: int) -> list[dict]:
         metadata.append((value[offset], value[offset + 1], le_u16(value, offset + 2)))
     errors = []
     candidates = []
-    for data_start_name, data_start in (
+    layouts = (
         (
-            "record_relative_aligned_metadata_end",
+            "record_relative_start_record_relative_fields",
             align_relative(base_offset, fields_end),
+            lambda cursor: align_relative(base_offset, cursor),
         ),
-        ("unpacked_metadata_end", fields_end),
-    ):
+        (
+            "unpacked_start_record_relative_fields",
+            fields_end,
+            lambda cursor: align_relative(base_offset, cursor),
+        ),
+        (
+            "unpacked_start_blob_relative_fields",
+            fields_end,
+            align8,
+        ),
+        (
+            "blob_relative_start_blob_relative_fields",
+            align8(fields_end),
+            align8,
+        ),
+    )
+    for data_start_name, data_start, align_next in layouts:
         try:
             fields = parse_xfield_data(
-                value, metadata, data_start, data_start_name, base_offset
+                value, metadata, data_start, data_start_name, align_next
             )
             candidates.append((score_xfields(fields), fields))
         except ProbeError as err:
@@ -489,7 +505,7 @@ def parse_xfield_data(
     metadata: list[tuple[int, int, int]],
     data_start: int,
     layout: str,
-    base_offset: int,
+    align_next: Any,
 ) -> list[dict]:
     cursor = data_start
     fields = []
@@ -510,7 +526,7 @@ def parse_xfield_data(
                 "interpreted": interpret_xfield(x_type, data),
             }
         )
-        cursor = align_relative(base_offset, cursor + x_size)
+        cursor = align_next(cursor + x_size)
     return fields
 
 
@@ -523,13 +539,27 @@ def score_xfields(fields: list[dict]) -> int:
     for field in fields:
         interpreted = field.get("interpreted") or {}
         if interpreted.get("kind") == "utf8" and interpreted.get("value"):
-            score += 1
+            value = interpreted["value"]
+            stripped_value = value.rstrip("\x00")
+            if not stripped_value or "\x00" in stripped_value:
+                score -= 5
+            else:
+                score += 5
         if interpreted.get("kind") == "dstream":
             value = interpreted["value"]
-            if value["size"] < (1 << 40) and value["alloced_size"] < (1 << 40):
+            if (
+                value["size"] < (1 << 40)
+                and value["alloced_size"] < (1 << 40)
+                and value["total_bytes_written"] < (1 << 40)
+            ):
                 score += 10
             else:
                 score -= 100
+        if interpreted.get("kind") == "u64":
+            if interpreted["value"] < (1 << 40):
+                score += 2
+            else:
+                score -= 10
     return score
 
 

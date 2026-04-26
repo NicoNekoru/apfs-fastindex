@@ -5,7 +5,7 @@ Title: Native FS-record body oracle
 Date: 2026-04-26
 Owner: GPT-5.5
 Status: Executed
-Result: Python raw-byte record-body probe produced `body_field_mismatch`
+Result: Python raw-byte record-body probe produced `validated_native_record_body_contract`
 Related RLs:
 - RL-03 FS Tree Topology and Required Records
 - RL-06 Namespace Reconstruction
@@ -17,11 +17,10 @@ Related RLs:
 
 `EX-12` validates native OMAP/root lookup for a paired detached fixture.
 `EX-13` executed the next gate as a Python-first raw-byte experiment, not a Rust
-parser change. The probe decoded FS-tree record bodies and reconstructed all
-mounted paths, but it did **not** validate the full native body contract:
-ordinary files, hard links, symlink target, and namespace rows matched, while
-the sparse file's inode dstream logical size decoded incorrectly because xfield
-data alignment/layout remains unresolved.
+parser change. The probe decoded FS-tree record bodies, reconstructed all
+mounted paths, and matched the mounted/POSIX namespace plus ordinary logical-size
+oracle, including the sparse file after xfield layout candidates were made
+explicit.
 
 ## Question
 
@@ -176,13 +175,19 @@ Minimum first fixture:
   - unexpected paths: `0`
   - path/type/file identity mismatches: `0`
 - Logical-size comparison:
-  - ordinary hard-linked file rows matched after record-relative xfield
-    alignment was added to the Python parser.
+  - ordinary hard-linked file rows matched.
   - symlink target and logical size matched.
-  - sparse file `dst/sparse.bin` mismatched:
-    - expected public logical size: `1048576`
-    - Python-decoded dstream size: `4503599627370496`
-- Verdict: `body_field_mismatch`.
+  - sparse file `dst/sparse.bin` matched:
+    - public logical size: `1048576`
+    - Python-decoded dstream size: `1048576`
+    - Python-decoded sparse bytes: `1015808`
+  - logical-size mismatches: `0`
+- Xfield layout observation:
+  - the Python probe now records the selected candidate layout per xfield.
+  - ordinary two-xfield inodes used `record_relative_start_record_relative_fields`.
+  - the sparse inode used `unpacked_start_blob_relative_fields`, which aligns
+    the dstream and sparse-byte fields to the xfield-blob-relative data stream.
+- Verdict: `validated_native_record_body_contract`.
 
 ## Artifacts Saved
 
@@ -226,25 +231,25 @@ Minimum first fixture:
   namespace/logical-size rows can be trusted.
 - Observation: Python raw-byte parsing can reconstruct the proof fixture path
   graph from `DIR_REC` keys/values and recover hard-link identity, symlink xattr
-  payload, and ordinary file dstream sizes for non-sparse files.
-- Observation: Sparse-file dstream/xfield parsing is not yet trustworthy. The
-  mismatch is localized to body-field decoding, not checkpoint selection, OMAP
-  lookup, path reconstruction, or mounted oracle capture.
-- Hypothesis: APFS xfield data alignment must be modeled relative to the
-  containing record and may have additional sparse-file layout nuance. This must
-  be resolved in Python before a Rust record-body decoder is justified.
+  payload, and file dstream sizes for the proof fixture.
+- Observation: Sparse-file dstream/xfield parsing required explicit candidate
+  layout handling. The successful sparse record used blob-relative alignment
+  for subsequent xfield data, while some ordinary inode records used
+  record-relative alignment. That distinction must remain documented in Python
+  artifacts before being encoded in Rust.
+- Hypothesis: APFS xfield alignment behavior may vary by record body shape or
+  by the byte offsets created by each xfield sequence. More Python fixtures
+  should exercise extra xfield orderings before Rust adopts a single decoder.
 
 ## What This Can Rule Out
 
 - It rules out treating record-family counts as sufficient evidence for
   namespace/logical-size support.
-- It rules out moving record-body decoding into Rust now; the sparse dstream
-  mismatch needs Python/source-level resolution first.
-- It rules out product namespace/logical-size rows until xfield/dstream decoding
-  matches sparse-file public logical size.
-- It rules out collapsing sparse logical size with allocated/shared/exclusive
-  accounting. The observed failure is a logical-size field decode issue, not a
-  physical accounting formula.
+- It rules out the earlier one-layout xfield decoder as sufficient. The probe
+  must preserve per-record xfield layout evidence.
+- It rules out treating sparse logical size as physical/shared/exclusive
+  accounting. The validated sparse logical-size row came from inode dstream
+  metadata; allocated/shared/exclusive formulas remain separate.
 - It continues to rule out using `go-apfs` or any third-party parser as a
   paddr/XID oracle without selected-XID alignment.
 
@@ -259,8 +264,8 @@ Minimum first fixture:
 
 ## Next Exact Step
 
-- Continue in Python: isolate APFS xfield data alignment for inodes with
-  `INO_EXT_TYPE_SPARSE_BYTES` by saving per-xfield raw offsets/candidate layouts
-  and comparing the sparse file against `go-apfs` record groups and Apple's
-  `xf_blob_t` rules. Do not implement Rust record-body decoding until sparse
-  dstream logical size matches the mounted oracle.
+- Continue in Python with a second `EX-13` fixture variant before Rust:
+  deliberately create files with multiple xfield orderings and optional metadata
+  (sparse, hard link name, Finder/provenance xattrs, compressed candidate) and
+  prove that the candidate layout selection is deterministic and source-backed.
+  Only after that should Rust record-body decoding be considered.

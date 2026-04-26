@@ -220,8 +220,7 @@ Future execution should save:
 
 ## Next Exact Step
 
-- Do not execute accounting yet. First resolve the `EX-13` sparse-file
-  xfield/dstream mismatch in Python so inode dstream, inode uncompressed-size,
-  xattr, and decmpfs metadata can be emitted with confidence. The first
-  `EX-09` result should answer compressed logical-size precedence before any
-  physical/shared accounting formula is attempted.
+- Do not execute broad accounting yet. Use the corrected Python `EX-13` body dump
+  as the input baseline, then run the first `EX-09` pass narrowly against
+  compressed logical-size precedence before any physical/shared accounting
+  formula is attempted.

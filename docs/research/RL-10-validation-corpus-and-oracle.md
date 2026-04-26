@@ -131,11 +131,12 @@ Last Updated: 2026-04-26
   with any third-party APFS observer preserving the `selected_xid` caveat from
   `EX-12`.
 - [2026-04-26] Observation: `EX-13` executed as a Python-first probe and produced
-  a valid negative oracle result: `body_field_mismatch`. The same-run mounted
-  oracle and Python raw parser agreed on path set and identity but disagreed on
-  sparse-file logical size. This is reusable evidence because it saves the raw
-  body dump, mounted oracle, cross-tool observer, comparison, and summary under
-  `EX-13` artifacts.
+  `validated_native_record_body_contract`. The same-run mounted oracle and
+  Python raw parser agreed on path set, identity, symlink target, hard-link file
+  identity, and ordinary logical size after xfield layout candidates were
+  preserved. This is reusable evidence because it saves the raw body dump,
+  mounted oracle, cross-tool observer, comparison, and summary under `EX-13`
+  artifacts.
 
 ## Interim Decisions
 - Every optimization must be validated against a fresh full-scan oracle.
