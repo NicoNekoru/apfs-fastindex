@@ -1,5 +1,5 @@
 {
-  "device": "/dev/rdisk5",
+  "device": "/dev/rdisk7",
   "entries": [
     {
       "file_id": 17,
@@ -45,7 +45,7 @@
   ],
   "node_summaries": [
     {
-      "checksum": 3055955575639904282,
+      "checksum": 10315728882180999979,
       "domain": "volume_omap",
       "is_leaf": true,
       "key_count": 53,
@@ -55,8 +55,8 @@
       "name_count": 22,
       "name_sample": [
         ".fseventsd",
-        "00000000056e6ec2",
-        "00000000056e6ec3",
+        "000000000b0a99ff",
+        "000000000b0a9a00",
         "clone.txt",
         "com.apple.fs.symlink",
         "com.apple.provenance",
@@ -75,7 +75,7 @@
         "purgeable-drecs-fixed",
         "root"
       ],
-      "node_key": "volume_omap|1028|12|427|3055955575639904282|OBJECT_TYPE_BTREE|OBJECT_TYPE_FSTREE|fecd7ca6e64233a86ba76553d3f4b3237fec6cdaf26add148598d607ee7dfdd9",
+      "node_key": "volume_omap|1028|12|427|10315728882180999979|OBJECT_TYPE_BTREE|OBJECT_TYPE_FSTREE|05fa43669a73843743b4f06796584d7daf3f1059ca50f19843dd7a077637761b",
       "object_xid": 12,
       "oid": 1028,
       "paddr": 427,
@@ -90,14 +90,14 @@
       },
       "role": "fs_root_tree",
       "subtype": "OBJECT_TYPE_FSTREE",
-      "summary_hash": "b38784af12a8792c20a7a9305bf326cf8f423d7ff498454e119d19441c4e8b27",
+      "summary_hash": "d5d8b6c53cc24f651ffcc5a9147cd1ab0c4505a095bb48caa964cfacb850ef9c",
       "type": "OBJECT_TYPE_BTREE"
     }
   ],
   "nodes": [
     {
-      "checksum": 3055955575639904282,
-      "content_hash": "fecd7ca6e64233a86ba76553d3f4b3237fec6cdaf26add148598d607ee7dfdd9",
+      "checksum": 10315728882180999979,
+      "content_hash": "05fa43669a73843743b4f06796584d7daf3f1059ca50f19843dd7a077637761b",
       "domain": "volume_omap",
       "flags": "OBJ_VIRTUAL",
       "is_leaf": true,
@@ -220,8 +220,8 @@
     }
   ],
   "root_tree": {
-    "checksum": 3055955575639904282,
-    "content_hash": "fecd7ca6e64233a86ba76553d3f4b3237fec6cdaf26add148598d607ee7dfdd9",
+    "checksum": 10315728882180999979,
+    "content_hash": "05fa43669a73843743b4f06796584d7daf3f1059ca50f19843dd7a077637761b",
     "domain": "volume_omap",
     "flags": "OBJ_VIRTUAL",
     "is_leaf": true,

@@ -1,7 +1,7 @@
 # SR-014 Native FS-record body contract
 
 Status: Complete
-Date: 2026-04-26
+Date: 2026-05-13
 Type: Source Review
 Related RLs:
 - RL-03
@@ -134,8 +134,11 @@ rows?
   mounted/POSIX oracle and preserve `selected_xid` discipline from `EX-12`.
 - `RL-13`: malformed variable-length fields, unknown flags, unsupported xattr
   stream forms, and mode-incompatible record families are hard-stop conditions.
-- Exact next step: `EX-13` executed as a Python-first raw-byte probe and produced
-  `validated_native_record_body_contract` for the proof fixture after recording
-  and scoring xfield layout candidates. Run a second Python fixture variant to
-  prove deterministic xfield-layout policy before any Rust record-body
-  implementation.
+- Exact next step: `EX-13` executed as a Python-first raw-byte probe and
+  produced `validated_native_record_body_contract` for the proof fixture after
+  recording and scoring xfield layout candidates. `EX-14` then attempted the
+  broader fixture-variant gate, but its first run was `oracle_inconclusive`
+  because Rust checkpoint/root context aborted with a checksum mismatch before
+  FS-record body bytes were available. Isolate that upstream context failure,
+  then rerun EX-14 to prove deterministic xfield-layout policy before any Rust
+  record-body implementation.

@@ -21,9 +21,9 @@ What is resolved and reproducible:
 
 What is not resolved:
 
-- native checkpoint-map validation beyond the current scan-state locator
-- native container/volume OMAP resolver
-- native FS-record reader
+- wiring the native Rust checkpoint/OMAP/root path into `ParserSkeleton`
+- native FS-record body decoding
+- native namespace/logical-size row emission
 - performance model
 - incremental reuse
 - live mounted raw scanning
@@ -32,13 +32,14 @@ What is not resolved:
 
 Native Rust status as of 2026-04-26:
 
-- `crates/apfs-fastindex` implements only the first checkpoint scanner slice:
-  source gating for `.dmg` and raw-device inputs, block-zero locator parsing,
-  contiguous descriptor scanning, candidate `NXSB` magic/type/checksum
-  validation, highest valid candidate XID selection, and JSON output.
-- The Rust scanner is tracked by `EX-10` and is not yet wired into
-  `ParserSkeleton`.
-- It does not implement OMAP/root discovery or FS-record parsing.
+- `crates/apfs-fastindex` implements the native read-only path through source
+  gating, block-zero locator parsing, checkpoint candidate selection,
+  checkpoint-map validation, container/volume OMAP resolution, volume
+  superblock decoding, FS-tree root validation, and FS-record family dumping.
+- The Rust scanner is tracked by `EX-10`, `EX-11`, and `EX-12`, with current
+  status summarized in `docs/implementation/rust-checkpoint-scanner.md`.
+- It is not yet wired into `ParserSkeleton` and still does not implement
+  FS-record body decoding, namespace entry emission, or logical-size output.
 
 This document is intentionally specific to the proof skeleton. Do not use it as
 the final native parser spec.

@@ -3,7 +3,7 @@
 Status: Open
 Priority: P0
 Owner: TBD
-Last Updated: 2026-04-26
+Last Updated: 2026-05-13
 
 ## Core Question
 - How do we prove the parser and incremental engine are correct?
@@ -137,6 +137,19 @@ Last Updated: 2026-04-26
   preserved. This is reusable evidence because it saves the raw body dump,
   mounted oracle, cross-tool observer, comparison, xfield-layout summary, and
   summary under `EX-13` artifacts.
+- [2026-05-13] Observation: `EX-14` is a negative/inconclusive oracle result for
+  the body-parser gate. The retained variant fixture saved environment,
+  operations, mounted/POSIX oracle, Rust context, comparison status, and xfield
+  summary status, but the raw body oracle did not run because Rust returned no
+  `selected_checkpoint` after `APFS object validation failed: checksum mismatch
+  at block 1031`. A same-session rerun of `EX-13` still passed, separating the
+  new fixture-context blocker from the original proof fixture.
+- [2026-05-13] Spec/Observation: `SR-015` creates the next body-oracle replay
+  gate: run the source-backed xfield cursor rule against the saved EX-13 media
+  state, record `xf_used_data`, and require the same namespace/logical-size diff.
+- [2026-05-13] Spec/Observation: `SR-016` through `SR-018` add required negative
+  and edge fixtures for record-body malformation, compression-size conflicts,
+  and APFS name-hash/case behavior before Rust broadens beyond row enumeration.
 
 ## Interim Decisions
 - Every optimization must be validated against a fresh full-scan oracle.
@@ -165,6 +178,13 @@ Last Updated: 2026-04-26
 - Negative body-field oracle results are sufficient to block Rust work. A Python
   probe that reconstructs paths but mismatches sparse logical size should be
   treated as an unresolved parser contract, not as a partial product success.
+- Inconclusive body-field oracle results are also sufficient to block Rust body
+  work when an earlier native context gate fails. `EX-14` should lead to a
+  focused checkpoint-context replay that preserves the offending context before
+  another xfield-layout fixture is attempted.
+- Body-parser promotion now requires both the positive EX-13 replay under the
+  source-backed xfield rule and synthetic negative fixtures for malformed
+  variable-length fields, xfields, xattrs, and cross-record inconsistencies.
 
 ## Oracle Matrix
 
@@ -208,6 +228,15 @@ Last Updated: 2026-04-26
 - `Python-first parser experiments`:
   body-field uncertainty should be resolved in Python artifacts before the Rust
   implementation surface is widened.
+- `Context-provider blockers for body experiments`:
+  if the Rust scanner cannot publish `selected_checkpoint` and FS-tree root
+  context for a same-run body fixture, the body oracle is `oracle_inconclusive`
+  and the next experiment should isolate checkpoint-map/OMAP/root validation
+  before retrying body decoding.
+- `Name and case behavior`:
+  row enumeration validates stored-name preservation; lookup-by-name requires a
+  separate APFS name-hash fixture before Rust can claim case/normalization
+  equivalence.
 - `Compression logical-size precedence`:
   public logical-size APIs must be compared to each raw candidate size source
   rather than collapsed into a global size pass/fail.

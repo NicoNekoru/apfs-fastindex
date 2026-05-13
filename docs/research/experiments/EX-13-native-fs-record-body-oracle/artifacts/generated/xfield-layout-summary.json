@@ -1,0 +1,331 @@
+{
+  "ambiguous_record_count": 4,
+  "ambiguous_records": [
+    {
+      "candidates": [
+        {
+          "data_start": 12,
+          "field_summaries": [
+            {
+              "interpreted_kind": "utf8",
+              "value": "ate-dir\u0000\u0000\u0000\u0000",
+              "value_hex": "6174652d6469720000000000",
+              "x_flags": 2,
+              "x_size": 12,
+              "x_type": 4
+            }
+          ],
+          "layout": "record_relative_start_record_relative_fields",
+          "score": 5
+        },
+        {
+          "data_start": 8,
+          "field_summaries": [
+            {
+              "interpreted_kind": "utf8",
+              "value": "private-dir",
+              "value_hex": "707269766174652d64697200",
+              "x_flags": 2,
+              "x_size": 12,
+              "x_type": 4
+            }
+          ],
+          "layout": "unpacked_start_record_relative_fields",
+          "score": 5
+        },
+        {
+          "data_start": 8,
+          "field_summaries": [
+            {
+              "interpreted_kind": "utf8",
+              "value": "private-dir",
+              "value_hex": "707269766174652d64697200",
+              "x_flags": 2,
+              "x_size": 12,
+              "x_type": 4
+            }
+          ],
+          "layout": "unpacked_start_blob_relative_fields",
+          "score": 5
+        },
+        {
+          "data_start": 8,
+          "field_summaries": [
+            {
+              "interpreted_kind": "utf8",
+              "value": "private-dir",
+              "value_hex": "707269766174652d64697200",
+              "x_flags": 2,
+              "x_size": 12,
+              "x_type": 4
+            }
+          ],
+          "layout": "blob_relative_start_blob_relative_fields",
+          "score": 5
+        }
+      ],
+      "entry_index": 7,
+      "family": "inode",
+      "node_paddr": 433,
+      "object_id": 3,
+      "selected_layout": "record_relative_start_record_relative_fields",
+      "selected_score": 5
+    },
+    {
+      "candidates": [
+        {
+          "data_start": 12,
+          "field_summaries": [
+            {
+              "interpreted_kind": "utf8",
+              "value": "ventsd\u0000\u0000\u0000\u0000",
+              "value_hex": "76656e7473640000000000",
+              "x_flags": 2,
+              "x_size": 11,
+              "x_type": 4
+            }
+          ],
+          "layout": "record_relative_start_record_relative_fields",
+          "score": 5
+        },
+        {
+          "data_start": 8,
+          "field_summaries": [
+            {
+              "interpreted_kind": "utf8",
+              "value": ".fseventsd",
+              "value_hex": "2e66736576656e74736400",
+              "x_flags": 2,
+              "x_size": 11,
+              "x_type": 4
+            }
+          ],
+          "layout": "unpacked_start_record_relative_fields",
+          "score": 5
+        },
+        {
+          "data_start": 8,
+          "field_summaries": [
+            {
+              "interpreted_kind": "utf8",
+              "value": ".fseventsd",
+              "value_hex": "2e66736576656e74736400",
+              "x_flags": 2,
+              "x_size": 11,
+              "x_type": 4
+            }
+          ],
+          "layout": "unpacked_start_blob_relative_fields",
+          "score": 5
+        },
+        {
+          "data_start": 8,
+          "field_summaries": [
+            {
+              "interpreted_kind": "utf8",
+              "value": ".fseventsd",
+              "value_hex": "2e66736576656e74736400",
+              "x_flags": 2,
+              "x_size": 11,
+              "x_type": 4
+            }
+          ],
+          "layout": "blob_relative_start_blob_relative_fields",
+          "score": 5
+        }
+      ],
+      "entry_index": 17,
+      "family": "inode",
+      "node_paddr": 433,
+      "object_id": 18,
+      "selected_layout": "record_relative_start_record_relative_fields",
+      "selected_score": 5
+    },
+    {
+      "candidates": [
+        {
+          "data_start": 12,
+          "field_summaries": [
+            {
+              "alloced_size": 4096,
+              "interpreted_kind": "dstream",
+              "size": 6,
+              "total_bytes_written": 6,
+              "value_hex": "06000000000000000010000000000000000000000000000006000000000000000000000000000000",
+              "x_flags": 32,
+              "x_size": 40,
+              "x_type": 8
+            },
+            {
+              "interpreted_kind": "utf8",
+              "value": "clone.txt",
+              "value_hex": "636c6f6e652e74787400",
+              "x_flags": 2,
+              "x_size": 10,
+              "x_type": 4
+            }
+          ],
+          "layout": "record_relative_start_record_relative_fields",
+          "score": 15
+        },
+        {
+          "data_start": 12,
+          "field_summaries": [
+            {
+              "alloced_size": 4096,
+              "interpreted_kind": "dstream",
+              "size": 6,
+              "total_bytes_written": 6,
+              "value_hex": "06000000000000000010000000000000000000000000000006000000000000000000000000000000",
+              "x_flags": 32,
+              "x_size": 40,
+              "x_type": 8
+            },
+            {
+              "interpreted_kind": "utf8",
+              "value": "clone.txt",
+              "value_hex": "636c6f6e652e74787400",
+              "x_flags": 2,
+              "x_size": 10,
+              "x_type": 4
+            }
+          ],
+          "layout": "unpacked_start_record_relative_fields",
+          "score": 15
+        },
+        {
+          "data_start": 12,
+          "field_summaries": [
+            {
+              "alloced_size": 4096,
+              "interpreted_kind": "dstream",
+              "size": 6,
+              "total_bytes_written": 6,
+              "value_hex": "06000000000000000010000000000000000000000000000006000000000000000000000000000000",
+              "x_flags": 32,
+              "x_size": 40,
+              "x_type": 8
+            },
+            {
+              "interpreted_kind": "utf8",
+              "value": "e.txt\u0000\u0000\u0000\u0000",
+              "value_hex": "652e7478740000000000",
+              "x_flags": 2,
+              "x_size": 10,
+              "x_type": 4
+            }
+          ],
+          "layout": "unpacked_start_blob_relative_fields",
+          "score": 15
+        },
+        {
+          "data_start": 16,
+          "field_summaries": [
+            {
+              "alloced_size": 0,
+              "interpreted_kind": "dstream",
+              "size": 17592186044416,
+              "total_bytes_written": 0,
+              "value_hex": "000000000010000000000000000000000000000006000000000000000000000000000000636c6f6e",
+              "x_flags": 32,
+              "x_size": 40,
+              "x_type": 8
+            },
+            {
+              "interpreted_kind": "utf8",
+              "value": "e.txt\u0000\u0000\u0000\u0000",
+              "value_hex": "652e7478740000000000",
+              "x_flags": 2,
+              "x_size": 10,
+              "x_type": 4
+            }
+          ],
+          "layout": "blob_relative_start_blob_relative_fields",
+          "score": -95
+        }
+      ],
+      "entry_index": 40,
+      "family": "inode",
+      "node_paddr": 433,
+      "object_id": 24,
+      "selected_layout": "record_relative_start_record_relative_fields",
+      "selected_score": 15
+    },
+    {
+      "candidates": [
+        {
+          "data_start": 12,
+          "field_summaries": [
+            {
+              "interpreted_kind": "utf8",
+              "value": ".txt\u0000\u0000\u0000\u0000",
+              "value_hex": "2e7478740000000000",
+              "x_flags": 2,
+              "x_size": 9,
+              "x_type": 4
+            }
+          ],
+          "layout": "record_relative_start_record_relative_fields",
+          "score": 5
+        },
+        {
+          "data_start": 8,
+          "field_summaries": [
+            {
+              "interpreted_kind": "utf8",
+              "value": "link.txt",
+              "value_hex": "6c696e6b2e74787400",
+              "x_flags": 2,
+              "x_size": 9,
+              "x_type": 4
+            }
+          ],
+          "layout": "unpacked_start_record_relative_fields",
+          "score": 5
+        },
+        {
+          "data_start": 8,
+          "field_summaries": [
+            {
+              "interpreted_kind": "utf8",
+              "value": "link.txt",
+              "value_hex": "6c696e6b2e74787400",
+              "x_flags": 2,
+              "x_size": 9,
+              "x_type": 4
+            }
+          ],
+          "layout": "unpacked_start_blob_relative_fields",
+          "score": 5
+        },
+        {
+          "data_start": 8,
+          "field_summaries": [
+            {
+              "interpreted_kind": "utf8",
+              "value": "link.txt",
+              "value_hex": "6c696e6b2e74787400",
+              "x_flags": 2,
+              "x_size": 9,
+              "x_type": 4
+            }
+          ],
+          "layout": "blob_relative_start_blob_relative_fields",
+          "score": 5
+        }
+      ],
+      "entry_index": 44,
+      "family": "inode",
+      "node_paddr": 433,
+      "object_id": 26,
+      "selected_layout": "record_relative_start_record_relative_fields",
+      "selected_score": 5
+    }
+  ],
+  "records_with_xfields": 14,
+  "selected_layout_counts": {
+    "record_relative_start_record_relative_fields": 8,
+    "unpacked_start_blob_relative_fields": 1,
+    "unpacked_start_record_relative_fields": 5
+  }
+}

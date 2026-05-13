@@ -3,7 +3,7 @@
 Status: Open
 Priority: P0
 Owner: TBD
-Last Updated: 2026-04-26
+Last Updated: 2026-05-13
 
 ## Core Question
 - What size metrics will the product report, and how can those metrics be computed correctly on APFS?
@@ -93,6 +93,17 @@ Last Updated: 2026-04-26
   and the Python-decoded inode dstream size matched `1048576`; the sparse-bytes
   xfield decoded to `1015808`. This validates ordinary logical-size extraction
   for the proof fixture while leaving physical/shared accounting out of scope.
+- [2026-05-13] Observation: `EX-14` saved a mounted/POSIX oracle with two sparse
+  candidates and a unique-inode logical total of `2097323`, but did not decode
+  raw logical-size fields because Rust context validation failed first
+  (`checksum mismatch at block 1031`, no `selected_checkpoint`). This is an
+  `oracle_inconclusive` body-parser result, not a logical-size mismatch.
+- [2026-05-13] Spec/Observation: `SR-017` defines v1 logical-size precedence:
+  dstream size for ordinary/sparse/cloned files, symlink target byte length for
+  symlinks, and inode `uncompressed_size` before decmpfs header size for
+  compressed files, with conflicts failing closed.
+- [2026-05-13] Spec/Observation: `SR-015` supports sparse logical-size decoding
+  by replacing EX-13 xfield candidate scoring with one padded-value cursor rule.
 
 ## Interim Decisions
 - v1 may need to distinguish "logical size" mode from "physical accounting" mode.
@@ -120,6 +131,12 @@ Last Updated: 2026-04-26
   dstream metadata, but sparse allocated/exclusive/shared semantics remain
   `EX-09` work. Keep the next accounting pass dependent on the corrected Python
   body dump, not on Rust record-body parsing.
+- Do not promote sparse/logical-size extraction from EX-13 into Rust on the
+  basis of EX-14. The variant must first reach selected FS-tree context and then
+  prove dstream/sparse-byte parity in the same run.
+- V1 logical-size row emission may implement the SR-017 precedence table only
+  after the SR-015 xfield replay gate; compressed rows still require same-state
+  evidence when raw candidate size fields disagree.
 
 ## Exit Criteria
 - Defined product-facing size semantics.

@@ -3,7 +3,7 @@
 Status: Open
 Priority: P1
 Owner: TBD
-Last Updated: 2026-04-26
+Last Updated: 2026-05-13
 
 ## Core Question
 - How stable is this raw-parser approach across APFS/macOS versions, and when should the product fall back to supported APIs?
@@ -181,6 +181,22 @@ Last Updated: 2026-04-26
   non-row-critical xfield records with true top-score ambiguity. This does not
   invalidate the proof-fixture namespace/logical-size comparison, but it does
   prevent treating the current scoring heuristic as a compatibility rule.
+- [2026-05-13] Observation: `EX-14` adds a fail-closed compatibility data point
+  before xfield layout policy could be tested. A detached unencrypted APFS
+  fixture reached source gating and descriptor scanning, but Rust aborted native
+  context validation with `APFS object validation failed: checksum mismatch at
+  block 1031` and did not emit `selected_checkpoint`. The correct verdict is
+  `oracle_inconclusive`, not a best-effort lower-checkpoint parse or namespace
+  output.
+- [2026-05-13] Spec/Observation: `SR-015` replaces xfield layout heuristics with
+  a single padded-value cursor rule, but keeps Rust gated on an EX-13 replay
+  that records `xf_used_data` and malformed xfield failures.
+- [2026-05-13] Spec/Observation: `SR-016` defines record-body fail-closed
+  classes: malformed fixed/variable bodies, unsupported body forms, and
+  cross-record body-field mismatches.
+- [2026-05-13] Spec/Observation: `SR-017` and `SR-018` narrow fallback triggers
+  for compressed-size conflicts and overclaimed name lookup/case-normalization
+  semantics.
 
 ## Interim Decisions
 - Compatibility boundaries must be explicit, not implied.
@@ -217,6 +233,13 @@ Last Updated: 2026-04-26
   xfield layout selection across additional fixture variants. The immediate
   compatibility gate moved from sparse dstream mismatch to deterministic
   xfield-layout policy.
+- After `EX-14`, deterministic xfield-layout policy is still blocked, but the
+  immediate compatibility gate is now earlier: explain why the variant fixture
+  fails native object validation at block `1031` before adding Rust body-field
+  decoding.
+- Rust may eventually replace Python xfield candidate scoring with the
+  source-backed cursor rule, but only after replay evidence; malformed
+  record-body classes should become hard errors rather than warnings.
 
 ## Exit Criteria
 - Supported-version matrix exists.

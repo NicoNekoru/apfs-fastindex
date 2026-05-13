@@ -641,13 +641,7 @@ mod tests {
 
     #[test]
     fn lookup_rejects_noheader_value() {
-        let mappings = vec![(
-            100u64,
-            5u64,
-            OMAP_VAL_NOHEADER,
-            BLOCK_SIZE as u32,
-            1000u64,
-        )];
+        let mappings = vec![(100u64, 5u64, OMAP_VAL_NOHEADER, BLOCK_SIZE as u32, 1000u64)];
         let image = build_image(2, 3, &mappings);
         let mut cursor = Cursor::new(image);
         let resolver = OmapResolver::open(&mut cursor, BLOCK_SIZE, 2).expect("omap opens");
@@ -702,8 +696,7 @@ mod tests {
     #[test]
     fn open_rejects_phys_crypto_generation_flag() {
         let mappings = vec![(100u64, 5u64, 0u32, BLOCK_SIZE as u32, 1000u64)];
-        let image =
-            build_image_with_phys_flags(2, 3, &mappings, OMAP_PHYS_CRYPTO_GENERATION_FLAG);
+        let image = build_image_with_phys_flags(2, 3, &mappings, OMAP_PHYS_CRYPTO_GENERATION_FLAG);
         let mut cursor = Cursor::new(image);
         let err = OmapResolver::open(&mut cursor, BLOCK_SIZE, 2)
             .expect_err("CRYPTO_GENERATION_FLAG phys flag must hard-stop");

@@ -1,0 +1,4 @@
+{
+  "reason": "Rust scanner did not return a usable selected_checkpoint for EX14CI; top-level keys=['checkpoint_candidates', 'correctness_claim', 'not_claimed', 'parser_output', 'skipped_descriptors']",
+  "status": "not_available"
+}

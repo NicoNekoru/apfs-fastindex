@@ -3,7 +3,7 @@
 Status: Open
 Priority: P0
 Owner: TBD
-Last Updated: 2026-04-26
+Last Updated: 2026-05-13
 
 ## Core Question
 - How do we reconstruct an exact directory tree and stable parent/child relationships from APFS metadata?
@@ -79,6 +79,17 @@ Last Updated: 2026-04-26
   mounted/POSIX entries. After xfield layout candidates were recorded and scored,
   the same field dump also matched logical-size rows, so `EX-13` validates the
   proof-fixture namespace+ordinary-logical-size body contract.
+- [2026-05-13] Observation: `EX-14` did not produce a namespace comparison for
+  the xfield-layout variant. The mounted/POSIX oracle was saved for `16` entries,
+  but Rust did not publish `selected_checkpoint` or FS-tree root context because
+  native validation aborted with `checksum mismatch at block 1031`. Namespace
+  reconstruction for the variant remains untested rather than failed.
+- [2026-05-13] Spec/Observation: `SR-018` fixes v1 name policy: emit stored
+  UTF-8 spelling exactly, record case/normalization volume modes, and defer
+  APFS lookup/hash claims until a dedicated name-hash fixture exists.
+- [2026-05-13] Spec/Observation: `SR-016` makes malformed names, missing
+  embedded symlink targets, sibling-link/map inconsistency, and drec/inode type
+  mismatch fail-closed namespace gates.
 
 ## Interim Decisions
 - Keep namespace reconstruction separate from storage traversal logic.
@@ -95,6 +106,11 @@ Last Updated: 2026-04-26
 - Path reconstruction evidence should continue in Python fixture variants before
   Rust product rows are added, especially around xfield layout and hard-link
   record combinations.
+- Product `NamespaceEntry` emission remains behind two gates: first isolate the
+  `EX-14` checkpoint-context failure, then rerun the Python xfield-layout
+  variant and require a same-run namespace/logical-size diff.
+- Product paths must not be normalized or case-folded during row emission; any
+  normalization/case behavior belongs to a later lookup/search gate.
 
 ## Exit Criteria
 - Exact reconstruction algorithm for paths and parent-child graph.

@@ -67,6 +67,10 @@ Current source reviews:
 - `SR-012` format drift and feature-bit allowlisting
 - `SR-013` checkpoint map integrity and ephemeral-object validation
 - `SR-014` native FS-record body contract
+- `SR-015` xfield layout and alignment
+- `SR-016` record-body fail-closed boundary
+- `SR-017` logical-size source precedence
+- `SR-018` name normalization and case behavior
 
 ### `EX-*` Experiment Notes
 
@@ -169,6 +173,26 @@ Gate D: broader product semantics and optimization
 - RL-11 Snapshots, Volume Groups, and Firmlinks
 - RL-12 Performance Model and Optimization
 
+## Current Parser Gates Enabled By SR-015..SR-018
+
+1. Isolate the `EX-14` upstream context blocker: the expanded fixture cannot
+   validate body layout until the checksum mismatch at block `1031` is explained
+   or reproduced as a malformed-source hard stop.
+2. Replay `EX-13` with the source-backed xfield cursor rule from `SR-015`,
+   recording `xf_used_data`, padded value lengths, decoded fields, and the same
+   namespace/logical-size comparison.
+3. Add synthetic negative record-body cases from `SR-016`: short fixed bodies,
+   malformed names, duplicate/out-of-bounds xfields, invalid xattr forms,
+   missing sibling mappings, and drec/inode type mismatches.
+4. Execute the logical-size precedence gate from `SR-017`: ordinary, sparse,
+   cloned, hard-linked, symlink, and compressed files with public `st_size` and
+   every raw candidate size source captured in the same selected state.
+5. Add the name/case fixture from `SR-018` before lookup-by-name is implemented:
+   APFS hash, normalization, case-folding, and collision checks. Row enumeration
+   can proceed earlier only if stored directory-key names are emitted verbatim.
+6. Implement Rust FS-record body decoding only after gates 1-3 pass; enable
+   logical-size rows after gate 4; enable lookup/search semantics after gate 5.
+
 ## Current Experiment Tracks
 
 - `EX-01` live checkpoint consistency and runtime boundary
@@ -224,6 +248,19 @@ Gate D: broader product semantics and optimization
   `xfield-layout-summary.json`; `4` non-row-critical records still have
   top-score layout ambiguity, so keep the next fixture-variant pass in Python
   before moving this rule into Rust.
+- `EX-14` xfield layout variant; executed as the Python-first successor to
+  `EX-13`, but returned `oracle_inconclusive` before xfield comparison. The
+  retained detached unencrypted fixture saved a mounted/POSIX oracle and Rust
+  context artifact; Rust reached source gating and found `4` valid checkpoint
+  candidates (`highest_xid=20`) but returned no `selected_checkpoint` after
+  `APFS object validation failed: checksum mismatch at block 1031`. Treat this
+  as a checkpoint/OMAP-context blocker before retrying the xfield layout pass or
+  implementing Rust FS-record body decoding.
+- `SR-015` through `SR-018` tightened the post-EX-13 parser gates: xfields have
+  one source-backed padded-value cursor rule, malformed record bodies fail
+  closed before row emission, logical size has a scoped precedence table, and
+  stored UTF-8 names must be preserved without claiming full APFS lookup
+  semantics.
 
 ## Research Tracks
 

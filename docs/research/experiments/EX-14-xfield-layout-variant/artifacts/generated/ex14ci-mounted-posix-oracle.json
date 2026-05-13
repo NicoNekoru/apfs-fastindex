@@ -1,0 +1,186 @@
+{
+  "entries": [
+    {
+      "inode": 2,
+      "nlink": 7,
+      "path": ".",
+      "type": "dir",
+      "xattrs": {}
+    },
+    {
+      "inode": 17,
+      "nlink": 6,
+      "path": "dst",
+      "type": "dir",
+      "xattrs": {
+        "com.apple.provenance": "01020041d42f2086a64cf2"
+      }
+    },
+    {
+      "allocated_bytes": 4096,
+      "inode": 27,
+      "logical_size": 6,
+      "nlink": 1,
+      "path": "dst/clone.txt",
+      "type": "file",
+      "xattrs": {
+        "com.apple.provenance": "01020041d42f2086a64cf2"
+      }
+    },
+    {
+      "allocated_bytes": 4096,
+      "inode": 22,
+      "logical_size": 11,
+      "nlink": 2,
+      "path": "dst/hard.txt",
+      "type": "file",
+      "xattrs": {
+        "com.apple.provenance": "01020041d42f2086a64cf2"
+      }
+    },
+    {
+      "inode": 29,
+      "logical_size": 9,
+      "nlink": 1,
+      "path": "dst/link.txt",
+      "symlink_target": "moved.txt",
+      "type": "symlink",
+      "xattrs": {
+        "com.apple.provenance": "01020041d42f2086a64cf2"
+      }
+    },
+    {
+      "allocated_bytes": 4096,
+      "inode": 22,
+      "logical_size": 11,
+      "nlink": 2,
+      "path": "dst/moved.txt",
+      "type": "file",
+      "xattrs": {
+        "com.apple.provenance": "01020041d42f2086a64cf2"
+      }
+    },
+    {
+      "inode": 18,
+      "nlink": 7,
+      "path": "names",
+      "type": "dir",
+      "xattrs": {
+        "com.apple.provenance": "01020041d42f2086a64cf2"
+      }
+    },
+    {
+      "allocated_bytes": 4096,
+      "inode": 30,
+      "logical_size": 2,
+      "nlink": 1,
+      "path": "names/n1",
+      "type": "file",
+      "xattrs": {
+        "com.apple.provenance": "01020041d42f2086a64cf2"
+      }
+    },
+    {
+      "allocated_bytes": 4096,
+      "inode": 31,
+      "logical_size": 6,
+      "nlink": 1,
+      "path": "names/name08ch",
+      "type": "file",
+      "xattrs": {
+        "com.apple.provenance": "01020041d42f2086a64cf2"
+      }
+    },
+    {
+      "allocated_bytes": 4096,
+      "inode": 32,
+      "logical_size": 5,
+      "nlink": 1,
+      "path": "names/name09chr",
+      "type": "file",
+      "xattrs": {
+        "com.apple.provenance": "01020041d42f2086a64cf2"
+      }
+    },
+    {
+      "allocated_bytes": 4096,
+      "inode": 33,
+      "logical_size": 8,
+      "nlink": 1,
+      "path": "names/name15charsxxx",
+      "type": "file",
+      "xattrs": {
+        "com.apple.provenance": "01020041d42f2086a64cf2"
+      }
+    },
+    {
+      "allocated_bytes": 4096,
+      "inode": 34,
+      "logical_size": 10,
+      "nlink": 1,
+      "path": "names/name17charsxxxxx",
+      "type": "file",
+      "xattrs": {
+        "com.apple.provenance": "01020041d42f2086a64cf2"
+      }
+    },
+    {
+      "inode": 19,
+      "nlink": 4,
+      "path": "sparse",
+      "type": "dir",
+      "xattrs": {
+        "com.apple.provenance": "01020041d42f2086a64cf2"
+      }
+    },
+    {
+      "allocated_bytes": 32768,
+      "inode": 25,
+      "logical_size": 1048576,
+      "nlink": 1,
+      "path": "sparse/sparse-1m.bin",
+      "type": "file",
+      "xattrs": {
+        "com.apple.provenance": "01020041d42f2086a64cf2"
+      }
+    },
+    {
+      "allocated_bytes": 20480,
+      "inode": 26,
+      "logical_size": 1048699,
+      "nlink": 1,
+      "path": "sparse/sparse-unaligned-name.bin",
+      "type": "file",
+      "xattrs": {
+        "com.apple.provenance": "01020041d42f2086a64cf2"
+      }
+    },
+    {
+      "inode": 16,
+      "nlink": 2,
+      "path": "src",
+      "type": "dir",
+      "xattrs": {
+        "com.apple.provenance": "01020041d42f2086a64cf2"
+      }
+    }
+  ],
+  "fs_name": "APFS",
+  "summary": {
+    "dir_count": 5,
+    "entry_count": 16,
+    "file_count": 10,
+    "fixture_xattr_paths": [],
+    "hard_link_paths": [
+      "dst/hard.txt",
+      "dst/moved.txt"
+    ],
+    "sparse_candidates": [
+      "sparse/sparse-1m.bin",
+      "sparse/sparse-unaligned-name.bin"
+    ],
+    "symlink_count": 1,
+    "unique_inode_logical_total": 2097323
+  },
+  "volume_label": "EX14CI"
+}

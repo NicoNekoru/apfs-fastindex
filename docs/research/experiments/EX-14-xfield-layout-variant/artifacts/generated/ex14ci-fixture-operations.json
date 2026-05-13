@@ -1,0 +1,54 @@
+[
+  {
+    "step": "create src, dst, names, and sparse directories"
+  },
+  {
+    "step": "create src/base.txt"
+  },
+  {
+    "step": "rename src/base.txt -> src/renamed.txt"
+  },
+  {
+    "step": "move src/renamed.txt -> dst/moved.txt"
+  },
+  {
+    "step": "create hard link dst/hard.txt"
+  },
+  {
+    "paths": [
+      "sparse/sparse-1m.bin",
+      "sparse/sparse-unaligned-name.bin"
+    ],
+    "step": "create sparse variants"
+  },
+  {
+    "returncode": 0,
+    "stderr": "",
+    "step": "clone dst/moved.txt -> dst/clone.txt"
+  },
+  {
+    "step": "append to dst/moved.txt"
+  },
+  {
+    "step": "create symlink dst/link.txt -> moved.txt"
+  },
+  {
+    "step": "create names/n1"
+  },
+  {
+    "step": "create names/name08ch"
+  },
+  {
+    "step": "create names/name09chr"
+  },
+  {
+    "step": "create names/name15charsxxx"
+  },
+  {
+    "step": "create names/name17charsxxxxx"
+  },
+  {
+    "reason": "keep EX-14 isolated to xfield layout variants after the broad corpus hit a Rust checkpoint-context blocker",
+    "step": "skip optional user xattrs, unicode/case probes, and compression"
+  }
+]

@@ -3,7 +3,7 @@
 Status: Open
 Priority: P0
 Owner: TBD
-Last Updated: 2026-04-26
+Last Updated: 2026-05-13
 
 ## Core Question
 - Which APFS trees and record types are required to build a complete directory index and size model?
@@ -121,6 +121,19 @@ Last Updated: 2026-04-26
   `unpacked_start_blob_relative_fields`. Four non-row-critical records still
   have true top-score ambiguity, so xfield layout policy remains a Python
   research surface even though the proof fixture rows validate.
+- [2026-05-13] Observation: `EX-14` attempted the required second xfield-layout
+  fixture pass, but the retained fixture blocked before FS-record body decode.
+  Rust reached source gating and checkpoint descriptor scanning on a detached
+  unencrypted APFS image (`4` valid candidates, `highest_xid=20`) but returned
+  no `selected_checkpoint` after `APFS object validation failed: checksum
+  mismatch at block 1031`. The mounted/POSIX oracle was saved (`16` entries,
+  `10` files, `2` sparse candidates), but no xfield records were decoded.
+- [2026-05-13] Spec/Observation: `SR-015` explains EX-13's apparent xfield
+  layout split as one source-backed cursor rule: values start immediately after
+  `xf_blob_t` metadata and each value consumes `round_up(x_size, 8)` bytes.
+- [2026-05-13] Spec/Observation: `SR-016` turns record-body parsing into an
+  explicit gate for fixed-size bodies, variable-length names, xfields, xattrs,
+  sibling records, and drec/inode type consistency before namespace rows emit.
 
 ## Interim Decisions
 - Separate "required for namespace" from "required for accounting."
@@ -143,6 +156,13 @@ Last Updated: 2026-04-26
 - Keep the next body-field variant work in Python. The record-family surface is
   stable enough for experiments, but xfield layout selection should be exercised
   across more field orderings before it is encoded in Rust.
+- `EX-14` means the next body-field variant is blocked by checkpoint/root
+  context on the variant fixture. Do not implement Rust FS-record body structs
+  until a focused checkpoint-context successor explains the block `1031`
+  checksum failure or produces a stable selected root for the variant.
+- Replace EX-13 candidate scoring with the deterministic xfield cursor rule only
+  after a replay gate records `xf_used_data` and revalidates the saved body
+  oracle. Do not port the candidate scorer into Rust.
 
 ## Exit Criteria
 - A required-record matrix exists for each product mode.
