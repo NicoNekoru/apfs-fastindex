@@ -356,7 +356,8 @@ def parse_inode(value: bytes) -> dict:
     if len(value) < INODE_FIXED_SIZE:
         raise ProbeError("malformed_record_body", "inode value shorter than fixed body")
     internal_flags = le_u64(value, 0x30)
-    xfields = parse_xfields(value[INODE_FIXED_SIZE:], INODE_FIXED_SIZE)
+    xfield_result = parse_xfields(value[INODE_FIXED_SIZE:], INODE_FIXED_SIZE)
+    xfields = xfield_result["fields"]
     dstream = next(
         (field["interpreted"]["value"] for field in xfields if field.get("interpreted", {}).get("kind") == "dstream"),
         None,
@@ -381,6 +382,10 @@ def parse_inode(value: bytes) -> dict:
         "uncompressed_size": le_u64(value, 0x54),
         "has_uncompressed_size": bool(internal_flags & INODE_HAS_UNCOMPRESSED_SIZE),
         "xfields": xfields,
+        "xfield_layout": xfield_result["selected_layout"],
+        "xfield_layout_score": xfield_result["selected_score"],
+        "xfield_layout_candidates": xfield_result["candidates"],
+        "xfield_layout_ambiguous": xfield_result["ambiguous"],
         "dstream": dstream,
         "sparse_bytes": sparse_bytes,
         "inode_name": inode_name,
@@ -391,7 +396,8 @@ def parse_dir_rec(value: bytes) -> dict:
     if len(value) < 18:
         raise ProbeError("malformed_record_body", "directory record shorter than fixed body")
     flags = le_u16(value, 0x10)
-    xfields = parse_xfields(value[18:], 18)
+    xfield_result = parse_xfields(value[18:], 18)
+    xfields = xfield_result["fields"]
     sibling_id = next(
         (field["interpreted"]["value"] for field in xfields if field["x_type"] == DREC_EXT_TYPE_SIBLING_ID and field.get("interpreted", {}).get("kind") == "u64"),
         None,
@@ -403,6 +409,10 @@ def parse_dir_rec(value: bytes) -> dict:
         "entry_type": flags & DREC_TYPE_MASK,
         "sibling_id": sibling_id,
         "xfields": xfields,
+        "xfield_layout": xfield_result["selected_layout"],
+        "xfield_layout_score": xfield_result["selected_score"],
+        "xfield_layout_candidates": xfield_result["candidates"],
+        "xfield_layout_ambiguous": xfield_result["ambiguous"],
     }
 
 
@@ -445,9 +455,15 @@ def parse_sibling_link(value: bytes, notes: list[str]) -> dict:
     }
 
 
-def parse_xfields(value: bytes, base_offset: int) -> list[dict]:
+def parse_xfields(value: bytes, base_offset: int) -> dict:
     if not value:
-        return []
+        return {
+            "fields": [],
+            "selected_layout": None,
+            "selected_score": None,
+            "candidates": [],
+            "ambiguous": False,
+        }
     if len(value) < 4:
         raise ProbeError("malformed_record_body", "xfield blob shorter than header")
     count = le_u16(value, 0)
@@ -488,12 +504,42 @@ def parse_xfields(value: bytes, base_offset: int) -> list[dict]:
             fields = parse_xfield_data(
                 value, metadata, data_start, data_start_name, align_next
             )
-            candidates.append((score_xfields(fields), fields))
+            candidates.append(
+                {
+                    "layout": data_start_name,
+                    "data_start": data_start,
+                    "score": score_xfields(fields),
+                    "fields": fields,
+                }
+            )
         except ProbeError as err:
             errors.append(f"{data_start_name}: {err.detail}")
     if candidates:
-        candidates.sort(key=lambda item: item[0], reverse=True)
-        return candidates[0][1]
+        candidates.sort(key=lambda item: item["score"], reverse=True)
+        selected = candidates[0]
+        top_score = selected["score"]
+        top_candidate_signatures = {
+            candidate_signature(candidate["fields"])
+            for candidate in candidates
+            if candidate["score"] == top_score
+        }
+        return {
+            "fields": selected["fields"],
+            "selected_layout": selected["layout"],
+            "selected_score": selected["score"],
+            "candidates": [
+                {
+                    "layout": candidate["layout"],
+                    "data_start": candidate["data_start"],
+                    "score": candidate["score"],
+                    "field_summaries": summarize_xfield_candidate(
+                        candidate["fields"]
+                    ),
+                }
+                for candidate in candidates
+            ],
+            "ambiguous": len(top_candidate_signatures) > 1,
+        }
     raise ProbeError(
         "malformed_record_body",
         "xfield data exceeds value for all tested layouts: " + "; ".join(errors),
@@ -528,6 +574,34 @@ def parse_xfield_data(
         )
         cursor = align_next(cursor + x_size)
     return fields
+
+
+def summarize_xfield_candidate(fields: list[dict]) -> list[dict]:
+    summaries = []
+    for field in fields:
+        interpreted = field.get("interpreted") or {}
+        summary = {
+            "x_type": field["x_type"],
+            "x_flags": field["x_flags"],
+            "x_size": field["x_size"],
+            "value_hex": field["value_hex"],
+            "interpreted_kind": interpreted.get("kind"),
+        }
+        if interpreted.get("kind") == "utf8":
+            summary["value"] = interpreted.get("value")
+        elif interpreted.get("kind") == "u64":
+            summary["value"] = interpreted.get("value")
+        elif interpreted.get("kind") == "dstream":
+            value = interpreted.get("value") or {}
+            summary["size"] = value.get("size")
+            summary["alloced_size"] = value.get("alloced_size")
+            summary["total_bytes_written"] = value.get("total_bytes_written")
+        summaries.append(summary)
+    return summaries
+
+
+def candidate_signature(fields: list[dict]) -> str:
+    return json.dumps(summarize_xfield_candidate(fields), sort_keys=True)
 
 
 def align_relative(base_offset: int, relative_offset: int) -> int:
@@ -691,6 +765,45 @@ def family_counts(records: list[dict]) -> dict[str, int]:
     return counts
 
 
+def summarize_xfield_layouts(records: list[dict]) -> dict:
+    by_layout: dict[str, int] = {}
+    ambiguous_records = []
+    records_with_candidates = 0
+    for record in records:
+        value = record.get("value", {})
+        layout = value.get("xfield_layout")
+        if layout is None:
+            continue
+        records_with_candidates += 1
+        by_layout[layout] = by_layout.get(layout, 0) + 1
+        if value.get("xfield_layout_ambiguous"):
+            ambiguous_records.append(
+                {
+                    "object_id": record["object_id"],
+                    "family": record["family"],
+                    "node_paddr": record["node_paddr"],
+                    "entry_index": record["entry_index"],
+                    "selected_layout": layout,
+                    "selected_score": value.get("xfield_layout_score"),
+                    "candidates": value.get("xfield_layout_candidates", []),
+                }
+            )
+    return {
+        "records_with_xfields": records_with_candidates,
+        "selected_layout_counts": by_layout,
+        "ambiguous_record_count": len(ambiguous_records),
+        "ambiguous_records": ambiguous_records,
+    }
+
+
+def compact_xfield_layout_summary(summary: dict) -> dict:
+    return {
+        "records_with_xfields": summary["records_with_xfields"],
+        "selected_layout_counts": summary["selected_layout_counts"],
+        "ambiguous_record_count": summary["ambiguous_record_count"],
+    }
+
+
 def run_probe() -> dict:
     detach = None
     with build_proof_fixture() as fixture:
@@ -707,6 +820,7 @@ def run_probe() -> dict:
                 fs_tree = parse_fs_tree(handle, root_paddr, block_size)
             native_entries = reconstruct_entries(fs_tree["records"])
             comparison = compare_entries(mounted_oracle["entries"], native_entries)
+            xfield_layout_summary = summarize_xfield_layouts(fs_tree["records"])
             return {
                 "source": {
                     "image_path": str(fixture.image_path),
@@ -726,8 +840,10 @@ def run_probe() -> dict:
                     "nodes": fs_tree["nodes"],
                     "records": fs_tree["records"],
                     "family_counts": family_counts(fs_tree["records"]),
+                    "xfield_layout_summary": xfield_layout_summary,
                     "reconstructed_entries": native_entries,
                 },
+                "xfield_layout_summary": xfield_layout_summary,
                 "comparison": comparison,
             }
         finally:
@@ -754,6 +870,7 @@ def main() -> int:
         write_json("fixture-operations.json", result["source"]["fixture_operations"])
         write_json("mounted-posix-oracle.json", result["mounted_oracle"])
         write_json("native-record-body-dump.json", result["native_record_body_dump"])
+        write_json("xfield-layout-summary.json", result["xfield_layout_summary"])
         write_json("go-apfs-record-observer.json", result["go_apfs_observer"])
         write_json("comparison.json", result["comparison"])
         verdict = (
@@ -769,6 +886,9 @@ def main() -> int:
             "record_count": len(result["native_record_body_dump"]["records"]),
             "node_count": len(result["native_record_body_dump"]["nodes"]),
             "family_counts": result["native_record_body_dump"]["family_counts"],
+            "xfield_layout_summary": compact_xfield_layout_summary(
+                result["xfield_layout_summary"]
+            ),
             "reconstructed_entry_count": len(
                 result["native_record_body_dump"]["reconstructed_entries"]
             ),

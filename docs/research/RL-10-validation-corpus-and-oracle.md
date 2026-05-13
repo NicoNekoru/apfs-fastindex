@@ -135,8 +135,8 @@ Last Updated: 2026-04-26
   Python raw parser agreed on path set, identity, symlink target, hard-link file
   identity, and ordinary logical size after xfield layout candidates were
   preserved. This is reusable evidence because it saves the raw body dump,
-  mounted oracle, cross-tool observer, comparison, and summary under `EX-13`
-  artifacts.
+  mounted oracle, cross-tool observer, comparison, xfield-layout summary, and
+  summary under `EX-13` artifacts.
 
 ## Interim Decisions
 - Every optimization must be validated against a fresh full-scan oracle.

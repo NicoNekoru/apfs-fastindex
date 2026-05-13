@@ -113,6 +113,14 @@ Last Updated: 2026-04-26
   explicit xfield layout candidates, the sparse-file inode dstream decoded to
   the public logical size and the verdict became
   `validated_native_record_body_contract`.
+- [2026-04-26] Observation: The extended `EX-13` probe now writes
+  `xfield-layout-summary.json`. The current fixture has `14` records with
+  xfields and selected layouts split across `8`
+  `record_relative_start_record_relative_fields`, `5`
+  `unpacked_start_record_relative_fields`, and `1`
+  `unpacked_start_blob_relative_fields`. Four non-row-critical records still
+  have true top-score ambiguity, so xfield layout policy remains a Python
+  research surface even though the proof fixture rows validate.
 
 ## Interim Decisions
 - Separate "required for namespace" from "required for accounting."

@@ -187,6 +187,14 @@ Minimum first fixture:
   - ordinary two-xfield inodes used `record_relative_start_record_relative_fields`.
   - the sparse inode used `unpacked_start_blob_relative_fields`, which aligns
     the dstream and sparse-byte fields to the xfield-blob-relative data stream.
+  - `14` records had xfields; selected layout counts were
+    `record_relative_start_record_relative_fields=8`,
+    `unpacked_start_record_relative_fields=5`, and
+    `unpacked_start_blob_relative_fields=1`.
+  - `4` records still had true top-score layout ambiguity, all outside the
+    path/logical-size comparison rows; the sparse dstream candidate was
+    distinguishable from the bad record-relative candidate by implausible
+    dstream and sparse-byte magnitudes.
 - Verdict: `validated_native_record_body_contract`.
 
 ## Artifacts Saved
@@ -198,6 +206,7 @@ Minimum first fixture:
 - `artifacts/generated/fixture-operations.json`
 - `artifacts/generated/mounted-posix-oracle.json`
 - `artifacts/generated/native-record-body-dump.json`
+- `artifacts/generated/xfield-layout-summary.json`
 - `artifacts/generated/go-apfs-record-observer.json`
 - `artifacts/generated/comparison.json`
 - `artifacts/generated/summary.json`
@@ -237,6 +246,10 @@ Minimum first fixture:
   for subsequent xfield data, while some ordinary inode records used
   record-relative alignment. That distinction must remain documented in Python
   artifacts before being encoded in Rust.
+- Observation: The extended probe now saves all candidate layout summaries. The
+  proof-fixture product rows validate, but `4` non-row-critical xfield records
+  still have top-score ambiguity, which means the layout policy is not yet a
+  deterministic source-backed rule.
 - Hypothesis: APFS xfield alignment behavior may vary by record body shape or
   by the byte offsets created by each xfield sequence. More Python fixtures
   should exercise extra xfield orderings before Rust adopts a single decoder.
@@ -247,6 +260,9 @@ Minimum first fixture:
   namespace/logical-size support.
 - It rules out the earlier one-layout xfield decoder as sufficient. The probe
   must preserve per-record xfield layout evidence.
+- It rules out claiming a complete deterministic xfield layout policy from this
+  fixture alone; candidate scoring validates the sparse row but still leaves
+  name-only xfield ties.
 - It rules out treating sparse logical size as physical/shared/exclusive
   accounting. The validated sparse logical-size row came from inode dstream
   metadata; allocated/shared/exclusive formulas remain separate.

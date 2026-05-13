@@ -220,7 +220,9 @@ Gate D: broader product semantics and optimization
   artifacts. Verdict: `validated_native_record_body_contract`; the sparse-file
   mismatch was resolved by recording candidate xfield layouts and selecting the
   blob-relative data alignment that matches `j_dstream_t.size` and
-  `INO_EXT_TYPE_SPARSE_BYTES`. Keep the next fixture-variant pass in Python
+  `INO_EXT_TYPE_SPARSE_BYTES`. The extended probe now writes
+  `xfield-layout-summary.json`; `4` non-row-critical records still have
+  top-score layout ambiguity, so keep the next fixture-variant pass in Python
   before moving this rule into Rust.
 
 ## Research Tracks

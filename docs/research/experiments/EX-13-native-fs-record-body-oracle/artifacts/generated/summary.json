@@ -20,5 +20,14 @@
   "selected_xid": 14,
   "status": "executed",
   "unexpected_path_count": 0,
-  "verdict": "validated_native_record_body_contract"
+  "verdict": "validated_native_record_body_contract",
+  "xfield_layout_summary": {
+    "ambiguous_record_count": 4,
+    "records_with_xfields": 14,
+    "selected_layout_counts": {
+      "record_relative_start_record_relative_fields": 8,
+      "unpacked_start_blob_relative_fields": 1,
+      "unpacked_start_record_relative_fields": 5
+    }
+  }
 }

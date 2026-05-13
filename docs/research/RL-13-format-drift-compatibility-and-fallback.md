@@ -177,6 +177,10 @@ Last Updated: 2026-04-26
   layout candidates are recorded and scored. Rust support should still wait for
   a Python fixture-variant pass because the successful decoder relies on
   observed layout selection rather than a single settled rule.
+- [2026-04-26] Observation: Extended `EX-13` layout diagnostics found `4`
+  non-row-critical xfield records with true top-score ambiguity. This does not
+  invalidate the proof-fixture namespace/logical-size comparison, but it does
+  prevent treating the current scoring heuristic as a compatibility rule.
 
 ## Interim Decisions
 - Compatibility boundaries must be explicit, not implied.

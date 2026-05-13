@@ -45,7 +45,7 @@
   ],
   "node_summaries": [
     {
-      "checksum": 8507875456900214692,
+      "checksum": 3055955575639904282,
       "domain": "volume_omap",
       "is_leaf": true,
       "key_count": 53,
@@ -55,8 +55,8 @@
       "name_count": 22,
       "name_sample": [
         ".fseventsd",
-        "00000000056e45c9",
-        "00000000056e45ca",
+        "00000000056e6ec2",
+        "00000000056e6ec3",
         "clone.txt",
         "com.apple.fs.symlink",
         "com.apple.provenance",
@@ -75,7 +75,7 @@
         "purgeable-drecs-fixed",
         "root"
       ],
-      "node_key": "volume_omap|1028|12|427|8507875456900214692|OBJECT_TYPE_BTREE|OBJECT_TYPE_FSTREE|2342afc6b0f6f17e5c14e5a977d2de51e33e06ee077d79cff10c781fd2a1a1d4",
+      "node_key": "volume_omap|1028|12|427|3055955575639904282|OBJECT_TYPE_BTREE|OBJECT_TYPE_FSTREE|fecd7ca6e64233a86ba76553d3f4b3237fec6cdaf26add148598d607ee7dfdd9",
       "object_xid": 12,
       "oid": 1028,
       "paddr": 427,
@@ -90,14 +90,14 @@
       },
       "role": "fs_root_tree",
       "subtype": "OBJECT_TYPE_FSTREE",
-      "summary_hash": "b537816f0a49eea53471d14dfc990f827f4822ef5324e33ffbea03511368199d",
+      "summary_hash": "b38784af12a8792c20a7a9305bf326cf8f423d7ff498454e119d19441c4e8b27",
       "type": "OBJECT_TYPE_BTREE"
     }
   ],
   "nodes": [
     {
-      "checksum": 8507875456900214692,
-      "content_hash": "2342afc6b0f6f17e5c14e5a977d2de51e33e06ee077d79cff10c781fd2a1a1d4",
+      "checksum": 3055955575639904282,
+      "content_hash": "fecd7ca6e64233a86ba76553d3f4b3237fec6cdaf26add148598d607ee7dfdd9",
       "domain": "volume_omap",
       "flags": "OBJ_VIRTUAL",
       "is_leaf": true,
@@ -220,8 +220,8 @@
     }
   ],
   "root_tree": {
-    "checksum": 8507875456900214692,
-    "content_hash": "2342afc6b0f6f17e5c14e5a977d2de51e33e06ee077d79cff10c781fd2a1a1d4",
+    "checksum": 3055955575639904282,
+    "content_hash": "fecd7ca6e64233a86ba76553d3f4b3237fec6cdaf26add148598d607ee7dfdd9",
     "domain": "volume_omap",
     "flags": "OBJ_VIRTUAL",
     "is_leaf": true,
