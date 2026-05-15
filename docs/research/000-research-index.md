@@ -127,6 +127,7 @@ for the exact question being tested.
 - `experiments/`: controlled probes and their artifacts
 - implementation-facing docs:
   - `contracts/narrow-v1-parser-contract.md`
+  - `plans/general-wiztree-for-any-mac-roadmap.md`
   - `plans/first-raw-parser-prototype-plan.md`
   - `../implementation/000-implementation-index.md`
   - `../implementation/narrow-v1-proof-parser-skeleton.md`
@@ -172,6 +173,14 @@ Gate D: broader product semantics and optimization
 
 - RL-11 Snapshots, Volume Groups, and Firmlinks
 - RL-12 Performance Model and Optimization
+
+Long-range product roadmap:
+
+- `plans/general-wiztree-for-any-mac-roadmap.md`: staged route from the narrow
+  Rust full scan to a hybrid WizTree-for-any-Mac product, including support
+  matrix expansion, boot-root semantics, live/encrypted runtime behavior,
+  metric-specific accounting, persistent incremental cache, performance, and
+  packaging gates.
 
 ## Current Parser Gates Enabled By SR-015..SR-018
 

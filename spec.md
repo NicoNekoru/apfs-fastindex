@@ -230,11 +230,33 @@ stable.
 
 Near-term work should prioritize:
 
-1. support-boundary and fallback definition
-2. checkpoint / OMAP / root-discovery contract
-3. required-record matrix for namespace + logical size
-4. experiment and oracle infrastructure
-5. small controlled APFS probes
+1. resolve the `EX-14` checkpoint/OMAP-context blocker
+2. replay the `EX-13` body decoder with the source-backed xfield cursor rule
+3. add synthetic fail-closed record-body cases
+4. implement Rust FS-record body field dumps
+5. promote Rust output to namespace/logical-size rows only after oracle parity
 
 Only after those are stable should the project move cache design, subtree
 reuse, and repeat-scan performance back to the center of the spec.
+
+## 13. Long-Term Product Roadmap
+
+The general WizTree-for-any-Mac product path is tracked in:
+
+- `docs/research/plans/general-wiztree-for-any-mac-roadmap.md`
+
+That roadmap defines staged gates from the narrow Rust full scan to a hybrid
+consumer product:
+
+1. native narrow Rust full scan
+2. local single-volume backend with safe fallback
+3. Finder-visible macOS namespace mode
+4. encryption and live runtime support
+5. size semantics beyond logical size
+6. incremental scanning and persistent cache
+7. performance engineering
+8. product packaging and user experience
+
+The intended broad product is hybrid, not raw-only. Raw parsing should be used
+only when the source class, semantic mode, and metric have matching evidence;
+other cases should fall back to supported APIs or remain unsupported.

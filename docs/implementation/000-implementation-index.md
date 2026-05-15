@@ -7,6 +7,11 @@ This directory contains implementation-facing specs only when the corresponding
 research direction is resolved tightly enough to describe reproducible behavior
 without turning hypotheses into design commitments.
 
+The broader product roadmap lives in
+`../research/plans/general-wiztree-for-any-mac-roadmap.md`. It is intentionally
+not an implementation spec; use it to choose the next research or implementation
+gate, then promote only resolved slices into this directory.
+
 ## Specs
 
 - `narrow-v1-proof-parser-skeleton.md`: current `src/apfs_fastindex`
