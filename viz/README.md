@@ -41,17 +41,34 @@ ignored by the viz.
 
 ## What the visual shows
 
-- Each rectangle is one file or one directory's subtree.
-- Rectangle area is proportional to the directory's
-  unique-inode logical-size total (SR-009 policy: each inode counts once
-  per directory, even if hard-linked).
-- Click a directory rectangle to zoom in; the breadcrumb at the top
-  navigates back. **Reset zoom** in the header returns to the root.
-- Hover any rectangle for path, kind, and size. Symlinks also show
+- Every file in the scan is its own rectangle, all rendered at once
+  (depth-N layout — the WizTree-style "see the whole disk at a glance"
+  view).
+- Files are colored by extension. Known categories (text/code, images,
+  AV, documents, archives, app/system) have stable palette entries;
+  unknown extensions hash to a deterministic HSL color so the same
+  extension always looks the same and unfamiliar clusters stay
+  distinguishable from each other.
+- Directories are rendered as labeled containers around their contents:
+  a thin border + a name/size label band at the top. Clicking the
+  directory band zooms into that subtree. The breadcrumb at the top
+  navigates back; **Reset zoom** returns to the root.
+- Hover any rectangle for full path, kind, and size. Symlinks also show
   their target.
 - The header shows the scanner's `correctness_claim` so you can tell at
   a glance which semantic mode produced the data (raw APFS vs POSIX
   fallback).
+
+### Performance notes
+
+The viz uses SVG. To keep the page interactive on 100k+ entry scans the
+renderer skips any node whose computed pixel area is below ~4 px², so
+slivers smaller than your screen can resolve don't bog down the
+browser. Zooming into a directory re-lays out only that subtree, which
+brings back the detail for entries that were too small at the parent
+zoom level. Truly massive scans (the multi-million-entry end) will
+eventually need a Canvas or Metal renderer in the native app; the SVG
+version remains the demo surface.
 
 ## Known limits (v0)
 
