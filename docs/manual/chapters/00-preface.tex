@@ -25,3 +25,16 @@ unproven design direction.
 The current manual is intentionally skeletal. It records the narrative structure
 and the canonical cross-links so later research can fill chapters without
 turning the repository into a second, inconsistent source of truth.
+
+Since the previous revision the project has added a native Rust read-only path
+(\path{crates/apfs-fastindex}) covering source gating, descriptor scanning,
+checkpoint-map validation, container/volume OMAP resolution, volume-superblock
+decoding under the v1 feature allowlist, and an FS-tree record-family dump.
+A second cascade of source reviews (\texttt{SR-005} through \texttt{SR-018})
+has tightened checkpoint validation, OMAP lookup semantics, FS-record body
+layout, xfield cursor rules, fail-closed boundaries, logical-size source
+precedence, and name normalization. Five new experiments
+(\texttt{EX-10} through \texttt{EX-14}) record the empirical state of the
+native path; \texttt{EX-14} is the current open blocker for promoting Rust
+output past the FS-record family inventory. This revision updates each chapter
+to track those changes without prematurely claiming work that has not landed.

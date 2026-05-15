@@ -13,7 +13,11 @@ The read-path research separates four claims:
 \end{description}
 
 This vocabulary comes from
-\path{docs/research/experiments/EX-08-read-path-matrix/README.md}.
+\path{docs/research/experiments/EX-08-read-path-matrix/README.md}. The first
+safe-host execution of EX-08 supports detached unencrypted image-backed APFS
+for narrow v1 proof work, keeps mounted images
+\texttt{readable\_not\_supported}, and records startup raw read as
+\texttt{blocked\_privilege}.
 
 \section{Current Allowlist}
 
@@ -22,13 +26,20 @@ The current raw-mode allowlist is narrow:
 \begin{itemize}
   \item detached, unencrypted, image-backed APFS containers that match the tested
   layout
+  \item caller-supplied raw APFS container devices under \path{/dev/disk*} or
+  \path{/dev/rdisk*} matching the tested layout
   \item explicitly stable APFS sources where one scan state can be selected and
   held for the full run
   \item mounted lab images only for documented experiments, not product support
 \end{itemize}
 
-The support-boundary source review is
-\path{docs/research/sources/SR-004-runtime-read-path-and-encryption.md}.
+The support-boundary source reviews are
+\path{docs/research/sources/SR-004-runtime-read-path-and-encryption.md},
+\path{docs/research/sources/SR-011-encryption-runtime-read-path.md} for the
+encryption boundary, and
+\path{docs/research/sources/SR-012-format-drift-feature-allowlist.md} for the
+incompatible-feature allowlist enforced by the Rust container and volume
+decoders.
 
 \section{Fallback Conditions}
 

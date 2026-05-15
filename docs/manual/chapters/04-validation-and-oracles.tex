@@ -35,9 +35,50 @@ The successful v1 proof pattern is:
 This pattern was established in \path{docs/research/experiments/EX-03-pinned-state-raw-vs-oracle/README.md}
 and expanded in \path{docs/research/experiments/EX-04-expanded-pinned-corpus/README.md}.
 
+\section{Cross-Tool Oracle Pairing}
+
+\path{docs/research/experiments/EX-12-omap-lookup-contract/README.md}
+established a paired oracle pattern for the Rust path: a probe builds a fresh
+proof fixture, runs the native Rust scanner and \texttt{go-apfs identitydump}
+against the same \path{/dev/rdiskN}, replays \texttt{obj\_phys\_t} validation at
+every Rust-returned \texttt{paddr}, re-runs the SR-006 lower-bound rule on
+Rust's published OMAP samples, and confirms cross-tool agreement on
+\texttt{root\_tree.oid}. The \texttt{(paddr, object\_xid)} divergence between
+the Rust selected XID and the apparent \texttt{go-apfs} active state is recorded
+as a \texttt{go\_apfs\_active\_state\_observation} caveat rather than a
+contradiction.
+
+\section{Validation Gate Cascade}
+
+The current source-backed validation gates that precede any namespace claim:
+
+\begin{itemize}
+  \item \path{docs/research/sources/SR-005-checkpoint-validation-details.md}
+  for the checkpoint-superblock validation contract.
+  \item \path{docs/research/sources/SR-006-omap-lookup-semantics.md} for
+  \texttt{(omap, oid, max\_xid)} lower-bound semantics and OMAP failure cases.
+  \item \path{docs/research/sources/SR-007-object-header-fail-closed-validation.md}
+  for the single \texttt{validate\_object\_block} chokepoint used by every
+  reader in \path{crates/apfs-fastindex}.
+  \item \path{docs/research/sources/SR-013-checkpoint-map-integrity.md} for
+  checkpoint-map ring validation and ephemeral-object handling.
+  \item \path{docs/research/sources/SR-016-record-body-fail-closed-boundary.md}
+  for malformed-body hard stops before any row is emitted.
+\end{itemize}
+
 \section{Negative Live-State Pattern}
 
 \path{docs/research/experiments/EX-05-live-pinned-churn/README.md} is the
 counterexample pattern. A mounted image can be raw-readable while latest-state
 raw output still lacks a named stable oracle. That result prevents the manual
 from treating live latest raw traversal as correctness evidence.
+
+\section{Inconclusive Pattern}
+
+\path{docs/research/experiments/EX-14-xfield-layout-variant/README.md} is the
+counterexample pattern for an upstream failure: the experiment captured a
+mounted oracle, ran the Rust scanner, and recorded that the native context
+provider failed before xfield comparison could occur. Recording the
+\texttt{validation\_gaps} list and the failing block address is itself the
+deliverable; the experiment does not promote a Hypothesis past the available
+evidence.

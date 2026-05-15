@@ -49,3 +49,46 @@ Every durable claim should be tagged mentally as one of:
 
 The manual should preserve that discipline. It is acceptable for a chapter to
 say "not yet known"; that is better than encoding a guess as architecture.
+
+\section{Source Review Cascade}
+
+External evidence is consolidated in \path{docs/research/sources/SR-*.md}. The
+current set covers:
+
+\begin{itemize}
+  \item \texttt{SR-001} v1 support boundary
+  \item \texttt{SR-002} checkpoint, OMAP, and root-discovery contract
+  \item \texttt{SR-003} FS record taxonomy
+  \item \texttt{SR-004} runtime read path and encryption boundary
+  \item \texttt{SR-005} checkpoint validation details for the Rust scanner
+  \item \texttt{SR-006} OMAP lookup semantics and failure cases
+  \item \texttt{SR-007} object-header fail-closed validation
+  \item \texttt{SR-008} FS record layout for native v1 parsing
+  \item \texttt{SR-009} compression and logical-size precedence
+  \item \texttt{SR-010} snapshots, volume groups, and firmlinks
+  \item \texttt{SR-011} encryption and runtime read-path boundary
+  \item \texttt{SR-012} format drift and feature-bit allowlisting
+  \item \texttt{SR-013} checkpoint-map integrity and ephemeral-object validation
+  \item \texttt{SR-014} native FS-record body contract
+  \item \texttt{SR-015} xfield layout and alignment
+  \item \texttt{SR-016} record-body fail-closed boundary
+  \item \texttt{SR-017} logical-size source precedence
+  \item \texttt{SR-018} name normalization and case behavior
+\end{itemize}
+
+Every \texttt{SR-*} note opens with a bottom line, separates Spec from
+Observation from Hypothesis, and ends with a Decision impact line that names
+the affected \texttt{RL-*} log and the next exact step. Conflicts between
+Apple's PDF and converged open-source implementations carry an explicit
+\textbf{Conflict Note} so the smallest decisive probe is identifiable from the
+review alone.
+
+\section{Pinned Citation Style}
+
+External citations should pin both the URL and either a commit SHA or
+retrieval date. \texttt{SR-015} is the current model: the source list cites
+Apple's reference PDF together with permalinks at fixed commits for
+\texttt{linux-apfs-rw}, \texttt{apfs-fuse}, \texttt{dissect.apfs},
+\texttt{go-apfs}, \texttt{libfsapfs}, and the Sleuth Kit's APFS module. A
+claim that three or more independent implementations agree on is treated as
+stronger evidence than the PDF on its own.

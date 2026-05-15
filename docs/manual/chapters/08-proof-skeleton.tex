@@ -1,9 +1,16 @@
-\chapter{Proof Skeleton}
+\chapter{Implementations}
 
-\section{Current Implementation Boundary}
+The repository carries two runnable implementations: a Python proof skeleton
+that remains the authoritative oracle for namespace and logical-size parity,
+and a native Rust read-only path that has been extended to FS-tree record-family
+inventory. This chapter documents both and the discipline that keeps them
+honest about what they prove.
 
-The current runnable implementation is a proof-backed parser skeleton, not the
-final native high-performance parser. Its implementation-facing spec is
+\section{Python Proof Skeleton}
+
+\subsection{Current Implementation Boundary}
+
+The proof-backed parser skeleton is documented in
 \path{docs/implementation/narrow-v1-proof-parser-skeleton.md}.
 
 The execution path is:
@@ -17,7 +24,7 @@ The execution path is:
   \item oracle diff
 \end{enumerate}
 
-\section{Regression Command}
+\subsection{Regression Command}
 
 From the repository root:
 
@@ -28,20 +35,150 @@ PYTHONPATH=src python3 -m apfs_fastindex.poc_regression
 The regression creates a temporary APFS image, builds a small corpus, captures a
 mounted oracle, detaches the image, runs the proof parser, and compares output.
 
-\section{What Not To Infer}
+\subsection{What Not To Infer}
 
 Do not infer native parser performance from the proof skeleton. The proof backend
 currently shells out through \texttt{go run} and exists to keep correctness
 experiments runnable while native root resolution and FS-record parsing are
 split out.
 
-Native implementation work should preserve the output contracts while replacing
-the proof backend in stages:
+\section{Native Rust Scanner}
+
+\subsection{Current Boundary}
+
+The native Rust crate is \path{crates/apfs-fastindex} and its
+implementation-facing spec is \path{docs/implementation/rust-checkpoint-scanner.md}.
+The crate is the v1 implementation slice; it covers the full read-only path
+from source-gate to FS-tree record-family inventory but does not yet decode
+FS-record bodies, emit \texttt{NamespaceEntry} rows, compute logical sizes, or
+claim live-mounted-source correctness.
+
+What the Rust path currently proves on the proof fixture:
+
+\begin{itemize}
+  \item Allowlisted input is a detached APFS \texttt{.dmg} image attached with
+  \texttt{hdiutil attach -plist -nomount}, or a caller-supplied raw APFS
+  container path under \path{/dev/disk*} or \path{/dev/rdisk*}.
+  \item Block zero is validated as an APFS container locator (block size,
+  \texttt{NXSB} magic, object type, object id, Fletcher-64 checksum).
+  \item Contiguous checkpoint descriptor areas are scanned for checksum-valid
+  \texttt{NXSB} candidates and the highest candidate XID is selected.
+  \item The selected NX superblock is decoded end-to-end and the v1
+  incompatible-feature allowlist is enforced.
+  \item The per-checkpoint \texttt{checkpoint\_map\_phys\_t} ring is walked,
+  ephemeral OID mappings are reported, and \texttt{CHECKPOINT\_MAP\_LAST} is
+  required.
+  \item The container OMAP is opened and queried with the
+  \texttt{(oid, max\_xid)} lower-bound semantics required by SR-006, with
+  hard stops on the encryption, no-header, and unknown-flag conditions.
+  \item Every reachable volume superblock is decoded and gated by the v1
+  allowlist (encryption, sealed volumes, normalization sensitivity, unknown
+  incompatible features all force \texttt{Unsupported(reason)}).
+  \item Supported volumes have their volume OMAP opened and the FS-tree root
+  validated through it.
+  \item The FS-tree is walked read-only and an FS-record family dump is
+  emitted (\texttt{inode}, \texttt{xattr}, \texttt{sibling\_link},
+  \texttt{dstream\_id}, \texttt{file\_extent}, \texttt{dir\_rec},
+  \texttt{sibling\_map}, snapshot families, and an \texttt{unsupported}
+  bucket).
+\end{itemize}
+
+\subsection{Module Layout}
+
+\begin{verbatim}
+crates/apfs-fastindex/src/
+  lib.rs          orchestration, parser shapes, source gate
+  main.rs         apfs-fastindex-scan binary (JSON output)
+  block_io.rs     block reads, le_u*, Fletcher-64, test helpers
+  object.rs       obj_phys_t validation (SR-007 single chokepoint)
+  btree.rs        read-only B-tree node reader (fixed and variable kv)
+  omap.rs         OMAP resolver: (oid, max_xid) lower-bound + summary
+  container.rs    NXSB decode + checkpoint map ring walk
+  volume.rs       APSB decode + v1 feature allowlist (SR-012)
+  fs_records.rs   FS-tree record-family dumper (SR-008)
+\end{verbatim}
+
+The fail-closed contract is centralized in
+\texttt{object::validate\_object\_block}: checksum, expected object type,
+expected storage class, encryption flag, no-header flag, optional
+\texttt{oid == paddr} check, and optional \texttt{xid <= scan\_xid} guard.
+Every reader in the crate validates a block through this function before
+trusting its body.
+
+\subsection{Commands}
+
+Run unit tests:
+
+\begin{verbatim}
+cargo test -p apfs-fastindex
+\end{verbatim}
+
+Build and run the scanner against a detached APFS \texttt{.dmg}:
+
+\begin{verbatim}
+cargo run --bin apfs-fastindex-scan -- /path/to/detached-apfs.dmg
+\end{verbatim}
+
+Run the EX-10 probe (also asserts on the native dump structure):
+
+\begin{verbatim}
+python3 docs/research/experiments/EX-10-rust-checkpoint-scanner/artifacts/probe_ex10.py
+\end{verbatim}
+
+Run the EX-12 OMAP lookup contract probe:
+
+\begin{verbatim}
+python3 docs/research/experiments/EX-12-omap-lookup-contract/artifacts/probe_ex12.py
+\end{verbatim}
+
+\subsection{Empirical Corrections Distilled Into Code}
+
+Three empirical corrections from running the Rust path against the real proof
+fixture have been landed in the crate and recorded in RL-01, RL-02, and RL-03:
 
 \begin{enumerate}
-  \item native checkpoint and root resolver
-  \item native OMAP lookup with selected-XID enforcement
-  \item native FS-record reader
-  \item native namespace and logical-size extraction
-  \item regression against the existing oracle corpus
+  \item \texttt{OBJECT\_TYPE\_CHECKPOINT\_MAP} blocks carry \texttt{OBJ\_PHYSICAL},
+  not \texttt{OBJ\_EPHEMERAL}, so the validator for the checkpoint-map ring
+  expects \texttt{ExpectedStorage::Physical}.
+  \item B-tree TOC \texttt{v\_off} measures the distance from the end of the
+  value area to the start of the value; values run forward by
+  \texttt{fixed\_value\_size} or \texttt{v\_len}. The earlier
+  ``value extends backward from \texttt{v\_off}'' assumption mis-decoded OMAP
+  values as \texttt{flags=0x10ffff}.
+  \item The FS-tree root is reached through the volume OMAP, so on disk it
+  carries a virtual \texttt{obj\_phys\_t} (storage flags 0). The FS-tree
+  validator therefore uses \texttt{ExpectedStorage::Virtual} and checks
+  \texttt{header.oid == volume\_omap\_lookup.oid} rather than requiring
+  \texttt{o\_oid == paddr}.
 \end{enumerate}
+
+\section{Native Replacement Path}
+
+Remaining native work, in order, with each step landing as its own
+\texttt{EX-*} note before promotion:
+
+\begin{enumerate}
+  \item Resolve the \texttt{EX-14} block-1031 context blocker before any new
+  body decoder is added.
+  \item Replay \texttt{EX-13} with the SR-015 source-backed xfield cursor rule
+  and \texttt{xf\_used\_data} validation.
+  \item Add synthetic negative record-body cases from SR-016.
+  \item Decode \texttt{j\_drec\_*\_key\_t} and \texttt{j\_drec\_val\_t} to
+  reconstruct the path table without yet emitting \texttt{NamespaceEntry} rows.
+  \item Decode \texttt{j\_inode\_val\_t} flags, link count, and embedded fields
+  needed for logical-size selection per SR-009 and SR-017.
+  \item Decode \texttt{j\_dstream\_id\_val\_t} and \texttt{j\_dstream\_t} for
+  logical size, and resolve the symlink-target \texttt{XATTR}.
+  \item Resolve \texttt{j\_sibling\_link\_val\_t} and
+  \texttt{j\_sibling\_map\_val\_t} for hard-link unification.
+  \item Wire the resolved namespace into the existing
+  \texttt{ParserOutput} / \texttt{NamespaceEntry} / \texttt{DirectoryAggregate}
+  / oracle-diff contract so the Rust path can be diffed against the Python
+  proof oracle.
+  \item Re-run the existing Python proof fixture and the expanded EX-04 corpus
+  after each replacement stage. Native parity is not declared until the
+  regression suite passes.
+\end{enumerate}
+
+Any support broadening must first update the related \texttt{SR-*},
+\texttt{EX-*}, and \texttt{RL-*} artifacts.

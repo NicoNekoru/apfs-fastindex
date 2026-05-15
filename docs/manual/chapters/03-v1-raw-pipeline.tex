@@ -49,11 +49,44 @@ The current source-backed taxonomy is
 \path{docs/research/sources/SR-003-fs-record-taxonomy.md}; the rolling synthesis
 is \path{docs/research/RL-03-fs-tree-topology-and-required-records.md}.
 
+\subsection{Body And Xfield Decoding Rules}
+
+FS-record body decoding adds three further source-backed contracts:
+
+\begin{itemize}
+  \item \path{docs/research/sources/SR-008-fs-record-layout-v1.md} fixes the
+  on-disk layout of \texttt{j\_drec\_*}, \texttt{j\_inode\_*},
+  \texttt{j\_dstream\_*}, \texttt{j\_xattr\_*}, and \texttt{j\_sibling\_*}.
+  \item \path{docs/research/sources/SR-014-native-fs-record-body-contract.md}
+  ties body decoding to the validated checkpoint/OMAP/root context.
+  \item \path{docs/research/sources/SR-015-xfield-layout-and-alignment.md}
+  pins one deterministic xfield cursor: the value area starts immediately
+  after the metadata table and each value advances by
+  \texttt{round\_up(x\_size, 8)}; \texttt{xf\_used\_data} is the padded
+  value-area byte count.
+  \item \path{docs/research/sources/SR-016-record-body-fail-closed-boundary.md}
+  enumerates the malformed-body hard stops (short fixed bodies, malformed
+  names, duplicate or out-of-bounds xfields, invalid xattr forms,
+  \texttt{drec}/\texttt{inode} type mismatches, missing sibling mappings).
+\end{itemize}
+
 \section{Namespace And Logical Size}
 
 Namespace output must preserve path identity and file identity separately.
 Logical size is the only v1 size metric. Physical, shared, exclusive, and
 snapshot-retained accounting are separate modes.
+
+The logical-size source precedence is fixed by
+\path{docs/research/sources/SR-017-logical-size-source-precedence.md}: ordinary,
+sparse, cloned, hard-linked, symlink, and compressed cases each name the
+candidate fields (\texttt{j\_dstream\_t.size}, \texttt{INO\_EXT\_TYPE\_DSTREAM},
+\texttt{INO\_EXT\_TYPE\_SPARSE\_BYTES}, decmpfs xattr) and the fail-closed
+condition when they disagree.
+
+Name normalization, case behavior, and APFS hash collisions follow
+\path{docs/research/sources/SR-018-name-normalization-and-case.md}. Until the
+SR-018 fixture lands, stored UTF-8 names are emitted verbatim and lookup-by-name
+is not claimed.
 
 Related logs:
 
@@ -61,3 +94,18 @@ Related logs:
   \item \path{docs/research/RL-06-namespace-reconstruction.md}
   \item \path{docs/research/RL-07-size-and-space-accounting.md}
 \end{itemize}
+
+\section{Current Open Blocker}
+
+\path{docs/research/experiments/EX-14-xfield-layout-variant/README.md} returned
+\texttt{oracle\_inconclusive} on a denser EX-13-style fixture: the Rust context
+provider found four valid checkpoint candidates with highest XID 20 but
+aborted with \texttt{APFS object validation failed: checksum mismatch at block
+1031} before publishing \texttt{selected\_checkpoint}. The rolling roadmap
+\path{docs/research/plans/general-wiztree-for-any-mac-roadmap.md} treats this
+as the gating defect for Rust FS-record body decoding and downstream namespace
+emission. The next exact step is a focused checkpoint/OMAP-context replay for
+the EX-14 fixture shape that distinguishes stale checkpoint selection, a
+missing checkpoint-map/data-ring rule, a Rust validation bug, or a
+malformed-source hard stop. Until that experiment closes, the manual records
+the native pipeline as halted at FS-record family inventory.

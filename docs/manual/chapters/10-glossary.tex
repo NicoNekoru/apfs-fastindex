@@ -26,4 +26,36 @@
   This is not part of raw v1 logical-size output.
   \item[Firmlink] macOS presentation mechanism that contributes to merged
   System/Data namespace behavior.
+  \item[NX / NXSB] APFS container superblock (\texttt{nx\_superblock\_t}). The
+  block-zero copy is the locator; the authoritative selected NXSB lives in the
+  checkpoint descriptor area at the highest valid checkpoint XID.
+  \item[APSB] APFS volume superblock. Decoded by the Rust crate under the v1
+  feature allowlist; encryption, sealed volumes, and unknown incompatible
+  features force \texttt{Unsupported(reason)}.
+  \item[Checkpoint map] The per-checkpoint
+  \texttt{checkpoint\_map\_phys\_t} ring that maps ephemeral object IDs to
+  physical addresses for the selected transaction; the last block in the ring
+  must carry \texttt{CHECKPOINT\_MAP\_LAST}.
+  \item[Scan XID] The single chosen transaction identifier the parser pins for
+  the duration of a run; all object resolution must be performed against this
+  scan XID.
+  \item[Xfield] The variable-length extended-field area in inode and
+  directory-record bodies. SR-015 fixes one source-backed cursor rule:
+  values start immediately after the metadata table and each value advances by
+  \texttt{round\_up(x\_size, 8)}; \texttt{xf\_used\_data} is the padded
+  value-area byte count.
+  \item[Sibling link / sibling map] The hard-link records
+  (\texttt{j\_sibling\_link\_val\_t}, \texttt{j\_sibling\_map\_val\_t}) that
+  unify multiple paths sharing a single file identity.
+  \item[decmpfs] The Apple compression xattr family used by the
+  HFS-compression mechanism on APFS. SR-009 and SR-017 specify when its
+  uncompressed size takes precedence over \texttt{j\_dstream\_t.size}.
+  \item[Sparse bytes] The \texttt{INO\_EXT\_TYPE\_SPARSE\_BYTES} xfield that
+  records bytes saved by sparse-file allocation; relevant to the size
+  precedence table when the dstream size includes sparse holes.
+  \item[Fail-closed] The behavioral discipline that turns any unrecognized,
+  malformed, or out-of-allowlist condition into a typed hard stop rather than
+  a best-effort guess; centralized in
+  \texttt{object::validate\_object\_block} for object headers and in SR-016
+  for record bodies.
 \end{description}
