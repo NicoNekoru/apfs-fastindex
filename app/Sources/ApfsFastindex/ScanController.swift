@@ -11,9 +11,17 @@ enum ScanMode: String, CaseIterable, Hashable {
 }
 
 /// Drives the `apfs-fastindex-scan` subprocess and bridges results into
-/// the viz WKWebView. Phase 1 scope: launch the scanner, stream stderr
-/// progress, hand the stdout JSON to the viz. Selection / context-menu
-/// plumbing is reserved for Phase 2.
+/// the viz WKWebView.
+///
+/// The earlier `Task.detached` + `nonisolated async` plumbing was
+/// fragile: under `@MainActor` isolation, the optional-chained
+/// `self?.streamProgress(...)` could end up serialized through the main
+/// actor anyway and `FileHandle.read(upToCount:)` would block the run
+/// loop — the progress counters didn't tick until the subprocess closed
+/// its pipes. We use `FileHandle.readabilityHandler` instead: the
+/// callback fires on a private background queue by construction, we
+/// process the bytes there, and hop to main via `DispatchQueue.main`
+/// for the @Published state mutations.
 @MainActor
 final class ScanController: ObservableObject {
     @Published var targetPath: String = ""
@@ -27,16 +35,30 @@ final class ScanController: ObservableObject {
     @Published var selectedPath: String = ""
     @Published var correctnessClaim: String = ""
 
-    /// Cached values pushed to the viz once the WebView reports it is
-    /// ready. We may receive a scan before the viz finishes loading, so
-    /// the bridge replays the latest cached scan + progress when it
-    /// connects.
-    private(set) var pendingScanJSON: String? = nil
+    /// Latest scan-result URL written to disk so the viz can load it via
+    /// XHR. We retain it for the lifetime of the scan + page render; the
+    /// next scan or app exit cleans it up.
+    private(set) var pendingScanFileURL: URL? = nil
     private(set) var pendingProgress: ProgressUpdate? = nil
 
     private weak var webView: WKWebView?
+    /// Direct handle to the WebView's coordinator (also the
+    /// `WKURLSchemeHandler` for `apfs-scan://`). Set in `bindWebView`
+    /// so we can stash the latest scan-result file URL on the handler
+    /// *before* the JS XHR fires — going through SwiftUI's
+    /// `updateNSView` propagation has a one-frame lag that loses the
+    /// race with `evaluateJavaScript`.
+    private weak var vizCoordinator: VizWebView.Coordinator?
     private var scanProcess: Process?
     private var scanCancelled: Bool = false
+
+    /// Thread-safe accumulator for stdout bytes. Lives outside the
+    /// @MainActor class so the `readabilityHandler` and the
+    /// `terminationHandler` can append + snapshot it without crossing
+    /// the actor boundary on every chunk.
+    private let stdoutBox = ScanBufferBox()
+    private var stderrBuffer = Data()
+    private var lastTempScanURL: URL? = nil
 
     var modeLabel: String {
         switch mode {
@@ -62,8 +84,14 @@ final class ScanController: ObservableObject {
 
     func bindWebView(_ webView: WKWebView) {
         self.webView = webView
-        if let cached = pendingScanJSON {
-            evaluateLoadScan(json: cached)
+        // The Coordinator we registered in `makeNSView` is both the
+        // navigation delegate and the URL-scheme handler for
+        // `apfs-scan://`. Grab the reference so we can push the latest
+        // scan-result file URL onto it directly without going through
+        // the SwiftUI re-render path.
+        self.vizCoordinator = webView.navigationDelegate as? VizWebView.Coordinator
+        if let url = pendingScanFileURL {
+            evaluateLoadScanFromFile(url)
         }
         if let progress = pendingProgress {
             evaluateSetProgress(progress)
@@ -83,8 +111,11 @@ final class ScanController: ObservableObject {
         elapsedMs = 0
         lastError = nil
         correctnessClaim = ""
-        pendingScanJSON = nil
         pendingProgress = nil
+        // Discard any previous temp scan file before starting a new one.
+        cleanupLastTempScan()
+        stdoutBox.clear()
+        stderrBuffer.removeAll(keepingCapacity: false)
         isScanning = true
         scanCancelled = false
 
@@ -105,20 +136,60 @@ final class ScanController: ObservableObject {
         let stderrPipe = Pipe()
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
+
+        // Wire the readability handlers BEFORE launching the process so
+        // we don't miss the first burst of progress lines or output bytes.
+        let stdoutReader = stdoutPipe.fileHandleForReading
+        let stderrReader = stderrPipe.fileHandleForReading
+
+        let bufferBox = stdoutBox
+        // stdout: just buffer the bytes — the JSON is one big blob that
+        // we ship to disk at EOF, no parsing here.
+        stdoutReader.readabilityHandler = { handle in
+            let data = handle.availableData
+            if data.isEmpty {
+                handle.readabilityHandler = nil
+                return
+            }
+            bufferBox.append(data)
+        }
+
+        // stderr: progress JSON, one object per line. Hop to main for the
+        // @Published state update because that's where SwiftUI observes
+        // them; the JSON parse itself is tiny (<200 bytes per line).
+        stderrReader.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            if data.isEmpty {
+                handle.readabilityHandler = nil
+                return
+            }
+            DispatchQueue.main.async { [weak self] in
+                self?.appendStderr(data)
+            }
+        }
+
+        process.terminationHandler = { [weak self] proc in
+            // terminationHandler fires on a background queue. Drain any
+            // remaining bytes from the pipes (Apple recommends a
+            // best-effort `availableData` after termination), commit
+            // them through the thread-safe box, then hop to main for
+            // the final state update.
+            let stdoutTail = stdoutReader.availableData
+            let stderrTail = stderrReader.availableData
+            if !stdoutTail.isEmpty { bufferBox.append(stdoutTail) }
+            let collected = bufferBox.snapshot()
+            DispatchQueue.main.async { [weak self] in
+                if !stderrTail.isEmpty { self?.appendStderr(stderrTail) }
+                self?.finishScan(process: proc, stdout: collected)
+            }
+        }
+
         scanProcess = process
-
-        // Stream stderr progress on a background task; assemble stdout
-        // on another. Both terminate when the pipes close.
-        Task.detached { [weak self] in
-            await self?.streamProgress(stderrPipe.fileHandleForReading)
-        }
-        Task.detached { [weak self] in
-            await self?.collectStdout(stdoutPipe.fileHandleForReading, process: process)
-        }
-
         do {
             try process.run()
         } catch {
+            stdoutReader.readabilityHandler = nil
+            stderrReader.readabilityHandler = nil
             isScanning = false
             scanProcess = nil
             lastError = "failed to launch scanner: \(error.localizedDescription)"
@@ -130,93 +201,101 @@ final class ScanController: ObservableObject {
         scanProcess?.terminate()
     }
 
-    // MARK: - Subprocess plumbing
+    // MARK: - Stream handlers (main actor)
 
-    private func streamProgress(_ handle: FileHandle) async {
-        // Read progress lines one at a time; each is a JSON object terminated
-        // by `\n`. We hand the parsed counters to the UI on the main actor.
-        var buffer = Data()
-        while true {
-            let chunk: Data
-            do {
-                chunk = try handle.read(upToCount: 4096) ?? Data()
-            } catch {
-                break
+    private func appendStderr(_ data: Data) {
+        stderrBuffer.append(data)
+        // Pop one line at a time. Data uses Int indices that aren't
+        // necessarily 0-based after slicing, so we always work from
+        // `startIndex` and use `removeSubrange` to slide the buffer.
+        while let newline = stderrBuffer.firstIndex(of: 0x0A) {
+            let lineRange = stderrBuffer.startIndex..<newline
+            let lineData = Data(stderrBuffer[lineRange])
+            let dropRange = stderrBuffer.startIndex...newline
+            stderrBuffer.removeSubrange(dropRange)
+            if let update = decodeProgress(lineData) {
+                scannedCount = update.scanned
+                skippedCount = update.skipped
+                elapsedMs = update.elapsedMs
+                pendingProgress = update
+                evaluateSetProgress(update)
             }
-            if chunk.isEmpty { break }
-            buffer.append(chunk)
-            while let newline = buffer.firstIndex(of: 0x0A) {
-                let line = buffer.subdata(in: 0..<newline)
-                buffer.removeSubrange(0..<(newline + 1))
-                if let update = decodeProgress(line) {
-                    await MainActor.run {
-                        self.scannedCount = update.scanned
-                        self.skippedCount = update.skipped
-                        self.elapsedMs = update.elapsedMs
-                        self.pendingProgress = update
-                        self.evaluateSetProgress(update)
-                    }
+        }
+    }
+
+    private func finishScan(process: Process, stdout: Data) {
+        isScanning = false
+        scanProcess = nil
+
+        if scanCancelled {
+            lastError = "scan cancelled"
+            return
+        }
+        let exitCode = process.terminationStatus
+        if exitCode != 0 {
+            lastError = "scanner exited with status \(exitCode)"
+            return
+        }
+
+        // Pull the small `correctness_claim` field off the raw bytes
+        // before we ship the rest of the blob to disk. Doing this on
+        // main is fine: it reads only the first ~4 KB.
+        if let claim = Self.extractCorrectnessClaim(stdout) {
+            correctnessClaim = claim
+        }
+
+        // The scan JSON can be hundreds of MB. We write it to a temp
+        // file on a background queue and hand the path to the viz; the
+        // viz fetches via XHR (parsed in the WebKit content process)
+        // instead of eating a giant string interpolation + IPC on the
+        // main thread.
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("apfs-scan-\(UUID().uuidString).json")
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            do {
+                try stdout.write(to: url, options: .atomic)
+                DispatchQueue.main.async {
+                    self?.pendingScanFileURL = url
+                    self?.lastTempScanURL = url
+                    self?.evaluateLoadScanFromFile(url)
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self?.lastError = "failed to write scan to disk: \(error.localizedDescription)"
                 }
             }
         }
     }
 
-    private func collectStdout(_ handle: FileHandle, process: Process) async {
-        // The Rust binary emits one big JSON document. We accumulate it
-        // and ship to the viz once the process exits.
-        var stdout = Data()
-        while true {
-            let chunk: Data
-            do {
-                chunk = try handle.read(upToCount: 65_536) ?? Data()
-            } catch { break }
-            if chunk.isEmpty { break }
-            stdout.append(chunk)
+    private func cleanupLastTempScan() {
+        if let url = lastTempScanURL {
+            try? FileManager.default.removeItem(at: url)
+            lastTempScanURL = nil
+            pendingScanFileURL = nil
         }
-        process.waitUntilExit()
-        let cancelled = await MainActor.run { self.scanCancelled }
-        let exitCode = process.terminationStatus
-
-        let result = String(data: stdout, encoding: .utf8) ?? ""
-        await MainActor.run {
-            self.isScanning = false
-            self.scanProcess = nil
-            if cancelled {
-                self.lastError = "scan cancelled"
-                return
-            }
-            if exitCode != 0 {
-                self.lastError = "scanner exited with status \(exitCode)"
-                return
-            }
-            if let claim = self.extractCorrectnessClaim(result) {
-                self.correctnessClaim = claim
-            }
-            self.pendingScanJSON = result
-            self.evaluateLoadScan(json: result)
-        }
-    }
-
-    private func extractCorrectnessClaim(_ json: String) -> String? {
-        guard let data = json.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return nil
-        }
-        return obj["correctness_claim"] as? String
     }
 
     // MARK: - WKWebView calls
 
-    private func evaluateLoadScan(json: String) {
+    private func evaluateLoadScanFromFile(_ url: URL) {
         guard let webView else { return }
-        // Pass through `JSON.parse` on the JS side so a 100+ MB payload
-        // does not have to be re-stringified by us. The web side reads
-        // the top-level doc the same way it does in the drag-drop flow.
-        let escaped = jsStringLiteral(json)
-        let js = "if (window.__apfs_ingest__) { __apfs_ingest__(\(escaped)); }"
+        // **Order matters.** The Coordinator (URL-scheme handler) must
+        // know about this scan file *before* the JS XHR fires; if we
+        // relied on SwiftUI's `updateNSView` to propagate the URL,
+        // `evaluateJavaScript` would beat the re-render and the XHR
+        // would 404. Set it directly on the coordinator first.
+        vizCoordinator?.currentScanFileURL = url
+
+        // The path argument is purely for diagnostics — the JS shim
+        // always fetches `apfs-scan://current` regardless of what we
+        // pass. Escape backslashes and single-quotes defensively.
+        let escaped = url.path
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+        let js = "if (window.__apfs_ingest_file__) __apfs_ingest_file__('\(escaped)');"
         webView.evaluateJavaScript(js) { _, err in
             if let err = err {
-                NSLog("loadScan JS error: \(err.localizedDescription)")
+                NSLog("evaluateLoadScanFromFile JS error: \(err.localizedDescription)")
             }
         }
     }
@@ -230,17 +309,35 @@ final class ScanController: ObservableObject {
         webView.evaluateJavaScript(js, completionHandler: nil)
     }
 
-    private func jsStringLiteral(_ s: String) -> String {
-        // Minimal JS-safe escape: wrap in JSON.stringify on the JS side by
-        // using a JSON-quoted string. We re-encode as a JSON string so
-        // backslashes, quotes, and control chars are preserved.
-        if let data = try? JSONSerialization.data(withJSONObject: [s], options: []),
-           let str = String(data: data, encoding: .utf8),
-           str.count >= 2 {
-            // Strip surrounding `[` / `]`
-            return String(str.dropFirst().dropLast())
+    /// `static` so the call site doesn't need actor isolation. Scans
+    /// only the first 4 KB of the buffer for `"correctness_claim"`,
+    /// since the scanner emits that key near the top of the document.
+    nonisolated static func extractCorrectnessClaim(_ data: Data) -> String? {
+        let prefixData = data.prefix(4096)
+        guard let prefix = String(data: prefixData, encoding: .utf8) else { return nil }
+        guard let keyRange = prefix.range(of: "\"correctness_claim\"") else { return nil }
+        let after = prefix[keyRange.upperBound...]
+        guard let colon = after.firstIndex(of: ":") else { return nil }
+        let rest = after[after.index(after: colon)...]
+        guard let openQuote = rest.firstIndex(of: "\"") else { return nil }
+        var cursor = rest.index(after: openQuote)
+        var out = ""
+        var escaped = false
+        while cursor < rest.endIndex {
+            let ch = rest[cursor]
+            if escaped {
+                out.append(ch)
+                escaped = false
+            } else if ch == "\\" {
+                escaped = true
+            } else if ch == "\"" {
+                return out
+            } else {
+                out.append(ch)
+            }
+            cursor = rest.index(after: cursor)
         }
-        return "\"\""
+        return nil
     }
 
     // MARK: - Bridge inbound (Phase 2 will populate this)
@@ -252,25 +349,31 @@ final class ScanController: ObservableObject {
         case .contextMenu, .revealInFinder, .moveToTrash:
             // Reserved for Phase 2.
             break
+        case .consoleError(let message):
+            // Surface viz-side failures in the host log. Without this
+            // the page can silently swallow exceptions and we have no
+            // signal that ingest broke.
+            NSLog("[viz] console.error: %@", message)
+        case .ingestStarted:
+            NSLog("[viz] ingest started")
+        case .ingestSucceeded(let root, let total):
+            NSLog("[viz] ingest ok: root=%@ entries=%llu", root, total)
+        case .ingestFailed(let message):
+            NSLog("[viz] ingest failed: %@", message)
+            self.lastError = "viz failed to load scan: \(message)"
         }
     }
 
     // MARK: - Binary discovery
 
     private func locateScannerBinary() -> URL? {
-        // Search order:
-        // 1. Bundled inside the .app at Contents/Resources/apfs-fastindex-scan.
-        // 2. Sibling release build under the repo: target/release/apfs-fastindex-scan.
-        // 3. PATH (`which apfs-fastindex-scan`).
         if let bundled = Bundle.main.url(forResource: "apfs-fastindex-scan", withExtension: nil) {
             return bundled
         }
         let fileManager = FileManager.default
         let candidates: [String] = [
-            // From `swift run` cwd (typically app/), look up to find target/release.
             FileManager.default.currentDirectoryPath + "/../target/release/apfs-fastindex-scan",
             FileManager.default.currentDirectoryPath + "/target/release/apfs-fastindex-scan",
-            // Hard-coded developer fallback for repos checked out at the standard path.
             "/Users/kai/Projects/apfs-fastindex/target/release/apfs-fastindex-scan",
         ]
         for path in candidates {
@@ -279,7 +382,6 @@ final class ScanController: ObservableObject {
                 return url
             }
         }
-        // Final fallback: PATH lookup.
         if let envPath = ProcessInfo.processInfo.environment["PATH"] {
             for component in envPath.split(separator: ":") {
                 let candidate = URL(fileURLWithPath: String(component))
@@ -309,4 +411,33 @@ private func decodeProgress(_ line: Data) -> ProgressUpdate? {
     let elapsed = (obj["elapsed_ms"] as? NSNumber)?.uint64Value ?? 0
     let terminal = (obj["terminal"] as? Bool) ?? false
     return ProgressUpdate(scanned: scanned, skipped: skipped, elapsedMs: elapsed, terminal: terminal)
+}
+
+/// Thread-safe `Data` accumulator. Sendable so the
+/// `FileHandle.readabilityHandler` and `Process.terminationHandler`
+/// can pass it across queue boundaries without dragging actor
+/// isolation along. Internal locking is a plain `NSLock` because
+/// append + snapshot are both fast and we don't need queue-based
+/// scheduling guarantees.
+final class ScanBufferBox: @unchecked Sendable {
+    private var data = Data()
+    private let lock = NSLock()
+
+    func append(_ chunk: Data) {
+        lock.lock()
+        data.append(chunk)
+        lock.unlock()
+    }
+
+    func snapshot() -> Data {
+        lock.lock()
+        defer { lock.unlock() }
+        return data
+    }
+
+    func clear() {
+        lock.lock()
+        data.removeAll(keepingCapacity: false)
+        lock.unlock()
+    }
 }
