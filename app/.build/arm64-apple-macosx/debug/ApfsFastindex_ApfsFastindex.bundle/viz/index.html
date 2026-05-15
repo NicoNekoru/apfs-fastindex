@@ -85,6 +85,22 @@
     border-radius: 4px;
     font: 12px ui-monospace, Menlo, monospace;
   }
+  /* When the page is hosted inside the native app shell, the toolbar
+     drives scanning. The standalone drop zone + "Open JSON" button are
+     hidden and replaced by a quiet placeholder so the page isn't blank
+     before the first scan finishes. */
+  .apfs-native-shell #drop-zone > * { display: none; }
+  .apfs-native-shell #drop-zone {
+    border-style: solid;
+    border-color: transparent;
+  }
+  .apfs-native-shell #drop-zone::after {
+    content: "Press Scan in the toolbar to begin.";
+    color: var(--muted);
+    font-size: 13px;
+  }
+  .apfs-native-shell header #load-btn,
+  .apfs-native-shell header #reset-btn { display: none; }
   #breadcrumb {
     padding: 8px 16px;
     background: var(--panel);
