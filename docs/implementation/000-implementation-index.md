@@ -117,10 +117,14 @@ the walk continues. Whole-machine `/` scans run end-to-end under a
 normal user (~5.25M entries, ~130 s, ~830 skipped paths on the
 reference host). Mount-boundary skipping is the default (cross-device
 children are recorded but not descended); `--cross-mounts` opts in to
-the older behavior. The fallback backend today is
-`std::fs::read_dir` + `symlink_metadata` (one `lstat` per entry); a
-future pass can swap in `getattrlistbulk` for performance without
-changing the contract.
+the older behavior. The fallback backend defaults to macOS `getattrlistbulk`
+(`crates/apfs-fastindex/src/fallback_bulk.rs`) and falls back to
+`std::fs::read_dir` + `symlink_metadata` whenever the bulk syscall is
+unavailable or errors. The bulk path cuts whole-machine `/`-scan wall
+time by ~16% and system CPU by ~38% (see
+`measurement-baseline.md`). The `--progress` CLI flag streams one
+JSON line per second to stderr describing scan progress for any
+wrapper (native app, terminal).
 
 Gate 2+ (live volumes, encryption, boot-root, incremental cache)
 requires fresh oracles and is out of scope until separately approved.

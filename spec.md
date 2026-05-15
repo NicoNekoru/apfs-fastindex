@@ -122,6 +122,17 @@ Fallback strategy should be explicit:
 - bulk attribute APIs where they improve performance safely
 - snapshot-assisted workflows only where supported and operationally realistic
 
+R2 expands the fallback set to include **APFS-snapshot-backed scanning**
+as an explicit support-matrix cell. Snapshots are now an R2 research
+lane (see RL-11) rather than purely deferred. The investigation
+boundary: take a free local snapshot, mount it read-only, run the
+existing fallback or raw walker against it, and validate that the
+resulting `NamespaceEntry`/`DirectoryAggregate` rows match the
+non-snapshot baseline for unchanged data. Anything beyond that
+(snapshot-retained byte accounting, cross-snapshot diffs, sealed
+system volume content via user snapshots) requires further explicit
+scope approval.
+
 ## 5. Full-Scan Model For V1
 
 The current baseline raw pipeline is:
@@ -190,15 +201,27 @@ The canonical v1 metric is:
 
 - `logical size`
 
-The following remain future modes pending more evidence:
+The following are explicitly in-scope for R2 research and are tracked as
+named investigation lanes (see RL-07b):
 
-- allocated size
-- exclusive size
-- shared size
+- **Physical / allocated size per file**. The size source candidates
+  (`j_dstream_t.alloced_size`, file-extent records, extent-reference
+  tree) are already partially decoded by the v1 body parser; R2 promotes
+  them from "diagnostic" to an oracle-validated product metric. This is
+  the most visible WizTree feature R1 currently lacks.
+
+The following remain longer-range future modes; opening them requires
+explicit support-matrix approval and a dedicated oracle:
+
+- exclusive size (per-inode block ownership versus clones and snapshots)
+- shared size (cross-inode shared blocks)
 - snapshot-retained attribution
 
-If later modes are added, they must be clearly labeled and must not be implied
-to reconcile with all APFS and macOS tools simultaneously unless proven.
+If any of these later modes are added, they must be clearly labeled and
+must not be implied to reconcile with all APFS and macOS tools
+simultaneously unless proven. An emitted metric whose oracle is not
+green stays in `not_claimed` and must not be presented in user-facing
+output.
 
 ## 10. Namespace Semantics
 
@@ -228,16 +251,35 @@ stable.
 
 ## 12. Near-Term Roadmap
 
-Near-term work should prioritize:
+R1 (Narrow Rust MWP) is complete:
 
-1. resolve the `EX-14` checkpoint/OMAP-context blocker
-2. replay the `EX-13` body decoder with the source-backed xfield cursor rule
-3. add synthetic fail-closed record-body cases
-4. implement Rust FS-record body field dumps
-5. promote Rust output to namespace/logical-size rows only after oracle parity
+1. ✅ resolved the `EX-14` checkpoint/OMAP-context blocker (EX-15)
+2. ✅ replayed `EX-13` body decoder with the source-backed xfield rule (EX-16)
+3. ✅ added synthetic fail-closed record-body cases (EX-17)
+4. ✅ implemented Rust FS-record body field dumps (EX-18)
+5. ✅ promoted Rust output to namespace/logical-size rows after oracle parity
+   (EX-19 + EX-20 + Rust MWP smoke)
+6. ✅ landed the POSIX fallback walker (EX-21) and resilience pass
 
-Only after those are stable should the project move cache design, subtree
-reuse, and repeat-scan performance back to the center of the spec.
+R2 lanes (open, explicitly scoped, no Gate-2 broadening yet):
+
+7. **R2-A: physical-size per file.** Promote `j_dstream_t.alloced_size`
+   plus file-extent and extent-reference records from "diagnostic"
+   to an oracle-validated product metric. Same source class (detached
+   `.dmg` + POSIX-mounted directory), same fail-closed contract. Tracked
+   under an expanded `RL-07` (see `RL-07b` evidence notes).
+8. **R2-B: snapshot-assisted scanning.** Take a free local APFS
+   snapshot, mount it read-only, scan it with the existing walkers,
+   prove field parity with the non-snapshot baseline. Tracked under
+   `RL-11`. Anything beyond shape parity (snapshot-retained accounting,
+   sealed-system content) remains out of scope.
+9. **R2-C: scanner ergonomics.** `getattrlistbulk` perf for the
+   fallback walker, stderr progress streaming, native macOS shell.
+   No emission-contract changes.
+
+Gate-2 work (encryption, live boot disk, boot-root merged namespace,
+incremental cache) still requires separate explicit approval. Cache
+design, subtree reuse, and repeat-scan performance remain out of v1.
 
 ## 13. Long-Term Product Roadmap
 

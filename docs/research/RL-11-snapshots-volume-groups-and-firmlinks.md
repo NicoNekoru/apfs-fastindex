@@ -1,9 +1,9 @@
 # RL-11 Snapshots, Volume Groups, and Firmlinks
 
-Status: Open
+Status: Open (R2-B lane active)
 Priority: P1
 Owner: TBD
-Last Updated: 2026-04-26
+Last Updated: 2026-05-14
 
 ## Core Question
 - What exactly are we indexing: a raw APFS volume, a snapshot, a volume group, or the user-visible merged namespace?
@@ -66,6 +66,19 @@ Last Updated: 2026-04-26
   requirements: roles, volume-group UUIDs, mounted snapshot identity, firmlink
   table interpretation, and user-visible POSIX/API output must be joined in a
   separate oracle before any Finder-visible root mode exists.
+- [2026-05-14] Scope: **R2-B opens here.** "Snapshot-assisted scanning"
+  is promoted from deferred to an explicit R2 research lane (see
+  spec.md §4.3 and §12 step 8). Motivation: APFS snapshots are free,
+  near-instant, read-only, and stable. A scanner that walks the snapshot
+  instead of the live volume gets a coherent point-in-time view, avoids
+  the `not_found` races we are already catching as walk skips, and
+  unblocks Gate-2 work later. R2-B's *only* claim is shape parity:
+  for unchanged data, scanning a snapshot of a directory produces the
+  same `NamespaceEntry`/`DirectoryAggregate` rows as scanning the live
+  directory. Anything beyond that (snapshot-retained byte accounting,
+  cross-snapshot diffs, sealed-system content via user snapshots,
+  per-file snapshot-retained sizes) remains out of R2-B scope and
+  requires explicit further approval.
 
 ## Interim Decisions
 - Keep boot-root semantics out of core parser design until raw single-volume
@@ -83,6 +96,25 @@ Last Updated: 2026-04-26
   is stable enough to compare as one input to a merged-root oracle.
 - `/usr/share/firmlinks` and `diskutil apfs list` are candidate diagnostic
   inputs for that future mode, not v1 parser dependencies.
+- **R2-B direction:** snapshot-assisted scanning proceeds as a fresh
+  `SR-020` source review (Apple's `tmutil localsnapshot` /
+  `fs_snapshot_*` semantics, mount semantics of `com.apple.TimeMachine`
+  local snapshots vs APFS-native named snapshots, lifetime and
+  visibility) followed by an `EX-23` fixture probe. EX-23 builds a
+  directory, takes a snapshot via documented APIs, mounts the
+  snapshot, walks both the live directory and the snapshot through
+  the existing fallback walker, and asserts the snapshot output is a
+  shape-parity match for the live output on the unchanged subtree.
+  R2-B does not promote the snapshot path into a default behavior;
+  it only proves that "scan the snapshot" is a viable supplement.
+  Snapshot-retained byte attribution stays out of scope until the
+  R2-A physical-size lane completes and a dedicated probe defines
+  the attribution rule.
+- The current default for raw mode remains "fail closed when the
+  source class is unsupported." R2-B may surface snapshot-based
+  scanning as an *option* (e.g., a `--snapshot` flag on the CLI),
+  not as automatic behavior. Anything that triggers a snapshot
+  without user intent is out of scope.
 
 ## Exit Criteria
 - Explicit product scope statement.
@@ -90,6 +122,10 @@ Last Updated: 2026-04-26
 - UI/accounting impact documented.
 - A documented comparison between raw single-volume output and boot-root output
   on a modern macOS system.
+- R2-B exit: EX-23 records shape parity between live-directory and
+  snapshot-directory scans on an unchanged subtree, plus a documented
+  snapshot lifecycle (create, mount, unmount, release) the scanner can
+  rely on without leaking system state.
 
 ## Related Logs
 - RL-06 Namespace Reconstruction

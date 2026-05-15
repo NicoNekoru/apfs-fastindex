@@ -12,6 +12,7 @@ mod block_io;
 mod btree;
 mod container;
 pub mod fallback;
+mod fallback_bulk;
 mod fs_record_body;
 mod fs_records;
 mod namespace;
@@ -30,7 +31,7 @@ pub use container::{
 };
 pub use fallback::{
     fallback_scan_path, fallback_scan_path_with_options, FallbackError, FallbackOptions,
-    FallbackScanOutput,
+    FallbackScanOutput, ProgressEvent,
 };
 pub use fs_record_body::{
     DirRecBody, DstreamFields, FsRecordKey, FsRecordRow, FsRecordValue, InodeBody, SiblingLinkBody,

@@ -25,14 +25,32 @@ PYTHONPATH=src python3 -m apfs_fastindex.bench --target /Applications --mode fal
 Host: macOS host listed in `src/apfs_fastindex/bench.py` output; release
 build (`cargo build --release`).
 
-| target                      | mode     | entries     | wall (median) | entries/sec | CPU user / sys (median) |
-| --------------------------- | -------- | ----------- | ------------- | ----------- | ------------------------ |
-| EX-13 proof fixture         | raw      | 7           | 0.23 s        | 30          | 13 ms / 15 ms            |
-| apfs-fastindex repo         | fallback | 9,124       | 0.07 s        | 130,734     | 15 ms / 48 ms            |
-| `/Applications` tree        | fallback | 163,667     | 1.28 s        | 127,513     | 410 ms / 728 ms          |
-| `/` whole-machine scan      | fallback | 5,251,546   | 129.6 s       | 40,510      | 16.3 s / 47.8 s          |
+| target                      | backend            | entries     | wall (median) | entries/sec | CPU user / sys (median) |
+| --------------------------- | ------------------ | ----------- | ------------- | ----------- | ------------------------ |
+| EX-13 proof fixture         | raw                | 7           | 0.23 s        | 30          | 13 ms / 15 ms            |
+| apfs-fastindex repo         | fallback (std)     | 9,124       | 0.07 s        | 130,734     | 15 ms / 48 ms            |
+| `/Applications` tree        | fallback (std)     | 163,667     | 1.28 s        | 127,513     | 410 ms / 728 ms          |
+| `/` whole-machine scan      | fallback (std)     | 5,251,546   | 129.6 s       | 40,510      | 16.3 s / 47.8 s          |
+| `/Applications` tree        | fallback (bulk)    | 163,667     | 1.04 s        | 157,155     | 347 ms / 608 ms          |
+| `/Users` user-data scan     | fallback (bulk)    | 1,304,073   | 26.65 s       | 48,933      | 2.92 s / 6.62 s          |
+| `/` whole-machine scan      | fallback (bulk)    | 5,260,624   | 108.7 s       | 48,380      | 14.85 s / 29.80 s        |
 
-The whole-machine number is a single-run, cold-cache result (the file system was untouched before the run). It also reflects the resilient walker (post-`walk_skips` patch); 828 paths were skipped (~mostly `permission_denied` across system-owned directories, plus mount-boundary hits at `/Volumes`). Without the resilience pass the same command aborted on the first `EACCES`.
+"std" rows used `std::fs::read_dir` + `symlink_metadata` per entry. "bulk"
+rows used the macOS `getattrlistbulk` backend in
+`crates/apfs-fastindex/src/fallback_bulk.rs`. The whole-machine
+comparison is the apples-to-apples one:
+
+- `/` wall: **130 s → 109 s** (16% faster end-to-end on cold cache).
+- `/` system CPU: **48 s → 30 s** (38% less time in syscalls).
+- `/Applications` warm-ish: **127k → 157k entries/s** (24% throughput
+  win).
+
+Wall speedup is bounded by disk I/O on a cold scan; CPU/sys drop is
+the cleaner signal that bulk fetch is doing the right thing
+(fewer kernel transitions per entry). Hot-cache scans will close more
+of the gap toward the throughput ceiling. Symlinks still cost one
+extra `readlink` per entry because `getattrlistbulk` does not return
+the link target.
 
 Notes:
 

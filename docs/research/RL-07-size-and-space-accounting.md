@@ -123,6 +123,20 @@ Last Updated: 2026-05-14 (EX-19)
   sparse inodes. Ordinary uncompressed logical size for v1 is now safe to
   source from `INO_EXT_TYPE_DSTREAM.size` decoded by the SR-015 cursor rule.
   Compression precedence remains SR-017/EX-19 territory.
+- [2026-05-14] Scope: **R2-A opens here.** "Physical / allocated size per
+  file" is promoted from a deferred future mode to an explicit R2
+  research lane (see spec.md §9 and §12 step 7). Source-of-truth
+  candidates already partially decoded by the v1 body parser:
+  `j_dstream_t.alloced_size` (per inode), `j_file_extent_*` records
+  (per extent), and the volume's extent-reference tree (for
+  shared-block accounting). R2-A targets *per-file* allocated bytes
+  first (the size column WizTree shows next to logical bytes), keeping
+  exclusive/shared accounting deferred. Source class stays unchanged
+  (detached `.dmg` + POSIX-mounted directory); fail-closed contract
+  unchanged. Entry criterion: a same-run fixture where every file
+  records (`logical_size`, `allocated_size_candidates`, `st_blocks *
+  512`) and a precedence table reproduces `st_blocks * 512` for every
+  entry, with clones / sparse / compressed cases broken out.
 
 ## Interim Decisions
 - v1 may need to distinguish "logical size" mode from "physical accounting" mode.
@@ -162,11 +176,27 @@ Last Updated: 2026-05-14 (EX-19)
   clone, hard link, symlink, and compressed cases. The Rust MWP namespace
   emitter may now implement SR-017 per-inode logical size, gated only by
   EX-20 (SR-018 name/case) and the v1 aggregate policy from SR-009.
+- **R2-A direction**: physical-size investigation proceeds as a fresh
+  `SR-019` source review followed by an `EX-22` fixture probe. SR-019
+  should converge `dissect.apfs`, `apfs-fuse`, `libfsapfs`, and TSK on
+  how each maps `(j_dstream_t.alloced_size, j_file_extent_val.flags &
+  J_FILE_EXTENT_LEN_MASK, extent-reference tree)` to a per-file
+  physical-bytes metric and how clones / sparse / compressed cases are
+  resolved. EX-22 then runs a same-run fixture with ordinary, sparse,
+  cloned, hard-linked, symlink, and compressed files, captures every
+  candidate, and asserts the chosen precedence reproduces
+  `st_blocks * 512` for every entry. R2-A row emission in Rust waits on
+  EX-22 passing. Exclusive/shared/snapshot-retained accounting remains
+  out of R2-A scope.
 
 ## Exit Criteria
 - Defined product-facing size semantics.
 - Formula/algorithm for each reported metric.
 - A list of known mismatch cases versus other tools.
+- R2-A exit: per-file physical-size precedence table validated by EX-22
+  against `st_blocks * 512` on a same-run fixture covering the SR-017
+  shape set (ordinary / sparse / clone / hard link / symlink /
+  compressed).
 
 ## Related Logs
 - RL-03 FS Tree Topology and Required Records

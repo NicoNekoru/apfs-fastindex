@@ -2,10 +2,14 @@ use std::env;
 use std::path::Path;
 use std::process::ExitCode;
 
-use apfs_fastindex::{fallback_scan_path_with_options, FallbackOptions, FallbackScanOutput};
+use std::io::Write;
+
+use apfs_fastindex::{
+    fallback_scan_path_with_options, FallbackOptions, FallbackScanOutput, ProgressEvent,
+};
 
 const USAGE: &str = "usage: apfs-fastindex-scan [--summary] [--pretty] [--slim] \
-                     [--mode raw|fallback|auto] [--cross-mounts] <source-path>\n\
+                     [--mode raw|fallback|auto] [--cross-mounts] [--progress] <source-path>\n\
                      source-path may be:\n  \
                      - a detached APFS .dmg image (raw mode)\n  \
                      - a raw APFS container device (/dev/rdiskN) (raw mode)\n  \
@@ -15,7 +19,9 @@ const USAGE: &str = "usage: apfs-fastindex-scan [--summary] [--pretty] [--slim] 
                      --slim drops fields the viz does not consume (file_id, aggregates, null \
                      symlink targets, scan_state) so the output fits comfortably in a browser.\n\
                      --cross-mounts lets the fallback walker descend into directories on a \
-                     different device than the root (default: stop at mount boundaries).";
+                     different device than the root (default: stop at mount boundaries).\n\
+                     --progress writes one JSON object per second to stderr describing scan \
+                     progress (fallback mode only; raw mode emits no progress today).";
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 enum Mode {
@@ -37,6 +43,7 @@ fn main() -> ExitCode {
     let mut source_path: Option<String> = None;
     let mut pending_mode_value = false;
     let mut cross_mounts = false;
+    let mut progress = false;
     for arg in args {
         if pending_mode_value {
             mode = match arg.as_str() {
@@ -71,6 +78,9 @@ fn main() -> ExitCode {
             }
             "--slim" => {
                 slim = true;
+            }
+            "--progress" => {
+                progress = true;
             }
             other if other.starts_with("--mode=") => {
                 let value = &other["--mode=".len()..];
@@ -119,9 +129,12 @@ fn main() -> ExitCode {
             if cross_mounts {
                 eprintln!("apfs-fastindex-scan: warning: --cross-mounts has no effect in raw mode");
             }
+            if progress {
+                eprintln!("apfs-fastindex-scan: warning: --progress has no effect in raw mode (no streaming hooks yet)");
+            }
             run_raw(&path, summary_only, pretty, slim)
         }
-        Mode::Fallback => run_fallback(&path, summary_only, cross_mounts, pretty, slim),
+        Mode::Fallback => run_fallback(&path, summary_only, cross_mounts, pretty, slim, progress),
         Mode::Auto => unreachable!("auto resolves to Raw or Fallback above"),
     }
 }
@@ -178,8 +191,27 @@ fn run_fallback(
     cross_mounts: bool,
     pretty: bool,
     slim: bool,
+    progress: bool,
 ) -> ExitCode {
-    let options = FallbackOptions { cross_mounts };
+    let mut progress_writer = |event: ProgressEvent| {
+        let mut stderr = std::io::stderr().lock();
+        let _ = writeln!(
+            stderr,
+            "{{\"scanned\":{},\"skipped\":{},\"elapsed_ms\":{},\"terminal\":{}}}",
+            event.scanned,
+            event.skipped,
+            event.elapsed.as_millis(),
+            event.terminal
+        );
+    };
+    let options = FallbackOptions {
+        cross_mounts,
+        progress: if progress {
+            Some(&mut progress_writer as &mut dyn FnMut(ProgressEvent))
+        } else {
+            None
+        },
+    };
     match fallback_scan_path_with_options(path, options) {
         Ok(output) => {
             if summary_only {
@@ -257,7 +289,10 @@ fn slim_entries(entries: &[apfs_fastindex::NamespaceEntry]) -> Vec<serde_json::V
         .iter()
         .map(|entry| {
             let mut obj = serde_json::Map::new();
-            obj.insert("path".to_string(), serde_json::Value::String(entry.path.clone()));
+            obj.insert(
+                "path".to_string(),
+                serde_json::Value::String(entry.path.clone()),
+            );
             obj.insert(
                 "entry_kind".to_string(),
                 serde_json::to_value(&entry.entry_kind).unwrap(),

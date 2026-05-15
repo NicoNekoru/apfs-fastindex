@@ -174,6 +174,36 @@ Gate D: broader product semantics and optimization
 - RL-11 Snapshots, Volume Groups, and Firmlinks
 - RL-12 Performance Model and Optimization
 
+## R2 lanes (open)
+
+R1 (Narrow Rust MWP) is complete. Two named R2 lanes are open and
+explicitly scoped; they sit between Gate A (done) and Gate B
+(unopened) and do **not** widen the support matrix to live boot disks,
+encrypted runtime, or boot-root merged namespace.
+
+- **R2-A — physical-size per file.** Promote per-file allocated bytes
+  from "diagnostic" to an oracle-validated product metric. Investigation
+  lives under an expanded `RL-07` ("R2-A direction" interim decision).
+  Source-of-truth candidates: `j_dstream_t.alloced_size`,
+  `j_file_extent_*` records, the volume's extent-reference tree. Same
+  source class as R1 (detached `.dmg` + POSIX-mounted directory),
+  same fail-closed contract. Entry plan: `SR-019` source review →
+  `EX-22` same-run fixture probe against `st_blocks * 512`.
+- **R2-B — snapshot-assisted scanning.** Take a free local APFS
+  snapshot, mount it read-only, run the existing fallback walker
+  against it, prove `NamespaceEntry`/`DirectoryAggregate` shape parity
+  with the live-directory scan on unchanged data. Investigation lives
+  under an expanded `RL-11` ("R2-B direction" interim decision).
+  Entry plan: `SR-020` source review (snapshot API semantics, mount
+  lifecycle) → `EX-23` fixture probe (live vs snapshot shape parity).
+  Snapshot-retained byte accounting and sealed-system content stay
+  out of R2-B scope.
+
+Both R2 lanes share the discipline of R1: every claim has a named
+oracle, a source review, and a probe that records both the positive
+and negative case. Neither lane promotes any new entry into the Rust
+crate until the corresponding `EX-*` records a passing shape oracle.
+
 Long-range product roadmap:
 
 - `plans/general-wiztree-for-any-mac-roadmap.md`: staged route from the narrow

@@ -55,9 +55,11 @@ use std::fs;
 use std::io;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
+use crate::fallback_bulk::{read_directory_bulk, BulkEntry};
 use crate::{
     DirectoryAggregate, EntryKind, NamespaceEntry, ParserOutput, ScanState, SourceDescriptor,
     WalkSkip,
@@ -70,9 +72,24 @@ const SKIP_TOP_LEVEL_NAMES: &[&str] = &[".fseventsd", ".Spotlight-V100", ".Trash
 /// Caller-facing knobs for the fallback walker. Defaults are
 /// `cross_mounts: false` so an `apfs-fastindex-scan /` won't accidentally
 /// descend into every mounted volume.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct FallbackOptions {
+#[derive(Default)]
+pub struct FallbackOptions<'a> {
     pub cross_mounts: bool,
+    /// Optional progress sink. When set, the walker calls it roughly
+    /// every second with a snapshot of `(scanned, skipped, elapsed)`.
+    /// The CLI uses this to stream JSON-per-line progress to stderr.
+    pub progress: Option<&'a mut dyn FnMut(ProgressEvent)>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ProgressEvent {
+    pub scanned: u64,
+    pub skipped: u64,
+    pub elapsed: Duration,
+    /// `true` for the final event emitted at the end of the walk so a
+    /// consumer can render the last line without waiting for the
+    /// tick.
+    pub terminal: bool,
 }
 
 #[derive(Debug)]
@@ -125,7 +142,7 @@ pub fn fallback_scan_path<P: AsRef<Path>>(root: P) -> Result<FallbackScanOutput,
 
 pub fn fallback_scan_path_with_options<P: AsRef<Path>>(
     root: P,
-    options: FallbackOptions,
+    mut options: FallbackOptions<'_>,
 ) -> Result<FallbackScanOutput, FallbackError> {
     let root_path = root.as_ref();
     let resolved = fs::canonicalize(root_path)?;
@@ -145,7 +162,22 @@ pub fn fallback_scan_path_with_options<P: AsRef<Path>>(
         relative: PathBuf::new(),
     }];
 
+    let scan_start = Instant::now();
+    let mut next_progress_tick = scan_start + Duration::from_secs(1);
+
     while let Some(frame) = stack.pop() {
+        if let Some(cb) = options.progress.as_deref_mut() {
+            let now = Instant::now();
+            if now >= next_progress_tick {
+                cb(ProgressEvent {
+                    scanned: entries.len() as u64,
+                    skipped: walk_skips.len() as u64,
+                    elapsed: now.duration_since(scan_start),
+                    terminal: false,
+                });
+                next_progress_tick = now + Duration::from_secs(1);
+            }
+        }
         let children = match sorted_children(&frame.absolute, &frame.relative) {
             Ok(children) => children,
             Err(skip) => {
@@ -176,17 +208,39 @@ pub fn fallback_scan_path_with_options<P: AsRef<Path>>(
                     continue;
                 }
             };
-            let meta = match fs::symlink_metadata(&absolute) {
-                Ok(meta) => meta,
-                Err(err) => {
-                    walk_skips.push(WalkSkip {
-                        path: relative_str.clone(),
-                        reason: io_skip_reason(&err),
-                    });
-                    continue;
-                }
+
+            // Prefer the bulk-supplied metadata when present; otherwise
+            // pay for one `symlink_metadata` syscall here.
+            let (kind, file_id, file_logical_size, dev_id) = if let Some(bulk) = &child.bulk {
+                (
+                    bulk.kind.clone(),
+                    bulk.file_id,
+                    bulk.logical_size,
+                    bulk.dev_id as u64,
+                )
+            } else {
+                let meta = match fs::symlink_metadata(&absolute) {
+                    Ok(meta) => meta,
+                    Err(err) => {
+                        walk_skips.push(WalkSkip {
+                            path: relative_str.clone(),
+                            reason: io_skip_reason(&err),
+                        });
+                        continue;
+                    }
+                };
+                let kind = entry_kind_from_meta(&meta);
+                let size = if matches!(kind, EntryKind::File) {
+                    meta.size()
+                } else {
+                    0
+                };
+                (kind, meta.ino(), size, meta.dev())
             };
-            let kind = entry_kind_from_meta(&meta);
+
+            // Symlink target still requires a separate `readlink`. Bulk
+            // mode skips it because it isn't an attribute getattrlistbulk
+            // exposes.
             let (logical_size, symlink_target) = match kind {
                 EntryKind::Symlink => match fs::read_link(&absolute) {
                     Ok(target_path) => {
@@ -198,23 +252,22 @@ pub fn fallback_scan_path_with_options<P: AsRef<Path>>(
                             path: relative_str.clone(),
                             reason: io_skip_reason(&err),
                         });
-                        // Still emit the symlink entry; size 0, target unknown.
                         (0, None)
                     }
                 },
-                EntryKind::File => (meta.size(), None),
+                EntryKind::File => (file_logical_size, None),
                 _ => (0, None),
             };
             let is_dir = matches!(kind, EntryKind::Dir);
             entries.push(NamespaceEntry {
                 path: relative_str.clone(),
                 entry_kind: kind,
-                file_id: meta.ino(),
+                file_id,
                 logical_size,
                 symlink_target,
             });
             if is_dir {
-                if !options.cross_mounts && meta.dev() != root_dev {
+                if !options.cross_mounts && dev_id != root_dev {
                     walk_skips.push(WalkSkip {
                         path: relative_str,
                         reason: "mount_boundary".to_string(),
@@ -224,6 +277,15 @@ pub fn fallback_scan_path_with_options<P: AsRef<Path>>(
                 stack.push(WalkFrame { absolute, relative });
             }
         }
+    }
+
+    if let Some(cb) = options.progress.as_deref_mut() {
+        cb(ProgressEvent {
+            scanned: entries.len() as u64,
+            skipped: walk_skips.len() as u64,
+            elapsed: scan_start.elapsed(),
+            terminal: true,
+        });
     }
 
     entries.sort_by(|a, b| a.path.cmp(&b.path));
@@ -297,9 +359,32 @@ struct WalkFrame {
 
 struct ChildEntry {
     name: String,
+    /// Metadata populated by the bulk-attribute path. `None` means the
+    /// caller must `symlink_metadata` this child itself.
+    bulk: Option<BulkMeta>,
+}
+
+struct BulkMeta {
+    kind: EntryKind,
+    file_id: u64,
+    logical_size: u64,
+    dev_id: u32,
 }
 
 fn sorted_children(dir: &Path, relative: &Path) -> Result<Vec<ChildEntry>, WalkSkip> {
+    // Try the macOS `getattrlistbulk` backend first. If it succeeds we
+    // get name + kind + ino + size + dev_id per entry in one syscall
+    // batch — no per-child `lstat` needed. On any failure we fall
+    // through to `read_dir + symlink_metadata` so behavior is
+    // preserved on non-macOS or when the kernel rejects bulk reads
+    // for this directory.
+    if let Ok(bulk) = read_directory_bulk(dir) {
+        let mut out: Vec<ChildEntry> = bulk.into_iter().map(child_from_bulk).collect();
+        out.sort_by(|a, b| a.name.cmp(&b.name));
+        return Ok(out);
+    }
+    // Fall through to the std read_dir path on bulk failure.
+
     let read = match fs::read_dir(dir) {
         Ok(iter) => iter,
         Err(err) => {
@@ -333,10 +418,23 @@ fn sorted_children(dir: &Path, relative: &Path) -> Result<Vec<ChildEntry>, WalkS
                 });
             }
         };
-        out.push(ChildEntry { name });
+        out.push(ChildEntry { name, bulk: None });
     }
     out.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(out)
+}
+
+fn child_from_bulk(entry: BulkEntry) -> ChildEntry {
+    let bulk = BulkMeta {
+        kind: entry.kind.clone(),
+        file_id: entry.file_id,
+        logical_size: entry.logical_size,
+        dev_id: entry.dev_id,
+    };
+    ChildEntry {
+        name: entry.name,
+        bulk: Some(bulk),
+    }
 }
 
 fn io_skip_reason(err: &io::Error) -> String {

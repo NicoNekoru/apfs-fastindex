@@ -460,6 +460,25 @@ single-volume scans.
 Must not claim:
 Finder-visible startup root unless Gate 3 is complete.
 
+R2 also names two explicitly scoped research lanes, both backed by RL
+updates dated 2026-05-14:
+
+- **R2-A — physical-size per file.** Per-file allocated bytes via
+  `j_dstream_t.alloced_size` + `j_file_extent_*` + extent-reference
+  tree. Validated against `st_blocks * 512` on a same-run fixture.
+  Plan: `SR-019` review then `EX-22` probe. Exclusive/shared/snapshot-
+  retained accounting deferred (still Gate 5).
+- **R2-B — snapshot-assisted scanning.** Take a local APFS snapshot,
+  mount read-only, run the existing fallback walker, prove
+  `NamespaceEntry`/`DirectoryAggregate` shape parity with the live
+  scan on unchanged data. Plan: `SR-020` review then `EX-23` probe.
+  Snapshot-retained accounting and sealed-system content stay out of
+  scope.
+
+R2 still does not claim Finder-visible startup root, FileVault, live
+boot disk, or incremental cache. Those remain Gate 3+ / Gate 4+ /
+Gate 6+.
+
 ### R3: macOS Visible Namespace Scanner
 
 Audience:
