@@ -72,3 +72,6 @@ build/
 # Snapshot artifacts 
 *.dmg
 *.sparsebundle
+
+#
+scan.json

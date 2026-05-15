@@ -11,6 +11,7 @@ use serde::Serialize;
 mod block_io;
 mod btree;
 mod container;
+pub mod fallback;
 mod fs_record_body;
 mod fs_records;
 mod namespace;
@@ -26,6 +27,10 @@ use object::{
 
 pub use container::{
     CheckpointMapBlock, CheckpointMapSummary, CheckpointMapping, ContainerSummary,
+};
+pub use fallback::{
+    fallback_scan_path, fallback_scan_path_with_options, FallbackError, FallbackOptions,
+    FallbackScanOutput,
 };
 pub use fs_record_body::{
     DirRecBody, DstreamFields, FsRecordKey, FsRecordRow, FsRecordValue, InodeBody, SiblingLinkBody,
@@ -95,6 +100,21 @@ pub struct ParserOutput {
     pub backend_name: String,
     pub entries: Vec<NamespaceEntry>,
     pub aggregates: Vec<DirectoryAggregate>,
+    /// Per-path skip notes recorded while walking. Empty for raw mode
+    /// (which fails closed on every malformed-source signal). The
+    /// fallback walker populates this with `permission_denied`,
+    /// `not_found` (raced between readdir and lstat),
+    /// `mount_boundary` (cross-device child without `--cross-mounts`),
+    /// and `non_utf8_name` notes so a user-facing tool can report how
+    /// much of the requested subtree it actually saw.
+    #[serde(default)]
+    pub walk_skips: Vec<WalkSkip>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WalkSkip {
+    pub path: String,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -447,6 +467,7 @@ pub fn checkpoint_scan_source<P: AsRef<Path>>(
         backend_name: "rust-checkpoint-scan".to_string(),
         entries,
         aggregates,
+        walk_skips: Vec::new(),
     };
 
     let correctness_claim = if namespace_emitted {

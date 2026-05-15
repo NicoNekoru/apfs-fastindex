@@ -65,8 +65,15 @@ gate, then promote only resolved slices into this directory.
 - `../research/experiments/EX-21-fallback-path-skeleton/README.md`:
   research log proving that the POSIX-traversal fallback emits the same
   `NamespaceEntry`/`DirectoryAggregate` shape as Rust raw mode on the
-  proof fixture. Implementation lives in
-  `src/apfs_fastindex/fallback_traversal.py`.
+  proof fixture. Implementations live in
+  `src/apfs_fastindex/fallback_traversal.py` (Python) and
+  `crates/apfs-fastindex/src/fallback.rs` (Rust, used by the
+  `apfs-fastindex-scan` CLI when the source is a directory).
+- `measurement-baseline.md`: first reproducible measurement
+  (entries/sec, wall time, CPU breakdown) for raw and fallback modes
+  on three reference targets. Standing baseline for any future
+  performance claim. Reproducer:
+  `PYTHONPATH=src python3 -m apfs_fastindex.bench [...]`.
 
 ## Open Native Slice (Gate A)
 
@@ -95,14 +102,36 @@ All four MWP gates have landed:
    plus the `not_claimed` register.
 
 R1 (Narrow Rust MWP) is complete. EX-21 also lands the fallback-path
-skeleton (`src/apfs_fastindex/fallback_traversal.py`) that emits the
-same `NamespaceEntry` + `DirectoryAggregate` shape via POSIX traversal
-when raw mode is rejected. The skeleton today is `os.walk` + `os.lstat`
-+ `os.readlink`; a future pass can swap in `getattrlistbulk` for
-performance without changing the contract.
+skeleton in both Python (`src/apfs_fastindex/fallback_traversal.py`)
+and Rust (`crates/apfs-fastindex/src/fallback.rs`); both emit the same
+`NamespaceEntry` + `DirectoryAggregate` shape via POSIX traversal when
+raw mode is rejected. Rust raw vs Rust fallback matches on the proof
+fixture (same 7 entries, same 3 aggregates) so the demo CLI can
+auto-dispatch: `apfs-fastindex-scan <path>` picks raw mode for
+`.dmg` / `/dev/...` sources and fallback mode for directories
+(override via `--mode raw|fallback|auto`).
+
+The fallback walker is resilient: per-entry `EACCES` / `EPERM` /
+`ENOENT` are recorded in `parser_output.walk_skips` with a reason and
+the walk continues. Whole-machine `/` scans run end-to-end under a
+normal user (~5.25M entries, ~130 s, ~830 skipped paths on the
+reference host). Mount-boundary skipping is the default (cross-device
+children are recorded but not descended); `--cross-mounts` opts in to
+the older behavior. The fallback backend today is
+`std::fs::read_dir` + `symlink_metadata` (one `lstat` per entry); a
+future pass can swap in `getattrlistbulk` for performance without
+changing the contract.
 
 Gate 2+ (live volumes, encryption, boot-root, incremental cache)
 requires fresh oracles and is out of scope until separately approved.
+
+**Product trajectory note:** `viz/index.html` is the temporary demo
+surface. The shipping product is a native macOS app that owns the
+scan trigger, progress feedback, and rendering itself. The web viz
+exists to make the JSON contract reviewable and to give us a
+treemap to look at while the scanner contract is still moving;
+expect it to be retired once a native shell lands. The JSON shape
+the scanner emits is the durable interface.
 
 The earlier body-decoding slice has now landed; the steps below are
 preserved for traceability.

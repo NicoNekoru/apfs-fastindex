@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>apfs-fastindex treemap</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #1a1d24;
+    --border: #2a2e38;
+    --text: #e4e7ee;
+    --muted: #8b93a5;
+    --accent: #4f8cff;
+    --hover: rgba(255, 255, 255, 0.08);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  body { display: flex; flex-direction: column; }
+  header {
+    padding: 10px 16px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-shrink: 0;
+  }
+  header h1 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+  }
+  header .claim {
+    font-size: 12px;
+    color: var(--muted);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  header button {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  header button.secondary {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+  header button:disabled { opacity: 0.5; cursor: not-allowed; }
+  #drop-zone {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 12px;
+    border: 2px dashed var(--border);
+    margin: 24px;
+    border-radius: 12px;
+    color: var(--muted);
+    text-align: center;
+    padding: 24px;
+  }
+  #drop-zone.drag {
+    border-color: var(--accent);
+    background: rgba(79, 140, 255, 0.05);
+  }
+  #drop-zone code {
+    color: var(--text);
+    background: var(--panel);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font: 12px ui-monospace, Menlo, monospace;
+  }
+  #breadcrumb {
+    padding: 8px 16px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    display: none;
+    overflow-x: auto;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  #breadcrumb span.crumb {
+    cursor: pointer;
+    color: var(--accent);
+  }
+  #breadcrumb span.crumb:hover { text-decoration: underline; }
+  #breadcrumb .sep { color: var(--muted); margin: 0 6px; }
+  #main { flex: 1; position: relative; overflow: hidden; }
+  svg { display: block; width: 100%; height: 100%; }
+  .cell rect {
+    stroke: var(--bg);
+    stroke-width: 1;
+    cursor: pointer;
+    transition: opacity 120ms;
+  }
+  .cell:hover rect { opacity: 0.85; }
+  .cell text {
+    pointer-events: none;
+    fill: #fff;
+    font: 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+  }
+  #tooltip {
+    position: absolute;
+    pointer-events: none;
+    background: rgba(20, 22, 28, 0.95);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 12px;
+    max-width: 320px;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.45);
+    display: none;
+  }
+  #tooltip .path { color: var(--accent); word-break: break-all; }
+  #tooltip .meta { color: var(--muted); margin-top: 4px; }
+  #status-bar {
+    padding: 6px 16px;
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--muted);
+    display: flex;
+    gap: 16px;
+    flex-shrink: 0;
+    align-items: center;
+  }
+  #status-bar .pill {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    padding: 1px 6px;
+    border-radius: 4px;
+  }
+  #status-bar .pill.warn {
+    border-color: #d97706;
+    color: #fbbf24;
+    cursor: pointer;
+  }
+  #status-bar .pill.warn:hover {
+    background: rgba(217, 119, 6, 0.08);
+  }
+  #skips-modal {
+    position: absolute;
+    bottom: 36px;
+    right: 16px;
+    width: min(560px, 90vw);
+    max-height: 60vh;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 10px 32px rgba(0,0,0,0.5);
+    display: none;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #skips-modal header {
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    padding: 8px 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  #skips-modal header h2 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  #skips-modal header button {
+    background: transparent;
+    color: var(--muted);
+    border: none;
+    cursor: pointer;
+    font-size: 16px;
+  }
+  #skips-list {
+    overflow-y: auto;
+    padding: 8px 12px;
+    font: 12px ui-monospace, Menlo, monospace;
+  }
+  #skips-list .row {
+    display: flex;
+    gap: 10px;
+    padding: 3px 0;
+    border-bottom: 1px dashed var(--border);
+  }
+  #skips-list .row:last-child { border-bottom: none; }
+  #skips-list .reason {
+    color: #fbbf24;
+    min-width: 130px;
+  }
+  #skips-list .path {
+    color: var(--text);
+    word-break: break-all;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>apfs-fastindex treemap</h1>
+  <div class="claim" id="claim">Drop an apfs-fastindex-scan JSON file to begin.</div>
+  <button id="load-btn">Open JSON…</button>
+  <button id="reset-btn" class="secondary" disabled>Reset zoom</button>
+  <input type="file" id="file-input" accept=".json,application/json" hidden>
+</header>
+<div id="breadcrumb"></div>
+<div id="drop-zone">
+  <div>Drop a JSON file produced by <code>apfs-fastindex-scan</code> here,</div>
+  <div>or click <strong>Open JSON…</strong> above.</div>
+  <div style="margin-top:16px;font-size:12px;color:var(--muted);max-width:560px;">
+    Generate a scan with
+    <code>apfs-fastindex-scan /path/to/dir &gt; scan.json</code>
+    or
+    <code>apfs-fastindex-scan /path/to/source.dmg &gt; scan.json</code>.
+    The page only renders what's in that JSON — no upload, no network.
+  </div>
+</div>
+<div id="main" hidden>
+  <svg id="treemap"></svg>
+  <div id="tooltip"></div>
+</div>
+<div id="status-bar" hidden>
+  <span><span class="pill" id="status-mode">—</span></span>
+  <span id="status-entries">— entries</span>
+  <span id="status-total">— bytes</span>
+  <span id="status-current">/</span>
+  <span style="flex:1"></span>
+  <span class="pill warn" id="status-skips" hidden>0 skipped</span>
+</div>
+<div id="skips-modal">
+  <header>
+    <h2 id="skips-title">Skipped paths</h2>
+    <button id="skips-close" aria-label="Close">×</button>
+  </header>
+  <div id="skips-list"></div>
+</div>
+
+<script src="vendor/d3.v7.min.js"></script>
+<script>
+"use strict";
+
+const fileInput = document.getElementById("file-input");
+const loadBtn = document.getElementById("load-btn");
+const resetBtn = document.getElementById("reset-btn");
+const dropZone = document.getElementById("drop-zone");
+const main = document.getElementById("main");
+const breadcrumb = document.getElementById("breadcrumb");
+const claim = document.getElementById("claim");
+const statusBar = document.getElementById("status-bar");
+const statusMode = document.getElementById("status-mode");
+const statusEntries = document.getElementById("status-entries");
+const statusTotal = document.getElementById("status-total");
+const statusCurrent = document.getElementById("status-current");
+const statusSkips = document.getElementById("status-skips");
+const skipsModal = document.getElementById("skips-modal");
+const skipsClose = document.getElementById("skips-close");
+const skipsList = document.getElementById("skips-list");
+const skipsTitle = document.getElementById("skips-title");
+const tooltip = document.getElementById("tooltip");
+const svg = d3.select("#treemap");
+let currentSkips = [];
+
+let rootNode = null;
+let currentNode = null;
+
+loadBtn.addEventListener("click", () => fileInput.click());
+fileInput.addEventListener("change", (ev) => {
+  const f = ev.target.files[0];
+  if (f) loadFile(f);
+});
+["dragenter","dragover"].forEach(t =>
+  dropZone.addEventListener(t, (e) => { e.preventDefault(); dropZone.classList.add("drag"); })
+);
+["dragleave","drop"].forEach(t =>
+  dropZone.addEventListener(t, (e) => { e.preventDefault(); dropZone.classList.remove("drag"); })
+);
+document.body.addEventListener("dragover", (e) => e.preventDefault());
+document.body.addEventListener("drop", (e) => {
+  e.preventDefault();
+  if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) {
+    loadFile(e.dataTransfer.files[0]);
+  }
+});
+resetBtn.addEventListener("click", () => {
+  if (rootNode) navigate(rootNode);
+});
+statusSkips.addEventListener("click", () => {
+  if (currentSkips.length === 0) return;
+  skipsTitle.textContent = `Skipped paths (${currentSkips.length})`;
+  skipsList.innerHTML = currentSkips.map(s =>
+    `<div class="row"><span class="reason">${escapeHtml(s.reason)}</span>` +
+    `<span class="path">${escapeHtml(s.path)}</span></div>`
+  ).join("");
+  skipsModal.style.display = "flex";
+});
+skipsClose.addEventListener("click", () => { skipsModal.style.display = "none"; });
+window.addEventListener("resize", () => { if (currentNode) navigate(currentNode); });
+
+function loadFile(file) {
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    const text = ev.target.result;
+    if (typeof text !== "string" || text.length === 0) {
+      alert("FileReader returned empty content (the file may be too large for this browser to read in one go).");
+      return;
+    }
+    try {
+      const doc = JSON.parse(text);
+      ingest(doc, file.name);
+    } catch (err) {
+      const sizeMb = (file.size / (1024 * 1024)).toFixed(1);
+      const hint = file.size > 200 * 1024 * 1024
+        ? `\n\nThis file is ${sizeMb} MB. JSON.parse can run out of memory on very large ` +
+          `outputs. Try re-running the scanner with --slim (drops fields the viz does not ` +
+          `consume; typically 3-4× smaller), or scan a narrower subtree.`
+        : "";
+      alert("Failed to parse JSON: " + err.message + hint);
+    }
+  };
+  reader.onerror = () => {
+    alert("FileReader error: " + (reader.error && reader.error.message || "unknown"));
+  };
+  reader.readAsText(file);
+}
+
+function ingest(doc, filename) {
+  const parserOutput = doc.parser_output || doc;
+  const entries = parserOutput.entries || [];
+  const aggregates = parserOutput.aggregates || [];
+  const walkSkips = parserOutput.walk_skips || [];
+  const mode = doc.mode || (parserOutput.backend_name || "raw").replace(/^rust-/, "");
+  if (entries.length === 0) {
+    alert("This JSON has no entries to render. Did the scanner emit namespace rows?");
+    return;
+  }
+  rootNode = buildHierarchy(entries, aggregates);
+  currentNode = rootNode;
+  currentSkips = walkSkips;
+  claim.textContent = doc.correctness_claim || filename;
+  statusMode.textContent = mode;
+  statusEntries.textContent = `${entries.length.toLocaleString()} entries`;
+  statusTotal.textContent = formatBytes(rootNode.value);
+  if (walkSkips.length > 0) {
+    statusSkips.hidden = false;
+    statusSkips.textContent = `${walkSkips.length.toLocaleString()} skipped`;
+  } else {
+    statusSkips.hidden = true;
+  }
+  skipsModal.style.display = "none";
+  dropZone.hidden = true;
+  main.hidden = false;
+  statusBar.hidden = false;
+  resetBtn.disabled = false;
+  navigate(rootNode);
+}
+
+function buildHierarchy(entries, aggregates) {
+  // Build a tree keyed by path components. Files contribute leaves with
+  // their `logical_size`. Directories are interior nodes.
+  const root = { name: ".", kind: "dir", path: ".", children: new Map(), value: 0 };
+  for (const entry of entries) {
+    const parts = entry.path.split("/").filter(Boolean);
+    let cursor = root;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const name = parts[i];
+      if (!cursor.children.has(name)) {
+        const child = { name, kind: "dir", path: parts.slice(0, i + 1).join("/"), children: new Map(), value: 0 };
+        cursor.children.set(name, child);
+      }
+      cursor = cursor.children.get(name);
+    }
+    const leafName = parts[parts.length - 1];
+    if (entry.entry_kind === "dir") {
+      if (!cursor.children.has(leafName)) {
+        cursor.children.set(leafName, {
+          name: leafName,
+          kind: "dir",
+          path: entry.path,
+          children: new Map(),
+          value: 0,
+        });
+      }
+    } else {
+      // File / symlink / other: contribute size as a leaf.
+      cursor.children.set(leafName, {
+        name: leafName,
+        kind: entry.entry_kind,
+        path: entry.path,
+        value: entry.logical_size || 0,
+        symlinkTarget: entry.symlink_target || null,
+      });
+    }
+  }
+  // Convert children Maps to arrays and compute aggregate values.
+  function finalize(node) {
+    if (!node.children) return node.value || 0;
+    const arr = [];
+    let total = 0;
+    for (const child of node.children.values()) {
+      total += finalize(child);
+      arr.push(child);
+    }
+    node.children = arr;
+    node.value = total;
+    return total;
+  }
+  finalize(root);
+  return root;
+}
+
+function navigate(node) {
+  currentNode = node;
+  statusCurrent.textContent = node.path === "." ? "/" : "/" + node.path;
+  renderBreadcrumb(node);
+  render(node);
+}
+
+function renderBreadcrumb(node) {
+  breadcrumb.style.display = "block";
+  const ancestors = [];
+  let cursor = node;
+  while (cursor) {
+    ancestors.unshift(cursor);
+    cursor = findParent(rootNode, cursor.path);
+  }
+  breadcrumb.innerHTML = "";
+  ancestors.forEach((n, i) => {
+    if (i > 0) {
+      const sep = document.createElement("span");
+      sep.className = "sep";
+      sep.textContent = "›";
+      breadcrumb.appendChild(sep);
+    }
+    const crumb = document.createElement("span");
+    crumb.className = "crumb";
+    crumb.textContent = n.path === "." ? "/" : n.name;
+    crumb.addEventListener("click", () => navigate(n));
+    breadcrumb.appendChild(crumb);
+  });
+}
+
+function findParent(root, targetPath) {
+  if (targetPath === "." || targetPath === "") return null;
+  const parts = targetPath.split("/");
+  parts.pop();
+  if (parts.length === 0) return root;
+  const parentPath = parts.join("/");
+  return findByPath(root, parentPath);
+}
+
+function findByPath(node, path) {
+  if (node.path === path) return node;
+  if (!node.children) return null;
+  for (const child of node.children) {
+    if (path === child.path || path.startsWith(child.path + "/")) {
+      const hit = findByPath(child, path);
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
+
+function render(node) {
+  svg.selectAll("*").remove();
+  const width = main.clientWidth;
+  const height = main.clientHeight;
+  svg.attr("viewBox", `0 0 ${width} ${height}`);
+
+  if (!node.children || node.children.length === 0) {
+    svg.append("text")
+      .attr("x", width / 2).attr("y", height / 2)
+      .attr("text-anchor", "middle").attr("fill", "var(--muted)")
+      .text(node.kind === "dir" ? "(empty directory)" : node.path);
+    return;
+  }
+
+  const treeRoot = d3.hierarchy(node, d => d.children)
+    .sum(d => d.children ? 0 : d.value)
+    .sort((a, b) => b.value - a.value);
+  d3.treemap().size([width, height]).paddingInner(1).paddingOuter(2).tile(d3.treemapSquarify)(treeRoot);
+
+  const color = d3.scaleOrdinal()
+    .domain((treeRoot.children || []).map(c => c.data.name))
+    .range(["#4f8cff","#ff9f43","#22c55e","#a855f7","#06b6d4","#ef4444","#eab308","#ec4899","#14b8a6","#f97316"]);
+
+  const cell = svg.selectAll("g.cell")
+    .data(treeRoot.children || [])
+    .enter()
+    .append("g")
+    .attr("class", "cell")
+    .attr("transform", d => `translate(${d.x0},${d.y0})`);
+
+  cell.append("rect")
+    .attr("width", d => Math.max(0, d.x1 - d.x0))
+    .attr("height", d => Math.max(0, d.y1 - d.y0))
+    .attr("fill", d => color(d.data.name))
+    .on("mousemove", (event, d) => showTooltip(event, d.data))
+    .on("mouseleave", hideTooltip)
+    .on("click", (_, d) => {
+      if (d.data.kind === "dir" && d.data.children && d.data.children.length > 0) {
+        navigate(d.data);
+      }
+    });
+
+  cell.append("text")
+    .attr("x", 6).attr("y", 16)
+    .text(d => labelFor(d))
+    .each(function (d) {
+      const w = d.x1 - d.x0;
+      const h = d.y1 - d.y0;
+      if (w < 60 || h < 22) d3.select(this).remove();
+    });
+}
+
+function labelFor(d) {
+  const sizeStr = formatBytes(d.value);
+  const name = d.data.name === "." ? "/" : d.data.name;
+  return `${name} (${sizeStr})`;
+}
+
+function showTooltip(event, data) {
+  tooltip.style.display = "block";
+  const path = data.path === "." ? "/" : "/" + data.path;
+  const lines = [
+    `<div class="path">${escapeHtml(path)}</div>`,
+    `<div class="meta">${data.kind} · ${formatBytes(data.value)}</div>`,
+  ];
+  if (data.symlinkTarget) {
+    lines.push(`<div class="meta">→ ${escapeHtml(data.symlinkTarget)}</div>`);
+  }
+  tooltip.innerHTML = lines.join("");
+  const margin = 12;
+  const rect = main.getBoundingClientRect();
+  let x = event.clientX - rect.left + margin;
+  let y = event.clientY - rect.top + margin;
+  const tw = tooltip.offsetWidth;
+  const th = tooltip.offsetHeight;
+  if (x + tw > rect.width) x = event.clientX - rect.left - tw - margin;
+  if (y + th > rect.height) y = event.clientY - rect.top - th - margin;
+  tooltip.style.left = `${x}px`;
+  tooltip.style.top = `${y}px`;
+}
+
+function hideTooltip() {
+  tooltip.style.display = "none";
+}
+
+function formatBytes(bytes) {
+  if (bytes === 0 || !bytes) return "0 B";
+  const units = ["B","KB","MB","GB","TB","PB"];
+  const i = Math.min(units.length - 1, Math.floor(Math.log10(Math.abs(bytes)) / 3));
+  const value = bytes / Math.pow(1000, i);
+  return `${value.toFixed(value >= 100 || i === 0 ? 0 : value >= 10 ? 1 : 2)} ${units[i]}`;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]);
+}
+</script>
+</body>
+</html>

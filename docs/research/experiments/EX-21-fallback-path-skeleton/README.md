@@ -102,8 +102,9 @@ Implemented by `artifacts/probe_ex21.py`.
 
 ## Observed Results
 
-- Built the EX-13 proof fixture; ran fallback traversal on the mounted
-  image, then the Rust raw scanner against the detached `.dmg`.
+- Built the EX-13 proof fixture; ran the Python fallback traversal on
+  the mounted image, then the Rust raw scanner against the detached
+  `.dmg`.
 - Same 7 entries, same paths (`dst`, `dst/clone.txt`, `dst/hard.txt`,
   `dst/link.txt`, `dst/moved.txt`, `dst/sparse.bin`, `src`).
 - Same logical sizes including the sparse case (1 048 576 bytes) and
@@ -111,6 +112,17 @@ Implemented by `artifacts/probe_ex21.py`.
 - Same 3 aggregates (`.`, `dst`, `src`); same totals (e.g.,
   `dst -> 1048595` summing the three unique inodes — moved.txt/hard.txt
   collapsed, sparse 1 MiB, symlink target length, and so on).
+- **Rust port landed** as a follow-up:
+  `crates/apfs-fastindex/src/fallback.rs` ports the same walker to
+  Rust and ships via the `apfs-fastindex-scan` CLI. Auto-detect
+  dispatches a directory path to fallback mode and a `.dmg` /
+  `/dev/...` path to raw mode (`--mode raw|fallback|auto` overrides).
+  Cross-check: same proof fixture, Rust raw vs Rust fallback both
+  emit 7 entries + 3 aggregates with identical
+  `(path, entry_kind, logical_size, symlink_target)` and identical
+  `unique_inode_logical_total` per directory. Three new Rust unit
+  tests in `fallback::tests` cover the happy path, non-directory
+  rejection, and top-level `.fseventsd` skip.
 - Verdict: `validated_fallback_skeleton`.
 
 ## Artifacts Saved
