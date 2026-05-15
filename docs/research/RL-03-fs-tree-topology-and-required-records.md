@@ -134,6 +134,27 @@ Last Updated: 2026-05-14
 - [2026-05-13] Spec/Observation: `SR-016` turns record-body parsing into an
   explicit gate for fixed-size bodies, variable-length names, xfields, xattrs,
   sibling records, and drec/inode type consistency before namespace rows emit.
+- [2026-05-14] Observation: `EX-18` proves Rust body-field dump parity with
+  the Python EX-13 + EX-16 parser on the proof fixture. 53 records on both
+  sides, identical `(node_paddr, entry_index)` set, zero divergent fields
+  across `(family, key, value, key_len, value_len, xfields,
+  xfield_used_data, xfield_padded_total, xfield_unused_trailing_bytes,
+  validation_notes, object_id, raw_type)`. The Rust crate's
+  `FsRecordDump.records` now carries DIR_REC/INODE/XATTR/SIBLING_LINK/
+  SIBLING_MAP/DSTREAM_ID rows under SR-015 cursor + SR-016 hard-stop
+  gates; product `NamespaceEntry` rows still wait on SR-017 (EX-19) and
+  SR-018 (EX-20).
+- [2026-05-14] Observation: `EX-17` enforces the SR-016 fail-closed
+  boundary via 21 Rust unit tests in
+  `crates/apfs-fastindex/src/fs_record_body.rs::tests`, one per
+  per-record case (short bodies, malformed names, duplicate xfields,
+  xfield bounds, xattr flag combinations, wrong xfield sizes, sibling_link
+  name overflow, sibling_map short value, drec entry type outside POSIX
+  allowlist, `xf_used_data` mismatch, xfield blob shorter than header).
+  Each test asserts a typed `ScanError::InvalidObject` with an SR-016
+  substring. Cross-record cases (drec entry-type vs inode mode, missing
+  sibling_map for drec with `DREC_EXT_TYPE_SIBLING_ID`) remain EX-19+
+  work.
 - [2026-05-14] Observation: `EX-16` executed the SR-015 single cursor replay
   on the EX-13 proof fixture. All `14` records with xfields satisfy
   `xf_used_data == sum(round_up(x_size, 8))`; per-record oracle constraints

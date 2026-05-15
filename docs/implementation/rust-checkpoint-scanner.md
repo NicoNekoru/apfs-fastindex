@@ -52,15 +52,22 @@ What the Rust path currently proves on the proof fixture:
   volume OMAP at `(child_oid, scan_xid)` before each child block is read
   (EX-15 root cause; prior code read the value as a paddr and tripped a
   Fletcher-64 gate on the bare OID).
+- each in-scope leaf entry is decoded into a structured `FsRecordRow`
+  (`crates/apfs-fastindex/src/fs_record_body.rs`) under the SR-015 single
+  xfield cursor rule plus the SR-016 fail-closed gates. The decoder
+  surfaces: `key.kind` (`plain` / `named` / `sibling_link`), `value.kind`
+  per family, fixed inode/drec/xattr/sibling fields, `xfields[]` with
+  per-field `x_type`, `x_flags`, `x_size`, `padded_length`, `value_hex`,
+  and interpreted `u64` / `utf8` / `dstream` value when applicable. EX-17
+  and EX-18 prove the decoder against synthetic SR-016 negative blocks and
+  against the Python EX-13/EX-16 parser respectively.
 
 What it still does not prove:
 
-- FS record body decoding (`j_inode_*`, `j_drec_*`, `j_dstream_*`,
-  `j_xattr_*`, `j_file_extent_*`, `j_sibling_*`),
 - name normalization (UTF-8, NFD, case folding) and path reconstruction,
-- logical size extraction from `j_dstream_t` or compressed `XATTR`,
-- hard-link unification,
-- symlink target text,
+- logical-size precedence across compression / sparse / clone (SR-017 is
+  source-reviewed but not yet executed against the corpus),
+- hard-link aggregation policy in product output,
 - snapshot, sealed-volume, volume-group, or firmlink scope,
 - live mounted raw-scan correctness,
 - physical/shared/exclusive accounting,
@@ -81,7 +88,8 @@ crates/apfs-fastindex/src/
 ├── omap.rs         OMAP resolver: (oid, max_xid) lower-bound + summary
 ├── container.rs    NXSB decode + checkpoint map ring walk
 ├── volume.rs       APSB decode + v1 feature allowlist (SR-012)
-└── fs_records.rs   FS-tree record-family dumper (SR-008)
+├── fs_records.rs   FS-tree walk + record-family dumper (SR-008)
+└── fs_record_body.rs  Body decoders for v1 (SR-015 / SR-016 / EX-17 / EX-18)
 ```
 
 The fail-closed contract is centralized in `object::validate_object_block`:

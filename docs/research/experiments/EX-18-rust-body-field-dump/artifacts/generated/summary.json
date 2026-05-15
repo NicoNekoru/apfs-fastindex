@@ -1,0 +1,10 @@
+{
+  "extra_in_rust_count": 0,
+  "mismatch_count": 0,
+  "missing_in_rust_count": 0,
+  "python_record_count": 53,
+  "rust_record_count": 53,
+  "status": "executed",
+  "verdict": "field_level_parity",
+  "verdict_detail": "Rust and Python produced 53 matching records with zero divergent fields."
+}

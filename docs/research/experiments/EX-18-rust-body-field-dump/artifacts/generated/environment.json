@@ -1,0 +1,8 @@
+{
+  "cargo": "/Users/kai/.cargo/bin/cargo",
+  "cwd": "/Users/kai/Projects/apfs-fastindex",
+  "hdiutil": "/usr/bin/hdiutil",
+  "platform": "macOS-26.3.1-arm64-arm-64bit-Mach-O",
+  "python": "3.13.9",
+  "timestamp": "2026-05-15T02:43:44.395217+00:00"
+}

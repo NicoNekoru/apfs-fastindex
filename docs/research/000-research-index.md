@@ -196,7 +196,11 @@ Long-range product roadmap:
    logical-size oracle parity preserved.
 3. Add synthetic negative record-body cases from `SR-016`: short fixed bodies,
    malformed names, duplicate/out-of-bounds xfields, invalid xattr forms,
-   missing sibling mappings, and drec/inode type mismatches.
+   missing sibling mappings, and drec/inode type mismatches. **Closed by
+   EX-17** for the per-record cases (21 Rust unit tests in
+   `crates/apfs-fastindex/src/fs_record_body.rs::tests`); cross-record
+   cases (drec entry-type vs inode mode, sibling map closure) remain
+   EX-19+ work.
 4. Execute the logical-size precedence gate from `SR-017`: ordinary, sparse,
    cloned, hard-linked, symlink, and compressed files with public `st_size` and
    every raw candidate size source captured in the same selected state.
@@ -205,6 +209,10 @@ Long-range product roadmap:
    can proceed earlier only if stored directory-key names are emitted verbatim.
 6. Implement Rust FS-record body decoding only after gates 1-3 pass; enable
    logical-size rows after gate 4; enable lookup/search semantics after gate 5.
+   **Body decoding closed by EX-18** (Rust `FsRecordDump.records`
+   field-level parity with Python EX-13/EX-16 on the proof fixture, 53/53
+   records, 0 divergent fields). Logical-size and lookup gates still
+   pending.
 
 ## Current Experiment Tracks
 
@@ -268,6 +276,26 @@ Long-range product roadmap:
   candidates (`highest_xid=20`) but returned no `selected_checkpoint` after
   `APFS object validation failed: checksum mismatch at block 1031`. EX-15
   closed this blocker.
+- `EX-18` Rust body-field dump; rebuilt the EX-13 proof fixture, ran the
+  patched Rust scanner with `FsRecordDump.records` emission, and diffed
+  against the Python EX-13 decoder + EX-16 SR-015 xfield replay. Verdict
+  `field_level_parity` on the first run: 53 records both sides, zero
+  divergent fields. The Rust body decoder now matches the Python contract
+  on the proof fixture for `DIR_REC`, `INODE`, `XATTR`, `SIBLING_LINK`,
+  `SIBLING_MAP`, and dstream xfields. Body-decoder promotion gates SR-015
+  and SR-016 are now satisfied for the proof fixture; product
+  `NamespaceEntry` rows still wait on SR-017 (EX-19) and SR-018 (EX-20).
+- `EX-17` synthetic fail-closed record bodies; landed 21 Rust unit tests in
+  `crates/apfs-fastindex/src/fs_record_body.rs::tests` covering every
+  per-record SR-016 fail-closed case (short bodies, malformed names,
+  duplicate/out-of-bounds xfields, xattr flag combinations, wrong xfield
+  sizes, sibling_link name overflow, sibling_map short value, drec entry
+  type outside POSIX allowlist, `xf_used_data` mismatch, xfield blob
+  shorter than header). Each test asserts a typed
+  `ScanError::InvalidObject` with the SR-016 substring. Total crate test
+  count: 55/55. Cross-record SR-016 cases (drec-vs-inode mode mismatch,
+  missing sibling_map for drec carrying `DREC_EXT_TYPE_SIBLING_ID`) remain
+  EX-19+ work.
 - `EX-16` SR-015 xfield replay; re-ran EX-13's proof fixture under the SR-015
   single cursor rule (`cursor += round_up(x_size, 8)` starting immediately
   after the metadata table). All `14` records with xfields satisfy

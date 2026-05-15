@@ -15,6 +15,7 @@ use std::io::{Read, Seek};
 use serde::Serialize;
 
 use crate::btree::{read_btree_node, BtreeNode};
+use crate::fs_record_body::{decode_fs_record, FsRecordRow};
 use crate::object::ExpectedStorage;
 use crate::omap::OmapResolver;
 use crate::ScanError;
@@ -44,6 +45,9 @@ pub struct FsRecordDump {
     pub unique_object_ids: u32,
     pub max_xid: u64,
     pub validation_notes: Vec<String>,
+    /// Decoded body rows (SR-008 / SR-014 / SR-015 / SR-016). Each leaf entry
+    /// in scope of the v1 body decoder shows up here in walk order.
+    pub records: Vec<FsRecordRow>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -78,6 +82,7 @@ pub(crate) fn dump_fs_records<R: Read + Seek>(
         unsupported_record_count: 0,
         unique_object_ids: BTreeMap::new(),
         validation_notes: Vec::new(),
+        records: Vec::new(),
     };
     walk_fs_node(&mut state, reader, root_paddr, true, volume_omap)?;
     let mut family_counts: Vec<FamilyCount> = state
@@ -106,6 +111,7 @@ pub(crate) fn dump_fs_records<R: Read + Seek>(
         unique_object_ids: state.unique_object_ids.len() as u32,
         max_xid,
         validation_notes: state.validation_notes,
+        records: state.records,
     })
 }
 
@@ -119,6 +125,7 @@ struct DumpState {
     unsupported_record_count: u32,
     unique_object_ids: BTreeMap<u64, ()>,
     validation_notes: Vec<String>,
+    records: Vec<FsRecordRow>,
 }
 
 fn walk_fs_node<R: Read + Seek>(
@@ -153,6 +160,7 @@ fn walk_fs_node<R: Read + Seek>(
         for index in 0..node.nkeys {
             let entry = node.entry(index)?;
             let key = node.key_bytes(&entry, 0);
+            let value = node.value_bytes(&entry, 0);
             if key.len() < 8 {
                 return Err(ScanError::InvalidObject(format!(
                     "FS-tree leaf key at node {paddr} entry {index} shorter than j_key_t"
@@ -169,7 +177,10 @@ fn walk_fs_node<R: Read + Seek>(
                 state.validation_notes.push(format!(
                     "FS-tree node {paddr} entry {index} carries unknown record type {raw_type:#x}"
                 ));
+                continue;
             }
+            let row = decode_fs_record(paddr, index, key, value)?;
+            state.records.push(row);
         }
         return Ok(());
     }
@@ -360,8 +371,12 @@ mod tests {
         block
     }
 
-    /// Build an FS-tree leaf with one j_dir_rec record (raw_type=0x9).
-    fn make_fs_leaf_single_drec(_paddr: u64, xid: u64, oid: u64, object_id: u64) -> Vec<u8> {
+    /// Build an FS-tree leaf with one j_dstream_id record (raw_type=0x6).
+    /// Body decoding requires only a 4-byte refcnt; an 8-byte j_key_t header
+    /// is sufficient for the key. Used to exercise the FS-tree internal-OID
+    /// resolution path without exercising the larger DIR_REC / INODE body
+    /// gates that have their own coverage.
+    fn make_fs_leaf_single_dstream_id(_paddr: u64, xid: u64, oid: u64, object_id: u64) -> Vec<u8> {
         let mut block = vec![0u8; BLOCK_SIZE];
         put_u64(&mut block, 0x08, oid);
         put_u64(&mut block, 0x10, xid);
@@ -377,21 +392,23 @@ mod tests {
         let data_offset = OBJ_HEADER_SIZE + 24;
         let toc_offset = data_offset;
         let key_area_offset = toc_offset + toc_len as usize;
-        // Non-root leaf has no btree_info trailer; value_area_end == BLOCK_SIZE.
         let k_off: u16 = 0;
         let k_len: u16 = 8;
-        let v_off: u16 = 16;
-        let v_len: u16 = 16;
+        // Value is 4 bytes (j_dstream_id_val_t.refcnt). v_off counts back from
+        // value_area_end == BLOCK_SIZE (non-root) to value start.
+        let v_off: u16 = 4;
+        let v_len: u16 = 4;
         block[toc_offset..toc_offset + 2].copy_from_slice(&k_off.to_le_bytes());
         block[toc_offset + 2..toc_offset + 4].copy_from_slice(&k_len.to_le_bytes());
         block[toc_offset + 4..toc_offset + 6].copy_from_slice(&v_off.to_le_bytes());
         block[toc_offset + 6..toc_offset + 8].copy_from_slice(&v_len.to_le_bytes());
-        // Key: j_key_t with the object_id in low 60 bits and record type 0x9
-        // (DIR_REC) in high 4 bits.
-        let key_word = (object_id & FS_OBJECT_ID_MASK) | (0x9u64 << FS_RECORD_TYPE_SHIFT);
+        // Key: j_key_t with object_id in low 60 bits and record type 0x6
+        // (DSTREAM_ID) in high 4 bits.
+        let key_word = (object_id & FS_OBJECT_ID_MASK) | (0x6u64 << FS_RECORD_TYPE_SHIFT);
         let key_start = key_area_offset + k_off as usize;
         block[key_start..key_start + 8].copy_from_slice(&key_word.to_le_bytes());
-        // Value: 16 bytes of zero (we never decode it in this dump pass).
+        let value_start = BLOCK_SIZE - v_off as usize;
+        block[value_start..value_start + 4].copy_from_slice(&1u32.to_le_bytes());
         resign_block(&mut block);
         block
     }
@@ -421,7 +438,7 @@ mod tests {
         image[3 * BLOCK_SIZE..4 * BLOCK_SIZE].copy_from_slice(&omap_leaf);
         let fs_root = make_fs_internal_single_child_oid(4, 5, 1028, 1030);
         image[4 * BLOCK_SIZE..5 * BLOCK_SIZE].copy_from_slice(&fs_root);
-        let fs_leaf = make_fs_leaf_single_drec(7, 5, 1030, 42);
+        let fs_leaf = make_fs_leaf_single_dstream_id(7, 5, 1030, 42);
         image[7 * BLOCK_SIZE..8 * BLOCK_SIZE].copy_from_slice(&fs_leaf);
 
         let mut cursor = Cursor::new(image);
@@ -433,10 +450,11 @@ mod tests {
         assert_eq!(dump.leaf_record_count, 1);
         assert_eq!(dump.unique_object_ids, 1);
         assert_eq!(dump.family_counts.len(), 1);
-        let drec = &dump.family_counts[0];
-        assert_eq!(drec.raw_type, 0x9);
-        assert_eq!(drec.name, "dir_rec");
-        assert_eq!(drec.count, 1);
+        let fc = &dump.family_counts[0];
+        assert_eq!(fc.raw_type, 0x6);
+        assert_eq!(fc.name, "dstream_id");
+        assert_eq!(fc.count, 1);
+        assert_eq!(dump.records.len(), 1);
     }
 
     #[test]

@@ -41,12 +41,40 @@ gate, then promote only resolved slices into this directory.
   FS-tree traversal bug (internal-node values are virtual OIDs, not paddrs)
   and recording the patch + two synthetic regression tests in
   `crates/apfs-fastindex/src/fs_records.rs`.
+- `../research/experiments/EX-16-sr-015-xfield-replay/README.md`:
+  research log proving the SR-015 single-cursor xfield rule on the
+  EX-13 proof fixture (14/14 records pass
+  `xf_used_data == sum(round_up(x_size, 8))`).
+- `../research/experiments/EX-17-synthetic-fail-closed-bodies/README.md`:
+  research log enumerating the 21 per-record SR-016 fail-closed unit
+  tests landed in `crates/apfs-fastindex/src/fs_record_body.rs::tests`.
+- `../research/experiments/EX-18-rust-body-field-dump/README.md`:
+  research log proving the Rust body decoder is field-identical to the
+  Python EX-13 + EX-16 parser on the proof fixture
+  (53/53 records, 0 divergent fields).
 
 ## Open Native Slice (Gate A)
 
-With `EX-10`, `EX-11`, and `EX-12` complete, the next native slice is
-**FS-record body decoding** under the validated checkpoint/OMAP/root
-context. Specifically, in this order:
+With `EX-10`–`EX-18` complete, the Rust crate now decodes
+`FsRecordRow` fields for `DIR_REC`, `INODE`, `XATTR`, `SIBLING_LINK`,
+`SIBLING_MAP`, and dstream/sibling_id/inode_name xfields, under SR-015
+cursor + SR-016 fail-closed gates, and is field-level identical to the
+Python parser on the proof fixture.
+
+Remaining work before the Rust MWP can emit `NamespaceEntry`:
+
+1. EX-19: SR-017 logical-size precedence fixture (ordinary, sparse, clone,
+   hard link, symlink, compressed) — pins the rule for non-zero
+   `logical_size`.
+2. EX-20: SR-018 name/case fixture — APFS hash, normalization,
+   case-folding, collision; row enumeration may emit stored UTF-8 names
+   verbatim before this lands, but lookup-by-name semantics must wait.
+3. Rust MWP: wire `NamespaceEntry` and `DirectoryAggregate` emission with
+   the SR-009 unique-inode aggregate policy, gated on EX-19 + EX-20
+   passing.
+
+The earlier body-decoding slice has now landed; the steps below are
+preserved for traceability.
 
 1. `j_drec_*_key_t` and `j_drec_val_t` (`DIR_REC`) - reconstruct the
    directory-entry table with name bytes, normalization, and child file

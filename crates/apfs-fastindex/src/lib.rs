@@ -11,6 +11,7 @@ use serde::Serialize;
 mod block_io;
 mod btree;
 mod container;
+mod fs_record_body;
 mod fs_records;
 mod object;
 mod omap;
@@ -24,6 +25,10 @@ use object::{
 
 pub use container::{
     CheckpointMapBlock, CheckpointMapSummary, CheckpointMapping, ContainerSummary,
+};
+pub use fs_record_body::{
+    DirRecBody, DstreamFields, FsRecordKey, FsRecordRow, FsRecordValue, InodeBody, SiblingLinkBody,
+    XattrBody, XfieldEntry, XfieldInterpreted,
 };
 pub use fs_records::{FamilyCount, FsRecordDump};
 pub use object::ObjectHeader;

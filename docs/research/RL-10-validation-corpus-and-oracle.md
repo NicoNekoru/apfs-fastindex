@@ -150,6 +150,20 @@ Last Updated: 2026-05-14
 - [2026-05-13] Spec/Observation: `SR-016` through `SR-018` add required negative
   and edge fixtures for record-body malformation, compression-size conflicts,
   and APFS name-hash/case behavior before Rust broadens beyond row enumeration.
+- [2026-05-14] Observation: `EX-18` adds the field-level cross-tool oracle:
+  Rust `FsRecordDump.records` versus Python EX-13 + SR-015 xfield replay
+  on the same raw container. Pass condition is per-record dict equality
+  across `(node_paddr, entry_index, object_id, raw_type, family, key,
+  value, key_len, value_len, validation_notes)`. The EX-13 proof fixture
+  produced 53/53 matching records with 0 divergent fields. This is the
+  oracle product `NamespaceEntry` rows must clear (along with EX-19
+  logical-size precedence and EX-20 name/case) before they may be emitted
+  from Rust.
+- [2026-05-14] Observation: `EX-17` formalizes the SR-016 negative-case
+  regression suite as 21 Rust unit tests against synthetic raw blocks.
+  Each one asserts a typed `ScanError::InvalidObject` for one SR-016
+  category. The suite is part of `cargo test -p apfs-fastindex` and is
+  the standing fail-closed regression for the body decoder.
 - [2026-05-14] Observation: `EX-16` adds a per-record structural oracle:
   `xf_used_data == sum(round_up(x_size, 8))` over an inode/dir_rec's xfields.
   This is independent of any product output and is therefore reusable across

@@ -1,5 +1,5 @@
 {
-  "image_path": "/tmp/apfsfi-ex15-le64vqp2/EX15CI.dmg",
+  "image_path": "/tmp/apfsfi-ex15-rj331utc/EX15CI.dmg",
   "operations": [
     {
       "step": "create src, dst, names, and sparse directories"
