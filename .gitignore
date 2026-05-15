@@ -73,5 +73,6 @@ build/
 *.dmg
 *.sparsebundle
 
-#
+# App artifacts
 scan.json
+.build

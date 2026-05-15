@@ -7,6 +7,10 @@ enum BridgeMessage {
     case contextMenu(path: String, kind: String, viewportX: Double, viewportY: Double)
     case revealInFinder(path: String)
     case moveToTrash(paths: [String])
+    case consoleError(message: String)
+    case ingestStarted
+    case ingestSucceeded(rootPath: String, totalEntries: UInt64)
+    case ingestFailed(message: String)
 
     init?(payload: Any) {
         guard let dict = payload as? [String: Any],
@@ -29,6 +33,16 @@ enum BridgeMessage {
             self = .revealInFinder(path: (dict["path"] as? String) ?? "")
         case "move_to_trash":
             self = .moveToTrash(paths: (dict["paths"] as? [String]) ?? [])
+        case "console_error":
+            self = .consoleError(message: (dict["message"] as? String) ?? "")
+        case "ingest_started":
+            self = .ingestStarted
+        case "ingest_succeeded":
+            let root = (dict["rootPath"] as? String) ?? ""
+            let total = (dict["totalEntries"] as? NSNumber)?.uint64Value ?? 0
+            self = .ingestSucceeded(rootPath: root, totalEntries: total)
+        case "ingest_failed":
+            self = .ingestFailed(message: (dict["message"] as? String) ?? "")
         default:
             return nil
         }

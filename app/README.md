@@ -34,17 +34,30 @@ the trajectory.
 # 1. Build the Rust scanner (the app shells out to it).
 cargo build --release --bin apfs-fastindex-scan
 
-# 2. Build + run the SwiftUI shell.
+# 2. Build a proper .app bundle and launch it.
 cd app
-swift run
+./make-app.sh
+open ApfsFastindex.app
 ```
 
-The first launch takes ~30 s while SwiftPM compiles. Subsequent
-`swift run` is near-instant.
+`make-app.sh` runs `swift build -c release`, copies the executable and
+the SwiftPM resource bundle into `ApfsFastindex.app/Contents/`, and
+writes a minimal `Info.plist`. The first launch takes ~30 s while
+SwiftPM compiles; subsequent rebuilds are near-instant.
 
-To open the app's window from any path, pass the source as an arg in
-the toolbar (drag a folder onto the text field, or click Browse…). The
-viz inside the WebView lights up once the scanner finishes.
+### `swift run` for development iteration
+
+`swift run` also works (`./.build/debug/ApfsFastindex` launches the
+window) but SwiftPM-built binaries aren't `.app` bundles, so macOS
+launches them as CLI tools by default. The app forces
+`.regular` activation policy in `init` + `applicationWillFinishLaunching`,
+which is usually enough — if the window doesn't focus, click the dock
+icon or run `osascript -e 'tell app "apfs-fastindex" to activate'`. For
+anything beyond fast iteration, prefer `make-app.sh`.
+
+To scan, type a path in the toolbar (or click Browse…) and hit Scan
+(Cmd-Return). Toolbar progress + status bar update live; the treemap
+renders once the scan finishes.
 
 ## Layout
 

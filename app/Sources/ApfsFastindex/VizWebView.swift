@@ -2,17 +2,33 @@ import SwiftUI
 import WebKit
 
 /// `NSViewRepresentable` wrapper around `WKWebView` that hosts the bundled
-/// `viz/index.html`. The Phase 1 contract is intentionally tiny:
+/// `viz/index.html`.
 ///
-/// - Once the view loads, call `onReady(webView)` so the controller can
-///   start pushing data via `evaluateJavaScript`.
+/// Why this exists in its current form:
+///
+/// - The viz page is loaded from a `file://` URL (the SwiftPM resource
+///   bundle). Scan results land in a different temp directory. Bridging
+///   the two with `XMLHttpRequest('file://…')` requires private
+///   WebKit prefs (`allowUniversalAccessFromFileURLs`), which on
+///   macOS 26 (Tahoe) raise an uncatchable `NSException` when set
+///   via KVC — boom, launch crash.
+/// - Instead we register a `WKURLSchemeHandler` for `apfs-scan://`.
+///   The page fetches `apfs-scan://current` and the handler returns the
+///   bytes of the latest scan temp file. No private API, no
+///   cross-origin headaches, no file:// quirks.
+///
+/// Contract:
+///
+/// - Once the page finishes loading, call `onReady(webView)` so the
+///   controller can drive `evaluateJavaScript`.
 /// - Forward any structured JS-side messages back as `BridgeMessage`s.
-/// - Replay the latest pending scan / progress once the page is up so a
-///   slow viz load does not lose data the user already requested.
+/// - Replay any pending progress event once the page is up so a slow
+///   viz load doesn't drop the live counters the user already saw on
+///   the status bar.
 struct VizWebView: NSViewRepresentable {
     let onMessage: (BridgeMessage) -> Void
     let onReady: (WKWebView) -> Void
-    let onDeliverScanJSON: String?
+    let onDeliverScanFileURL: URL?
     let onDeliverProgress: ProgressUpdate?
 
     func makeCoordinator() -> Coordinator {
@@ -21,10 +37,9 @@ struct VizWebView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
+
         let userContentController = WKUserContentController()
         userContentController.add(context.coordinator, name: "app")
-        // Inject a tiny shim so Swift can deliver scan JSON / progress
-        // even before the viz finishes wiring up its drag-drop handlers.
         let shimScript = WKUserScript(
             source: vizBridgeShim,
             injectionTime: .atDocumentStart,
@@ -32,18 +47,17 @@ struct VizWebView: NSViewRepresentable {
         )
         userContentController.addUserScript(shimScript)
         config.userContentController = userContentController
-        // Allow `file://` resources to read sibling resources (the
-        // bundled vendor/ subdirectory). WKWebView blocks this by
-        // default on macOS.
-        config.preferences.setValue(true, forKey: "allowFileAccessFromFileURLs")
+
+        // Register the apfs-scan:// scheme so the viz can fetch scan
+        // results without crossing file:// origin restrictions or
+        // touching private WebKit prefs.
+        config.setURLSchemeHandler(context.coordinator, forURLScheme: "apfs-scan")
+
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
         webView.setValue(false, forKey: "drawsBackground")
 
         if let url = Bundle.module.url(forResource: "index", withExtension: "html", subdirectory: "viz") {
-            // Allow the WebView to read sibling resources (the vendored
-            // d3.v7.min.js lives in viz/vendor/). The grant scope is the
-            // viz/ subdirectory only.
             webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
         } else {
             NSLog("VizWebView: bundled viz/index.html not found")
@@ -52,26 +66,19 @@ struct VizWebView: NSViewRepresentable {
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
-        // SwiftUI re-invokes this when @Published state in the parent
-        // changes. We use it to replay any pending data the controller
-        // accumulated before the viz announced readiness.
-        if context.coordinator.viewReady {
-            if let json = onDeliverScanJSON, json != context.coordinator.lastDeliveredScan {
-                context.coordinator.lastDeliveredScan = json
-                deliverScan(webView: webView, json: json)
-            }
-            if let progress = onDeliverProgress,
-               progress.elapsedMs != context.coordinator.lastProgressElapsedMs {
-                context.coordinator.lastProgressElapsedMs = progress.elapsedMs
-                deliverProgress(webView: webView, progress: progress)
-            }
-        }
-    }
+        // The scan-result URL is *not* propagated through this re-render
+        // path. SwiftUI's view update can lag a frame behind the
+        // controller's `evaluateJavaScript` call, which would race the
+        // page's XHR against a stale (nil) `currentScanFileURL`. The
+        // controller writes directly to `coordinator.currentScanFileURL`
+        // before evaluating JS instead.
 
-    private func deliverScan(webView: WKWebView, json: String) {
-        let literal = ScanController.encodeAsJSStringLiteral(json)
-        let js = "if (window.__apfs_ingest__) { __apfs_ingest__(\(literal)); }"
-        webView.evaluateJavaScript(js, completionHandler: nil)
+        guard context.coordinator.viewReady else { return }
+        if let progress = onDeliverProgress,
+           progress.elapsedMs != context.coordinator.lastProgressElapsedMs {
+            context.coordinator.lastProgressElapsedMs = progress.elapsedMs
+            deliverProgress(webView: webView, progress: progress)
+        }
     }
 
     private func deliverProgress(webView: WKWebView, progress: ProgressUpdate) {
@@ -82,12 +89,16 @@ struct VizWebView: NSViewRepresentable {
         webView.evaluateJavaScript(js, completionHandler: nil)
     }
 
-    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler, WKURLSchemeHandler {
         let onMessage: (BridgeMessage) -> Void
         let onReady: (WKWebView) -> Void
         var viewReady: Bool = false
-        var lastDeliveredScan: String? = nil
         var lastProgressElapsedMs: UInt64 = .max
+
+        /// Latest scan-result file the controller wrote. Read on the
+        /// main thread when the WKURLSchemeHandler fires for
+        /// `apfs-scan://current`.
+        var currentScanFileURL: URL?
 
         init(onMessage: @escaping (BridgeMessage) -> Void,
              onReady: @escaping (WKWebView) -> Void) {
@@ -95,10 +106,14 @@ struct VizWebView: NSViewRepresentable {
             self.onReady = onReady
         }
 
+        // MARK: WKNavigationDelegate
+
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             viewReady = true
             onReady(webView)
         }
+
+        // MARK: WKScriptMessageHandler
 
         func userContentController(_ userContentController: WKUserContentController,
                                    didReceive message: WKScriptMessage) {
@@ -107,47 +122,224 @@ struct VizWebView: NSViewRepresentable {
                 onMessage(parsed)
             }
         }
+
+        // MARK: WKURLSchemeHandler
+
+        func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
+            guard let requestURL = urlSchemeTask.request.url else {
+                urlSchemeTask.didFailWithError(NSError(domain: "ApfsScanScheme", code: 400))
+                return
+            }
+            // Only one resource is recognized today: `apfs-scan://current`.
+            // (We don't gate on host because some macOS WebKit builds
+            // canonicalize the URL differently — accepting any path
+            // makes the handler robust to that.)
+            guard let scanURL = currentScanFileURL else {
+                urlSchemeTask.didFailWithError(NSError(
+                    domain: "ApfsScanScheme", code: 404,
+                    userInfo: [NSLocalizedDescriptionKey: "no scan available yet"]
+                ))
+                return
+            }
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    let data = try Data(contentsOf: scanURL, options: .mappedIfSafe)
+                    // **CORS matters here.** The viz is loaded from a
+                    // `file://` URL (the SwiftPM resource bundle) and
+                    // is XHR'ing to `apfs-scan://`. Different schemes
+                    // count as different origins; without an
+                    // `Access-Control-Allow-Origin` header WebKit
+                    // silently rejects the response and the JS
+                    // `onload` never fires. Return a real
+                    // `HTTPURLResponse` with `*` so the bytes reach
+                    // `xhr.response`.
+                    let response = HTTPURLResponse(
+                        url: requestURL,
+                        statusCode: 200,
+                        httpVersion: "HTTP/1.1",
+                        headerFields: [
+                            "Content-Type": "application/json; charset=utf-8",
+                            "Content-Length": "\(data.count)",
+                            "Access-Control-Allow-Origin": "*",
+                            "Cache-Control": "no-store"
+                        ]
+                    ) ?? URLResponse(
+                        url: requestURL,
+                        mimeType: "application/json",
+                        expectedContentLength: data.count,
+                        textEncodingName: "utf-8"
+                    )
+                    DispatchQueue.main.async {
+                        urlSchemeTask.didReceive(response)
+                        urlSchemeTask.didReceive(data)
+                        urlSchemeTask.didFinish()
+                    }
+                } catch {
+                    DispatchQueue.main.async {
+                        urlSchemeTask.didFailWithError(error)
+                    }
+                }
+            }
+        }
+
+        func webView(_ webView: WKWebView, stop urlSchemeTask: WKURLSchemeTask) {
+            // Nothing to cancel: our I/O is best-effort and the
+            // continuation simply no-ops if the task already finished.
+        }
     }
 }
 
 /// JavaScript injected at document-start that exposes:
 ///
-/// - `window.__apfs_ingest__(doc)` — Swift hands a parsed scan document
-///   (or JSON string) to the viz; identical effect to the user dragging
-///   a JSON file in.
+/// - `window.__apfs_ingest_file__(_path)` — Swift signals that a new
+///   scan is available; the page fetches `apfs-scan://current` and
+///   calls the viz's `ingest()`. Parsing happens in the WebKit content
+///   process so the Swift main thread isn't blocked by a giant
+///   `JSON.parse`.
 /// - `window.__apfs_progress__(update)` — Swift posts a live progress
-///   update. The viz currently ignores it (a status pill is still on
-///   the next-polish list); the function is wired so a later viz patch
-///   can render it without touching Swift again.
+///   event. Stored on `window.__apfs_latest_progress__` for any viz
+///   polish pass that wants to render a progress bar inside the page.
 /// - `window.__apfs_post__(message)` — convenience wrapper around
 ///   `window.webkit.messageHandlers.app.postMessage`.
+///
+/// The shim also tags `<html>` with the `apfs-native-shell` class so
+/// the viz CSS can hide the standalone-only drag-and-drop UI.
 private let vizBridgeShim: String = """
 (() => {
   if (window.__apfs_shim_installed__) return;
   window.__apfs_shim_installed__ = true;
-  window.__apfs_post__ = function(message) {
+
+  function tagNativeShell() {
+    try {
+      document.documentElement.classList.add('apfs-native-shell');
+      // The standalone viz hard-codes a "Drop an
+      // apfs-fastindex-scan JSON file to begin." prompt. In the
+      // native shell the user has no idea what a "scan JSON" is
+      // and never needs to drop a file. Replace it with something
+      // useful before the user sees it.
+      const claim = document.getElementById('claim');
+      if (claim) claim.textContent = 'Pick a folder, click Scan.';
+    } catch (e) {}
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', tagNativeShell);
+  } else {
+    tagNativeShell();
+  }
+
+  function postToSwift(message) {
     try {
       if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.app) {
         window.webkit.messageHandlers.app.postMessage(message);
       }
     } catch (err) {
-      console.error('__apfs_post__ failed', err);
+      // Swallow — there's nowhere safe to log this and the
+      // surrounding console.error would re-enter this function.
     }
-  };
-  window.__apfs_ingest__ = function(doc) {
+  }
+  window.__apfs_post__ = postToSwift;
+
+  // Mirror console.error to Swift so silent JS failures show up in
+  // the Xcode console / `swift run` stderr instead of evaporating
+  // inside WebKit.
+  const __origConsoleError = console.error.bind(console);
+  console.error = function() {
+    __origConsoleError.apply(console, arguments);
     try {
-      const parsed = (typeof doc === 'string') ? JSON.parse(doc) : doc;
-      if (typeof window.ingest === 'function') {
-        window.ingest(parsed, 'native://current-scan');
-      } else {
-        // The viz may not have wired `ingest` to window scope; fall back
-        // by saving the doc for the page to pick up.
-        window.__apfs_pending_scan__ = parsed;
+      const parts = [];
+      for (let i = 0; i < arguments.length; i++) {
+        const a = arguments[i];
+        if (a instanceof Error) {
+          parts.push(a.stack || a.message);
+        } else if (typeof a === 'object') {
+          try { parts.push(JSON.stringify(a)); }
+          catch (_) { parts.push(String(a)); }
+        } else {
+          parts.push(String(a));
+        }
       }
+      postToSwift({ type: 'console_error', message: parts.join(' ') });
+    } catch (e) {}
+  };
+  window.addEventListener('error', function(ev) {
+    const msg = (ev && ev.error && (ev.error.stack || ev.error.message)) || (ev && ev.message) || 'unknown error';
+    postToSwift({ type: 'console_error', message: 'window.error ' + msg });
+  });
+  window.addEventListener('unhandledrejection', function(ev) {
+    const r = ev && ev.reason;
+    const msg = (r && (r.stack || r.message)) || String(r);
+    postToSwift({ type: 'console_error', message: 'unhandledrejection ' + msg });
+  });
+
+  // Swift signals "a new scan result is available"; the page fetches
+  // it via the apfs-scan:// custom scheme. The Swift-side
+  // `WKURLSchemeHandler` serves the bytes from the latest scan temp
+  // file.
+  window.__apfs_ingest_file__ = function(_pathHint) {
+    postToSwift({ type: 'ingest_started' });
+    try {
+      const xhr = new XMLHttpRequest();
+      xhr.open('GET', 'apfs-scan://current', true);
+      // Pull the bytes as text first so a malformed-JSON failure
+      // surfaces with a real message instead of `responseType:
+      // 'json'` silently delivering `null`.
+      xhr.onload = function() {
+        const ok = xhr.status === 0 || (xhr.status >= 200 && xhr.status < 300);
+        if (!ok) {
+          const msg = 'scan fetch http ' + xhr.status;
+          console.error(msg);
+          postToSwift({ type: 'ingest_failed', message: msg });
+          return;
+        }
+        const text = xhr.responseText || '';
+        if (!text.length) {
+          const msg = 'scan fetch returned empty body';
+          console.error(msg);
+          postToSwift({ type: 'ingest_failed', message: msg });
+          return;
+        }
+        let doc;
+        try {
+          doc = JSON.parse(text);
+        } catch (parseErr) {
+          const msg = 'scan parse failed: ' + (parseErr && parseErr.message ? parseErr.message : parseErr);
+          console.error(msg);
+          postToSwift({ type: 'ingest_failed', message: msg });
+          return;
+        }
+        if (typeof window.ingest !== 'function') {
+          const msg = 'viz ingest() function missing';
+          console.error(msg);
+          postToSwift({ type: 'ingest_failed', message: msg });
+          window.__apfs_pending_scan__ = doc;
+          return;
+        }
+        try {
+          window.ingest(doc, 'native://current-scan');
+        } catch (ingestErr) {
+          const msg = 'viz ingest threw: ' + (ingestErr && ingestErr.stack ? ingestErr.stack : ingestErr);
+          console.error(msg);
+          postToSwift({ type: 'ingest_failed', message: msg });
+          return;
+        }
+        const parserOutput = (doc && (doc.parser_output || doc)) || {};
+        const entries = parserOutput.entries || [];
+        const rootPath = (entries[0] && entries[0].path) || '';
+        postToSwift({ type: 'ingest_succeeded', rootPath: rootPath, totalEntries: entries.length });
+      };
+      xhr.onerror = function() {
+        const msg = 'scan fetch transport error';
+        console.error(msg);
+        postToSwift({ type: 'ingest_failed', message: msg });
+      };
+      xhr.send();
     } catch (err) {
-      console.error('__apfs_ingest__ failed', err);
+      const msg = '__apfs_ingest_file__ threw: ' + (err && err.stack ? err.stack : err);
+      console.error(msg);
+      postToSwift({ type: 'ingest_failed', message: msg });
     }
   };
+
   window.__apfs_progress__ = function(update) {
     window.__apfs_latest_progress__ = update;
     if (typeof window.onApfsProgress === 'function') {
@@ -156,17 +348,3 @@ private let vizBridgeShim: String = """
   };
 })();
 """
-
-extension ScanController {
-    /// Re-encode a Swift string as a JS string literal that survives
-    /// `evaluateJavaScript`. Goes through `JSONSerialization` so all the
-    /// usual escapes are handled.
-    static func encodeAsJSStringLiteral(_ s: String) -> String {
-        if let data = try? JSONSerialization.data(withJSONObject: [s], options: []),
-           let str = String(data: data, encoding: .utf8),
-           str.count >= 2 {
-            return String(str.dropFirst().dropLast())
-        }
-        return "\"\""
-    }
-}
