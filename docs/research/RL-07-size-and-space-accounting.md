@@ -3,7 +3,7 @@
 Status: Open
 Priority: P0
 Owner: TBD
-Last Updated: 2026-05-14
+Last Updated: 2026-05-14 (EX-19)
 
 ## Core Question
 - What size metrics will the product report, and how can those metrics be computed correctly on APFS?
@@ -104,6 +104,18 @@ Last Updated: 2026-05-14
   compressed files, with conflicts failing closed.
 - [2026-05-13] Spec/Observation: `SR-015` supports sparse logical-size decoding
   by replacing EX-13 xfield candidate scoring with one padded-value cursor rule.
+- [2026-05-14] Observation: `EX-19` validated SR-017 logical-size
+  precedence against a same-run fixture covering ordinary, sparse, clone,
+  hard link, symlink, and `ditto --hfsCompression` cases. All 5 unique
+  inodes reproduced public `st_size` under SR-017 with zero mismatches:
+  ordinary/sparse/clone → `j_dstream_size`, sparse_bytes treated as
+  allocation hint, symlink → `com.apple.fs.symlink` payload byte length,
+  compressed → `inode.uncompressed_size` (with `INODE_HAS_UNCOMPRESSED_SIZE`
+  set; decmpfs header was placeholder on this fixture so step 4's
+  inode-first preference is load-bearing). Hard-link case is implicitly
+  covered by SR-017's per-inode rule. This pins the size source for the
+  Rust namespace emitter; the SR-017 step-by-step table is now the
+  documented rule for the v1 product mode.
 - [2026-05-14] Observation: `EX-16` executed SR-015 against the EX-13 proof
   fixture. Every `INO_EXT_TYPE_DSTREAM.size` decoded under the single cursor
   rule equals the mounted POSIX `st_size` for the corresponding inode, and
@@ -146,7 +158,10 @@ Last Updated: 2026-05-14
 - V1 logical-size row emission may implement the SR-017 precedence table only
   after the SR-015 xfield replay gate; compressed rows still require same-state
   evidence when raw candidate size fields disagree. **SR-015 gate done by
-  EX-16**; SR-017 compressed precedence still pending EX-19.
+  EX-16**; **SR-017 precedence validated by EX-19** for ordinary, sparse,
+  clone, hard link, symlink, and compressed cases. The Rust MWP namespace
+  emitter may now implement SR-017 per-inode logical size, gated only by
+  EX-20 (SR-018 name/case) and the v1 aggregate policy from SR-009.
 
 ## Exit Criteria
 - Defined product-facing size semantics.

@@ -1,0 +1,43 @@
+{
+  "operations": [
+    {
+      "outcome": {
+        "created": true,
+        "path": "plain.txt"
+      },
+      "step": "create plain.txt"
+    },
+    {
+      "outcome": {
+        "created": true,
+        "path": "CaseName.txt"
+      },
+      "step": "create CaseName.txt"
+    },
+    {
+      "outcome": {
+        "created": false,
+        "error": "[Errno 17] File exists: '/tmp/apfsfi-ex20-ci-ipuiy0m3/mnt/casename.txt'",
+        "path": "casename.txt"
+      },
+      "step": "attempt casename.txt after CaseName.txt"
+    },
+    {
+      "outcome": {
+        "created": true,
+        "path": "caf\u00e9.txt",
+        "utf8_hex": "636166c3a92e747874"
+      },
+      "step": "create NFC 'caf\u00e9.txt'"
+    },
+    {
+      "outcome": {
+        "created": false,
+        "error": "[Errno 17] File exists: '/tmp/apfsfi-ex20-ci-ipuiy0m3/mnt/cafe\u0301.txt'",
+        "path": "cafe\u0301.txt",
+        "utf8_hex": "63616665cc812e747874"
+      },
+      "step": "attempt NFD 'cafe\u0301.txt' after NFC sibling"
+    }
+  ]
+}

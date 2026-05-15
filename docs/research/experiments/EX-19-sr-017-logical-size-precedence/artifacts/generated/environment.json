@@ -1,0 +1,11 @@
+{
+  "cargo": "/Users/kai/.cargo/bin/cargo",
+  "compression_tool": "/usr/bin/compression_tool",
+  "cwd": "/Users/kai/Projects/apfs-fastindex",
+  "ditto": "/usr/bin/ditto",
+  "hdiutil": "/usr/bin/hdiutil",
+  "platform": "macOS-26.3.1-arm64-arm-64bit-Mach-O",
+  "python": "3.13.9",
+  "sw_vers": "ProductName:\t\tmacOS\nProductVersion:\t\t26.3.1\nProductVersionExtra:\t(a)\nBuildVersion:\t\t25D771280a\n",
+  "timestamp": "2026-05-15T02:56:13.817362+00:00"
+}

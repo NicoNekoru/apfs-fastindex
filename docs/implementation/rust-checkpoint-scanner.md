@@ -62,12 +62,20 @@ What the Rust path currently proves on the proof fixture:
   and EX-18 prove the decoder against synthetic SR-016 negative blocks and
   against the Python EX-13/EX-16 parser respectively.
 
+What it now also proves (R1 / Narrow Rust MWP):
+
+- `NamespaceEntry` rows emitted with stored UTF-8 names preserved
+  verbatim (SR-018; validated CI + CS by EX-20),
+- per-inode `logical_size` under SR-017 (ordinary / sparse / clone /
+  hard link / symlink / compressed, validated by EX-19),
+- `DirectoryAggregate` rows under SR-009 unique-inode policy, matching
+  the Python `build_directory_aggregates` reference,
+- a `--summary` CLI mode that prints the one-line `correctness_claim`
+  plus the `not_claimed` register.
+
 What it still does not prove:
 
-- name normalization (UTF-8, NFD, case folding) and path reconstruction,
-- logical-size precedence across compression / sparse / clone (SR-017 is
-  source-reviewed but not yet executed against the corpus),
-- hard-link aggregation policy in product output,
+- lookup-by-name (APFS hash + Unicode normalization + case fold),
 - snapshot, sealed-volume, volume-group, or firmlink scope,
 - live mounted raw-scan correctness,
 - physical/shared/exclusive accounting,
@@ -89,7 +97,9 @@ crates/apfs-fastindex/src/
 ├── container.rs    NXSB decode + checkpoint map ring walk
 ├── volume.rs       APSB decode + v1 feature allowlist (SR-012)
 ├── fs_records.rs   FS-tree walk + record-family dumper (SR-008)
-└── fs_record_body.rs  Body decoders for v1 (SR-015 / SR-016 / EX-17 / EX-18)
+├── fs_record_body.rs  Body decoders for v1 (SR-015 / SR-016 / EX-17 / EX-18)
+└── namespace.rs    NamespaceEntry + DirectoryAggregate emission (SR-009 /
+                    SR-017 / SR-018; gated by EX-19 + EX-20 + the MWP smoke)
 ```
 
 The fail-closed contract is centralized in `object::validate_object_block`:

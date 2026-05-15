@@ -3,7 +3,7 @@
 Status: Open
 Priority: P0
 Owner: TBD
-Last Updated: 2026-05-13
+Last Updated: 2026-05-14 (EX-20)
 
 ## Core Question
 - How do we reconstruct an exact directory tree and stable parent/child relationships from APFS metadata?
@@ -90,6 +90,34 @@ Last Updated: 2026-05-13
 - [2026-05-13] Spec/Observation: `SR-016` makes malformed names, missing
   embedded symlink targets, sibling-link/map inconsistency, and drec/inode type
   mismatch fail-closed namespace gates.
+- [2026-05-14] Observation: Rust MWP promotion landed (post-EX-20). The
+  crate emits `NamespaceEntry` rows (path / entry_kind / file_id /
+  logical_size / symlink_target) and `DirectoryAggregate` rows
+  (unique-inode logical totals per directory, SR-009 policy) directly
+  from `FsRecordDump.records`. The `rust_mwp_smoke` script
+  (`PYTHONPATH=src python3 -m apfs_fastindex.rust_mwp_smoke`) rebuilds
+  the proof fixture, runs the Rust scanner, deserializes its
+  `parser_output` into the Python `ParserOutput` model, runs
+  `compare_parser_output_to_oracle` against the mounted POSIX oracle,
+  and double-checks that the Python `aggregate.py` reproduces the same
+  aggregates from Rust's entries. First-run verdict: entries match
+  (7/7), aggregates match (3/3: `.`, `dst`, `src`). The Rust CLI
+  `--summary` mode prints the one-line correctness_claim + the
+  `not_claimed` register so a reviewer can read the semantic mode at a
+  glance.
+- [2026-05-14] Observation: `EX-20` validates SR-018 row-enumeration name
+  preservation across both `APFS` (case-insensitive) and
+  `Case-sensitive APFS` volumes. APFS lookup oracle: CI rejects both the
+  case duplicate `casename.txt` after `CaseName.txt` and the NFD form
+  after the NFC `café.txt`; CS allows the case duplicate but still
+  rejects the NFD duplicate (CS volumes are still
+  normalization-insensitive on macOS). Rust reconstructs paths by walking
+  `FsRecordDump.records` dir_rec keys + parent_id chains and emits stored
+  UTF-8 bytes with no normalization. Mounted POSIX and Rust path byte
+  arrays match exactly on both volumes (4/4 on CI, 5/5 on CS, hex-level
+  comparison). `VolumeSummary.case_insensitive` /
+  `normalization_insensitive` propagate correctly: CI volume reports
+  `(true, false)`; CS volume reports `(false, true)`.
 
 ## Interim Decisions
 - Keep namespace reconstruction separate from storage traversal logic.

@@ -1,0 +1,122 @@
+{
+  "matched": true,
+  "mismatches": [],
+  "row_count": 5,
+  "rows": [
+    {
+      "candidates": {
+        "decmpfs_header": null,
+        "has_uncompressed_size": false,
+        "inode_uncompressed_size": 0,
+        "internal_flags_hex": "0x8410",
+        "j_dstream_alloced_size": 4096,
+        "j_dstream_size": 29,
+        "sparse_bytes": null,
+        "symlink_target_len": null
+      },
+      "compressed_flag": false,
+      "fail_closed_reason": null,
+      "inode": 20,
+      "matches_st_size": true,
+      "mounted_st_flags": 0,
+      "mounted_st_size": 29,
+      "path": "clone.txt",
+      "picked": "j_dstream_size",
+      "picked_value": 29,
+      "precedence_kind": "regular"
+    },
+    {
+      "candidates": {
+        "decmpfs_header": {
+          "compression_type": 0,
+          "magic_be_hex": "0x1a000000",
+          "magic_le_hex": "0x0000001a",
+          "uncompressed_size": 437
+        },
+        "has_uncompressed_size": true,
+        "inode_uncompressed_size": 53248,
+        "internal_flags_hex": "0x40000",
+        "j_dstream_alloced_size": null,
+        "j_dstream_size": null,
+        "sparse_bytes": null,
+        "symlink_target_len": null
+      },
+      "compressed_flag": true,
+      "fail_closed_reason": null,
+      "inode": 24,
+      "matches_st_size": true,
+      "mounted_st_flags": 32,
+      "mounted_st_size": 53248,
+      "path": "compressed.txt",
+      "picked": "inode_uncompressed_size",
+      "picked_value": 53248,
+      "precedence_kind": "compressed"
+    },
+    {
+      "candidates": {
+        "decmpfs_header": null,
+        "has_uncompressed_size": false,
+        "inode_uncompressed_size": 0,
+        "internal_flags_hex": "0x8000",
+        "j_dstream_alloced_size": null,
+        "j_dstream_size": null,
+        "sparse_bytes": null,
+        "symlink_target_len": 12
+      },
+      "compressed_flag": false,
+      "fail_closed_reason": null,
+      "inode": 23,
+      "matches_st_size": true,
+      "mounted_st_flags": 0,
+      "mounted_st_size": 12,
+      "path": "link.txt",
+      "picked": "symlink_target_len",
+      "picked_value": 12,
+      "precedence_kind": "symlink"
+    },
+    {
+      "candidates": {
+        "decmpfs_header": null,
+        "has_uncompressed_size": false,
+        "inode_uncompressed_size": 0,
+        "internal_flags_hex": "0x8410",
+        "j_dstream_alloced_size": 4096,
+        "j_dstream_size": 29,
+        "sparse_bytes": null,
+        "symlink_target_len": null
+      },
+      "compressed_flag": false,
+      "fail_closed_reason": null,
+      "inode": 16,
+      "matches_st_size": true,
+      "mounted_st_flags": 0,
+      "mounted_st_size": 29,
+      "path": "ordinary.txt",
+      "picked": "j_dstream_size",
+      "picked_value": 29,
+      "precedence_kind": "regular"
+    },
+    {
+      "candidates": {
+        "decmpfs_header": null,
+        "has_uncompressed_size": false,
+        "inode_uncompressed_size": 0,
+        "internal_flags_hex": "0x8200",
+        "j_dstream_alloced_size": 1056768,
+        "j_dstream_size": 1052897,
+        "sparse_bytes": 1032192,
+        "symlink_target_len": null
+      },
+      "compressed_flag": false,
+      "fail_closed_reason": null,
+      "inode": 19,
+      "matches_st_size": true,
+      "mounted_st_flags": 0,
+      "mounted_st_size": 1052897,
+      "path": "sparse.bin",
+      "picked": "j_dstream_size",
+      "picked_value": 1052897,
+      "precedence_kind": "regular"
+    }
+  ]
+}

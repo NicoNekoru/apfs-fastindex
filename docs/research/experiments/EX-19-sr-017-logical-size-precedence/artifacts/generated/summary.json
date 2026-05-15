@@ -1,0 +1,7 @@
+{
+  "mismatch_count": 0,
+  "row_count": 5,
+  "status": "executed",
+  "verdict": "validated_sr_017_precedence",
+  "verdict_detail": "5 entries: all SR-017 picks equal mounted st_size."
+}

@@ -1,0 +1,29 @@
+{
+  "operations": [
+    {
+      "path": "ordinary.txt",
+      "step": "create ordinary.txt"
+    },
+    {
+      "hole_size": 1052897,
+      "path": "sparse.bin",
+      "step": "create sparse.bin"
+    },
+    {
+      "path": "clone.txt",
+      "step": "clone ordinary.txt -> clone.txt"
+    },
+    {
+      "path": "hard.txt",
+      "step": "hard link ordinary.txt <- hard.txt"
+    },
+    {
+      "path": "link.txt",
+      "step": "symlink link.txt -> ordinary.txt"
+    },
+    {
+      "path": "compressed.txt",
+      "step": "ditto --hfsCompression -> compressed.txt"
+    }
+  ]
+}

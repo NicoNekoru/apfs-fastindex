@@ -52,6 +52,21 @@ gate, then promote only resolved slices into this directory.
   research log proving the Rust body decoder is field-identical to the
   Python EX-13 + EX-16 parser on the proof fixture
   (53/53 records, 0 divergent fields).
+- `../research/experiments/EX-19-sr-017-logical-size-precedence/README.md`:
+  research log validating the SR-017 per-inode logical-size precedence
+  on a same-run fixture covering ordinary, sparse, clone, hard link,
+  symlink, and `ditto --hfsCompression`.
+- `../research/experiments/EX-20-sr-018-name-case-fixture/README.md`:
+  research log validating SR-018 row enumeration: Rust paths from
+  `FsRecordDump.records` match mounted POSIX byte-for-byte on both
+  case-insensitive and case-sensitive APFS volumes; volume
+  case/normalization flags propagate correctly. Lookup-by-name still
+  unclaimed.
+- `../research/experiments/EX-21-fallback-path-skeleton/README.md`:
+  research log proving that the POSIX-traversal fallback emits the same
+  `NamespaceEntry`/`DirectoryAggregate` shape as Rust raw mode on the
+  proof fixture. Implementation lives in
+  `src/apfs_fastindex/fallback_traversal.py`.
 
 ## Open Native Slice (Gate A)
 
@@ -61,17 +76,33 @@ With `EX-10`–`EX-18` complete, the Rust crate now decodes
 cursor + SR-016 fail-closed gates, and is field-level identical to the
 Python parser on the proof fixture.
 
-Remaining work before the Rust MWP can emit `NamespaceEntry`:
+All four MWP gates have landed:
 
-1. EX-19: SR-017 logical-size precedence fixture (ordinary, sparse, clone,
-   hard link, symlink, compressed) — pins the rule for non-zero
-   `logical_size`.
-2. EX-20: SR-018 name/case fixture — APFS hash, normalization,
-   case-folding, collision; row enumeration may emit stored UTF-8 names
-   verbatim before this lands, but lookup-by-name semantics must wait.
-3. Rust MWP: wire `NamespaceEntry` and `DirectoryAggregate` emission with
-   the SR-009 unique-inode aggregate policy, gated on EX-19 + EX-20
-   passing.
+1. EX-18: Rust body-field dump field-level parity with Python EX-13/EX-16
+   (53/53 records, 0 divergent fields).
+2. EX-19: SR-017 logical-size precedence (5/5 inodes match `st_size`
+   across ordinary, sparse, clone, hard link, symlink, compressed).
+3. EX-20: SR-018 row enumeration (paths match POSIX byte-for-byte on
+   both CI and CS volumes).
+4. Rust MWP promote: `NamespaceEntry` + `DirectoryAggregate` emission
+   with the SR-009 unique-inode aggregate policy. The smoke test at
+   `src/apfs_fastindex/rust_mwp_smoke.py` rebuilds the proof fixture,
+   runs the Rust scanner, deserializes `parser_output` into the Python
+   `ParserOutput` model, and asserts `compare_parser_output_to_oracle`
+   matches plus that `build_directory_aggregates` rebuilt from Rust's
+   entries equals Rust's aggregates. First-run verdict: matched.
+   The Rust CLI `--summary` mode prints the one-line correctness_claim
+   plus the `not_claimed` register.
+
+R1 (Narrow Rust MWP) is complete. EX-21 also lands the fallback-path
+skeleton (`src/apfs_fastindex/fallback_traversal.py`) that emits the
+same `NamespaceEntry` + `DirectoryAggregate` shape via POSIX traversal
+when raw mode is rejected. The skeleton today is `os.walk` + `os.lstat`
++ `os.readlink`; a future pass can swap in `getattrlistbulk` for
+performance without changing the contract.
+
+Gate 2+ (live volumes, encryption, boot-root, incremental cache)
+requires fresh oracles and is out of scope until separately approved.
 
 The earlier body-decoding slice has now landed; the steps below are
 preserved for traceability.

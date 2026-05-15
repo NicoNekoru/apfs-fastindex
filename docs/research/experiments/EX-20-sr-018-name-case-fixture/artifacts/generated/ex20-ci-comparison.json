@@ -1,0 +1,10 @@
+{
+  "case_insensitive_flag": true,
+  "extra_in_rust": [],
+  "hex_mismatches": [],
+  "matched": true,
+  "missing_in_rust": [],
+  "mounted_count": 4,
+  "normalization_insensitive_flag": false,
+  "rust_count": 4
+}

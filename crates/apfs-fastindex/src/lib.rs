@@ -13,6 +13,7 @@ mod btree;
 mod container;
 mod fs_record_body;
 mod fs_records;
+mod namespace;
 mod object;
 mod omap;
 mod volume;
@@ -423,21 +424,58 @@ pub fn checkpoint_scan_source<P: AsRef<Path>>(
         ]);
     }
 
+    // Build the v1 namespace + per-directory aggregate output from the
+    // first supported volume's FS-record dump. EX-18 / EX-19 / EX-20 have
+    // validated the body decoder, SR-017 logical-size precedence, and
+    // SR-018 stored-name preservation on the proof fixture; gating
+    // entry emission on `selected_checkpoint` + the volume's
+    // `fs_record_dump` keeps the emission off when any earlier
+    // fail-closed gate trips.
+    let (entries, aggregates) = match selected
+        .as_ref()
+        .and_then(|sel| sel.volumes.first())
+        .and_then(|vol| vol.fs_record_dump.as_ref())
+    {
+        Some(dump) => namespace::build_namespace(dump),
+        None => (Vec::new(), Vec::new()),
+    };
+    let namespace_emitted = !entries.is_empty();
+
     let parser_output = ParserOutput {
         source: source.descriptor.clone(),
         scan_state: report.to_scan_state(validation_gaps.clone()),
         backend_name: "rust-checkpoint-scan".to_string(),
-        entries: Vec::new(),
-        aggregates: Vec::new(),
+        entries,
+        aggregates,
     };
 
-    let correctness_claim = if selected.is_some() {
-        "Rust path validates the source gate, candidate scan, container superblock, checkpoint map, container OMAP, decoded volume superblocks, and a read-only FS-tree record-family dump"
+    let correctness_claim = if namespace_emitted {
+        "Rust path emits one APFS volume's NamespaceEntry + DirectoryAggregate rows under SR-017 logical-size precedence and SR-018 stored-name preservation, gated on EX-18 body-field parity, EX-19 size precedence, and EX-20 name preservation"
+            .to_string()
+    } else if selected.is_some() {
+        "Rust path validates the source gate, candidate scan, container superblock, checkpoint map, container OMAP, decoded volume superblocks, and a read-only FS-tree record-body dump (no namespace rows)"
             .to_string()
     } else {
         "Rust path validates the source gate and preliminary checkpoint descriptor scan only"
             .to_string()
     };
+
+    let mut not_claimed = vec![
+        "live mounted raw-scan correctness".to_string(),
+        "physical/shared/exclusive accounting".to_string(),
+        "incremental cache reuse".to_string(),
+        "encryption decryption or keybag handling".to_string(),
+        "snapshot, sealed-volume, or volume-group merged semantics".to_string(),
+        "APFS lookup-by-name (hash + normalization + case fold)".to_string(),
+        "boot-root or Finder-visible merged namespace".to_string(),
+    ];
+    if !namespace_emitted {
+        not_claimed.insert(
+            0,
+            "namespace entry emission and oracle-validated logical-size output from Rust"
+                .to_string(),
+        );
+    }
 
     Ok(CheckpointScanOutput {
         parser_output,
@@ -445,17 +483,7 @@ pub fn checkpoint_scan_source<P: AsRef<Path>>(
         skipped_descriptors: report.skipped_descriptors,
         selected_checkpoint: selected,
         correctness_claim,
-        not_claimed: vec![
-            "namespace entry emission and oracle-validated logical-size output from Rust"
-                .to_string(),
-            "FS-record body decoding (DIR_REC, INODE, DSTREAM, XATTR, SIBLING_*) in Rust"
-                .to_string(),
-            "live mounted raw-scan correctness".to_string(),
-            "physical/shared/exclusive accounting".to_string(),
-            "incremental cache reuse".to_string(),
-            "encryption decryption or keybag handling".to_string(),
-            "snapshot, sealed-volume, or volume-group merged semantics".to_string(),
-        ],
+        not_claimed,
     })
 }
 

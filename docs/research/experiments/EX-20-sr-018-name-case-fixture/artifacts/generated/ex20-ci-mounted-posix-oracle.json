@@ -1,0 +1,31 @@
+{
+  "entries": [
+    {
+      "inode": 2,
+      "path": ".",
+      "path_utf8_hex": "2e",
+      "type": "dir"
+    },
+    {
+      "inode": 17,
+      "path": "CaseName.txt",
+      "path_utf8_hex": "436173654e616d652e747874",
+      "st_size": 14,
+      "type": "file"
+    },
+    {
+      "inode": 18,
+      "path": "caf\u00e9.txt",
+      "path_utf8_hex": "636166c3a92e747874",
+      "st_size": 9,
+      "type": "file"
+    },
+    {
+      "inode": 16,
+      "path": "plain.txt",
+      "path_utf8_hex": "706c61696e2e747874",
+      "st_size": 20,
+      "type": "file"
+    }
+  ]
+}

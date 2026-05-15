@@ -204,15 +204,24 @@ Long-range product roadmap:
 4. Execute the logical-size precedence gate from `SR-017`: ordinary, sparse,
    cloned, hard-linked, symlink, and compressed files with public `st_size` and
    every raw candidate size source captured in the same selected state.
+   **Closed by EX-19** for the proof-fixture shape (5/5 unique inodes
+   match; compressed case picks `inode.uncompressed_size` per SR-017
+   step 4 since the decmpfs header carries placeholder data).
 5. Add the name/case fixture from `SR-018` before lookup-by-name is implemented:
    APFS hash, normalization, case-folding, and collision checks. Row enumeration
    can proceed earlier only if stored directory-key names are emitted verbatim.
+   **Closed by EX-20** for row enumeration: CI and CS volumes both have
+   Rust paths byte-for-byte matching POSIX traversal. Lookup-by-name
+   semantics remain explicitly unclaimed.
 6. Implement Rust FS-record body decoding only after gates 1-3 pass; enable
    logical-size rows after gate 4; enable lookup/search semantics after gate 5.
-   **Body decoding closed by EX-18** (Rust `FsRecordDump.records`
-   field-level parity with Python EX-13/EX-16 on the proof fixture, 53/53
-   records, 0 divergent fields). Logical-size and lookup gates still
-   pending.
+   **Body decoding closed by EX-18**, **logical-size rows closed by EX-19**,
+   **row enumeration closed by EX-20**. **Rust MWP promoted** — the crate
+   now emits `NamespaceEntry` and `DirectoryAggregate` rows under SR-017
+   precedence and SR-018 name preservation, with a CLI `--summary` mode
+   that prints the one-line correctness_claim and the `not_claimed`
+   register. Lookup-by-name (APFS hash + normalization + case fold) is
+   still NOT claimed.
 
 ## Current Experiment Tracks
 
@@ -276,6 +285,39 @@ Long-range product roadmap:
   candidates (`highest_xid=20`) but returned no `selected_checkpoint` after
   `APFS object validation failed: checksum mismatch at block 1031`. EX-15
   closed this blocker.
+- `EX-21` fallback path skeleton; landed a POSIX-traversal-backed
+  fallback in `src/apfs_fastindex/fallback_traversal.py` that emits the
+  same `NamespaceEntry` + `DirectoryAggregate` shape as the Rust raw
+  scanner. Probe: build the EX-13 proof fixture, run the fallback
+  against the mounted image, detach + rescan with Rust, diff. First-run
+  verdict `validated_fallback_skeleton`: 7/7 entries match (paths,
+  entry_kinds, logical sizes, symlink target), 3/3 aggregates match,
+  zero `file_id` divergence on this fresh fixture (POSIX inode and
+  APFS virtual OID happen to coincide; v1 contract permits divergence).
+  Gate-2 source classes (live boot, encryption, snapshot-assisted,
+  boot-root) remain explicitly out of scope.
+- `EX-20` SR-018 name/case fixture; built one `APFS` and one
+  `Case-sensitive APFS` image, ran ASCII case duplicates + NFC vs NFD
+  Unicode collisions, and asserted Rust `FsRecordDump.records` -based
+  path reconstruction matches mounted POSIX traversal byte-for-byte on
+  both volumes. Verdict `validated_sr_018_name_preservation`: CI shows
+  `case_insensitive=true, normalization_insensitive=false` (4 entries,
+  rejects both case + NFD duplicates); CS shows
+  `case_insensitive=false, normalization_insensitive=true` (5 entries,
+  allows case duplicate but still rejects NFD duplicate). Stored UTF-8
+  bytes preserved on Rust side with no normalization or case folding.
+  Lookup-by-name still NOT claimed by Rust.
+- `EX-19` SR-017 logical-size precedence; built a same-run fixture covering
+  ordinary, sparse, clone, hard link, symlink, and `ditto --hfsCompression`
+  cases. Captured public `st_size`, inode `internal_flags`,
+  `uncompressed_size`, `j_dstream_size`, `j_dstream_alloced_size`,
+  `INO_EXT_TYPE_SPARSE_BYTES`, the `com.apple.decmpfs` header, and the
+  `com.apple.fs.symlink` payload from the patched Rust scanner output.
+  Verdict `validated_sr_017_precedence` on first run: all 5 unique inodes
+  match `st_size` under SR-017 with zero mismatches, including the
+  compressed case (`INODE_HAS_UNCOMPRESSED_SIZE` + `uncompressed_size`
+  wins over the decmpfs header on this fixture). Hard-link case is
+  covered by per-inode rule sharing.
 - `EX-18` Rust body-field dump; rebuilt the EX-13 proof fixture, ran the
   patched Rust scanner with `FsRecordDump.records` emission, and diffed
   against the Python EX-13 decoder + EX-16 SR-015 xfield replay. Verdict

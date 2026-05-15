@@ -1,0 +1,78 @@
+{
+  "aggregates": [
+    {
+      "contributing_file_ids": [
+        20,
+        23,
+        24
+      ],
+      "path": ".",
+      "unique_inode_logical_total": 1048593
+    },
+    {
+      "contributing_file_ids": [
+        20,
+        23,
+        24
+      ],
+      "path": "dst",
+      "unique_inode_logical_total": 1048593
+    },
+    {
+      "contributing_file_ids": [],
+      "path": "src",
+      "unique_inode_logical_total": 0
+    }
+  ],
+  "entries": [
+    {
+      "entry_kind": "dir",
+      "file_id": 17,
+      "logical_size": 0,
+      "path": "dst",
+      "symlink_target": null
+    },
+    {
+      "entry_kind": "file",
+      "file_id": 24,
+      "logical_size": 6,
+      "path": "dst/clone.txt",
+      "symlink_target": null
+    },
+    {
+      "entry_kind": "file",
+      "file_id": 20,
+      "logical_size": 11,
+      "path": "dst/hard.txt",
+      "symlink_target": null
+    },
+    {
+      "entry_kind": "symlink",
+      "file_id": 26,
+      "logical_size": 9,
+      "path": "dst/link.txt",
+      "symlink_target": "moved.txt"
+    },
+    {
+      "entry_kind": "file",
+      "file_id": 20,
+      "logical_size": 11,
+      "path": "dst/moved.txt",
+      "symlink_target": null
+    },
+    {
+      "entry_kind": "file",
+      "file_id": 23,
+      "logical_size": 1048576,
+      "path": "dst/sparse.bin",
+      "symlink_target": null
+    },
+    {
+      "entry_kind": "dir",
+      "file_id": 16,
+      "logical_size": 0,
+      "path": "src",
+      "symlink_target": null
+    }
+  ]
+}

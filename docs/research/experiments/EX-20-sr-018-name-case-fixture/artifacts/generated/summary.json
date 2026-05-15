@@ -1,0 +1,21 @@
+{
+  "ci": {
+    "case_insensitive_flag": true,
+    "hex_mismatches": 0,
+    "matched": true,
+    "mounted_count": 4,
+    "normalization_insensitive_flag": false,
+    "rust_count": 4
+  },
+  "cs": {
+    "case_insensitive_flag": false,
+    "hex_mismatches": 0,
+    "matched": true,
+    "mounted_count": 5,
+    "normalization_insensitive_flag": true,
+    "rust_count": 5
+  },
+  "status": "executed",
+  "verdict": "validated_sr_018_name_preservation",
+  "verdict_detail": "Rust paths match POSIX paths byte-for-byte on both CI and CS volumes; volume case_insensitive/normalization_insensitive flags propagate as expected."
+}

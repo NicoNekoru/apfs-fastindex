@@ -1,0 +1,21 @@
+{
+  "aggregates": {
+    "extra_in_rust": [],
+    "matched": true,
+    "mismatches": [],
+    "missing_in_rust": []
+  },
+  "entries": {
+    "extra_in_rust": [],
+    "fallback_count": 7,
+    "file_id_divergence": [],
+    "file_id_divergence_count": 0,
+    "matched": true,
+    "mismatches": [],
+    "missing_in_rust": [],
+    "rust_count": 7
+  },
+  "status": "executed",
+  "verdict": "validated_fallback_skeleton",
+  "verdict_detail": "Fallback emitted 7 entries and 3 aggregates; Rust raw output matches shape contract exactly."
+}

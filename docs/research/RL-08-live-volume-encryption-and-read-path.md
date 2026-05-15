@@ -3,7 +3,7 @@
 Status: Open
 Priority: P0
 Owner: TBD
-Last Updated: 2026-04-26
+Last Updated: 2026-05-14 (EX-21)
 
 ## Core Question
 - Under what deployment conditions can we actually read APFS metadata raw and reliably?
@@ -91,6 +91,14 @@ Last Updated: 2026-04-26
 - [2026-04-26] `SR-012` and `EX-08` were tightened into explicit gate semantics:
   checkpoint-scanner-safe, checkpoint-context-safe, OMAP-root-safe,
   namespace-logical-size-safe, and product-supported are separate verdicts.
+- [2026-05-14] Observation: `EX-21` lands the spec's fall-back side in
+  `src/apfs_fastindex/fallback_traversal.py`. A POSIX traversal walks any
+  mounted directory and emits the same `NamespaceEntry` +
+  `DirectoryAggregate` shape as the Rust raw scanner. The probe verifies
+  shape parity on the proof fixture (7/7 entries, 3/3 aggregates). Gate-2
+  source classes (live boot, encryption, snapshot-assisted, boot-root
+  merged) remain out of scope; the fallback skeleton today covers only
+  the locally-mounted-directory cell.
 
 ## Interim Decisions
 - Deployment constraints are first-class product constraints, not implementation
