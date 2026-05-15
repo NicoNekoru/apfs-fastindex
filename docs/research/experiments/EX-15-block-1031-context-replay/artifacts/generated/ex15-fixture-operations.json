@@ -1,0 +1,53 @@
+{
+  "image_path": "/tmp/apfsfi-ex15-le64vqp2/EX15CI.dmg",
+  "operations": [
+    {
+      "step": "create src, dst, names, and sparse directories"
+    },
+    {
+      "step": "create src/base.txt"
+    },
+    {
+      "step": "rename src/base.txt -> src/renamed.txt"
+    },
+    {
+      "step": "move src/renamed.txt -> dst/moved.txt"
+    },
+    {
+      "step": "create hard link dst/hard.txt"
+    },
+    {
+      "paths": [
+        "sparse/sparse-1m.bin",
+        "sparse/sparse-unaligned-name.bin"
+      ],
+      "step": "create sparse variants"
+    },
+    {
+      "returncode": 0,
+      "stderr": "",
+      "step": "clone dst/moved.txt -> dst/clone.txt"
+    },
+    {
+      "step": "append to dst/moved.txt"
+    },
+    {
+      "step": "create symlink dst/link.txt -> moved.txt"
+    },
+    {
+      "step": "create names/n1"
+    },
+    {
+      "step": "create names/name08ch"
+    },
+    {
+      "step": "create names/name09chr"
+    },
+    {
+      "step": "create names/name15charsxxx"
+    },
+    {
+      "step": "create names/name17charsxxxxx"
+    }
+  ]
+}

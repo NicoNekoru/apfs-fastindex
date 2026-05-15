@@ -1,0 +1,982 @@
+{
+  "block0": {
+    "block_count": 40950,
+    "block_size": 4096,
+    "features_hex": "0x0",
+    "header": {
+      "checksum_computed_hex": "0xf47bc8555170a566",
+      "checksum_matches": true,
+      "checksum_stored_hex": "0xf47bc8555170a566",
+      "object_subtype_hex": "0x00000000",
+      "object_type": 1,
+      "object_type_flags_hex": "0x80000000",
+      "object_type_raw_hex": "0x80000001",
+      "oid": 1,
+      "paddr": 0,
+      "xid": 20
+    },
+    "incompat_features_hex": "0x2",
+    "max_file_systems": 1,
+    "next_xid": 21,
+    "nx_magic_hex": "0x4253584e",
+    "omap_oid": 506,
+    "reaper_oid": 1025,
+    "spaceman_oid": 1024,
+    "xp_data_base_raw_hex": "0x9",
+    "xp_data_blocks": 312,
+    "xp_data_index": 74,
+    "xp_data_len": 4,
+    "xp_data_next": 78,
+    "xp_desc_base_raw_hex": "0x1",
+    "xp_desc_blocks": 8,
+    "xp_desc_index": 6,
+    "xp_desc_len": 2,
+    "xp_desc_next": 0
+  },
+  "block_size": 4096,
+  "descriptor": {
+    "candidates": [
+      {
+        "descriptor_index": 1,
+        "fields": {
+          "block_count": 40950,
+          "block_size": 4096,
+          "features_hex": "0x0",
+          "header": {
+            "checksum_computed_hex": "0xf47a77ed5171f62e",
+            "checksum_matches": true,
+            "checksum_stored_hex": "0xf47a77ed5171f62e",
+            "object_subtype_hex": "0x00000000",
+            "object_type": 1,
+            "object_type_flags_hex": "0x80000000",
+            "object_type_raw_hex": "0x80000001",
+            "oid": 1,
+            "paddr": 2,
+            "xid": 17
+          },
+          "incompat_features_hex": "0x2",
+          "max_file_systems": 1,
+          "next_xid": 18,
+          "nx_magic_hex": "0x4253584e",
+          "omap_oid": 486,
+          "reaper_oid": 1025,
+          "spaceman_oid": 1024,
+          "xp_data_base_raw_hex": "0x9",
+          "xp_data_blocks": 312,
+          "xp_data_index": 62,
+          "xp_data_len": 4,
+          "xp_data_next": 66,
+          "xp_desc_base_raw_hex": "0x1",
+          "xp_desc_blocks": 8,
+          "xp_desc_index": 0,
+          "xp_desc_len": 2,
+          "xp_desc_next": 2
+        },
+        "header": {
+          "checksum_computed_hex": "0xf47a77ed5171f62e",
+          "checksum_matches": true,
+          "checksum_stored_hex": "0xf47a77ed5171f62e",
+          "object_subtype_hex": "0x00000000",
+          "object_type": 1,
+          "object_type_flags_hex": "0x80000000",
+          "object_type_raw_hex": "0x80000001",
+          "oid": 1,
+          "paddr": 2,
+          "xid": 17
+        },
+        "paddr": 2
+      },
+      {
+        "descriptor_index": 3,
+        "fields": {
+          "block_count": 40950,
+          "block_size": 4096,
+          "features_hex": "0x0",
+          "header": {
+            "checksum_computed_hex": "0xf47b0921517164d1",
+            "checksum_matches": true,
+            "checksum_stored_hex": "0xf47b0921517164d1",
+            "object_subtype_hex": "0x00000000",
+            "object_type": 1,
+            "object_type_flags_hex": "0x80000000",
+            "object_type_raw_hex": "0x80000001",
+            "oid": 1,
+            "paddr": 4,
+            "xid": 18
+          },
+          "incompat_features_hex": "0x2",
+          "max_file_systems": 1,
+          "next_xid": 19,
+          "nx_magic_hex": "0x4253584e",
+          "omap_oid": 497,
+          "reaper_oid": 1025,
+          "spaceman_oid": 1024,
+          "xp_data_base_raw_hex": "0x9",
+          "xp_data_blocks": 312,
+          "xp_data_index": 66,
+          "xp_data_len": 4,
+          "xp_data_next": 70,
+          "xp_desc_base_raw_hex": "0x1",
+          "xp_desc_blocks": 8,
+          "xp_desc_index": 2,
+          "xp_desc_len": 2,
+          "xp_desc_next": 4
+        },
+        "header": {
+          "checksum_computed_hex": "0xf47b0921517164d1",
+          "checksum_matches": true,
+          "checksum_stored_hex": "0xf47b0921517164d1",
+          "object_subtype_hex": "0x00000000",
+          "object_type": 1,
+          "object_type_flags_hex": "0x80000000",
+          "object_type_raw_hex": "0x80000001",
+          "oid": 1,
+          "paddr": 4,
+          "xid": 18
+        },
+        "paddr": 4
+      },
+      {
+        "descriptor_index": 5,
+        "fields": {
+          "block_count": 40950,
+          "block_size": 4096,
+          "features_hex": "0x0",
+          "header": {
+            "checksum_computed_hex": "0xf47b7dff5170efd2",
+            "checksum_matches": true,
+            "checksum_stored_hex": "0xf47b7dff5170efd2",
+            "object_subtype_hex": "0x00000000",
+            "object_type": 1,
+            "object_type_flags_hex": "0x80000000",
+            "object_type_raw_hex": "0x80000001",
+            "oid": 1,
+            "paddr": 6,
+            "xid": 19
+          },
+          "incompat_features_hex": "0x2",
+          "max_file_systems": 1,
+          "next_xid": 20,
+          "nx_magic_hex": "0x4253584e",
+          "omap_oid": 503,
+          "reaper_oid": 1025,
+          "spaceman_oid": 1024,
+          "xp_data_base_raw_hex": "0x9",
+          "xp_data_blocks": 312,
+          "xp_data_index": 70,
+          "xp_data_len": 4,
+          "xp_data_next": 74,
+          "xp_desc_base_raw_hex": "0x1",
+          "xp_desc_blocks": 8,
+          "xp_desc_index": 4,
+          "xp_desc_len": 2,
+          "xp_desc_next": 6
+        },
+        "header": {
+          "checksum_computed_hex": "0xf47b7dff5170efd2",
+          "checksum_matches": true,
+          "checksum_stored_hex": "0xf47b7dff5170efd2",
+          "object_subtype_hex": "0x00000000",
+          "object_type": 1,
+          "object_type_flags_hex": "0x80000000",
+          "object_type_raw_hex": "0x80000001",
+          "oid": 1,
+          "paddr": 6,
+          "xid": 19
+        },
+        "paddr": 6
+      },
+      {
+        "descriptor_index": 7,
+        "fields": {
+          "block_count": 40950,
+          "block_size": 4096,
+          "features_hex": "0x0",
+          "header": {
+            "checksum_computed_hex": "0xf47bbf375170ae87",
+            "checksum_matches": true,
+            "checksum_stored_hex": "0xf47bbf375170ae87",
+            "object_subtype_hex": "0x00000000",
+            "object_type": 1,
+            "object_type_flags_hex": "0x80000000",
+            "object_type_raw_hex": "0x80000001",
+            "oid": 1,
+            "paddr": 8,
+            "xid": 20
+          },
+          "incompat_features_hex": "0x2",
+          "max_file_systems": 1,
+          "next_xid": 21,
+          "nx_magic_hex": "0x4253584e",
+          "omap_oid": 506,
+          "reaper_oid": 1025,
+          "spaceman_oid": 1024,
+          "xp_data_base_raw_hex": "0x9",
+          "xp_data_blocks": 312,
+          "xp_data_index": 74,
+          "xp_data_len": 4,
+          "xp_data_next": 78,
+          "xp_desc_base_raw_hex": "0x1",
+          "xp_desc_blocks": 8,
+          "xp_desc_index": 6,
+          "xp_desc_len": 2,
+          "xp_desc_next": 0
+        },
+        "header": {
+          "checksum_computed_hex": "0xf47bbf375170ae87",
+          "checksum_matches": true,
+          "checksum_stored_hex": "0xf47bbf375170ae87",
+          "object_subtype_hex": "0x00000000",
+          "object_type": 1,
+          "object_type_flags_hex": "0x80000000",
+          "object_type_raw_hex": "0x80000001",
+          "oid": 1,
+          "paddr": 8,
+          "xid": 20
+        },
+        "paddr": 8
+      }
+    ],
+    "descriptor_base": 1,
+    "descriptor_blocks": 8,
+    "skipped": []
+  },
+  "replays": [
+    {
+      "failure_blocks": [],
+      "omap_leaf_sample": [
+        {
+          "flags_hex": "0x00000000",
+          "index": 0,
+          "node_paddr": 507,
+          "oid": 1026,
+          "paddr": 505,
+          "size": 4096,
+          "xid": 20
+        }
+      ],
+      "omap_phys": {
+        "flags": 1,
+        "most_recent_snap": 0,
+        "paddr": 506,
+        "snapshot_count": 0,
+        "snapshot_tree_oid": 0,
+        "snapshot_tree_type_raw_hex": "0x40000002",
+        "tree_oid": 507,
+        "tree_type_raw_hex": "0x40000002"
+      },
+      "omap_walk_leaf_count": 1,
+      "omap_walk_visited_nodes": 1,
+      "paddr": 8,
+      "stage_failed": null,
+      "volumes": [
+        {
+          "fs_oid": 1026,
+          "fs_root_lookup": {
+            "flags_hex": "0x00000000",
+            "index": 0,
+            "node_paddr": 501,
+            "oid": 1028,
+            "paddr": 495,
+            "size": 4096,
+            "xid": 18
+          },
+          "fs_root_validation": {
+            "errors": [],
+            "header": {
+              "checksum_computed_hex": "0xe22307be4a281c23",
+              "checksum_matches": true,
+              "checksum_stored_hex": "0xe22307be4a281c23",
+              "object_subtype_hex": "0x0000000e",
+              "object_type": 2,
+              "object_type_flags_hex": "0x00000000",
+              "object_type_raw_hex": "0x00000002",
+              "oid": 1028,
+              "paddr": 495,
+              "xid": 18
+            },
+            "ok": true
+          },
+          "header_validation": {
+            "errors": [],
+            "header": {
+              "checksum_computed_hex": "0xdecda405dcabd722",
+              "checksum_matches": true,
+              "checksum_stored_hex": "0xdecda405dcabd722",
+              "object_subtype_hex": "0x00000000",
+              "object_type": 13,
+              "object_type_flags_hex": "0x00000000",
+              "object_type_raw_hex": "0x0000000d",
+              "oid": 1026,
+              "paddr": 505,
+              "xid": 20
+            },
+            "ok": true
+          },
+          "omap_entry": {
+            "flags_hex": "0x00000000",
+            "index": 0,
+            "node_paddr": 507,
+            "oid": 1026,
+            "paddr": 505,
+            "size": 4096,
+            "xid": 20
+          },
+          "stage_failed": null,
+          "vol_omap_leaf_count": 3,
+          "vol_omap_phys": {
+            "flags": 0,
+            "most_recent_snap": 0,
+            "paddr": 500,
+            "snapshot_count": 0,
+            "snapshot_tree_oid": 0,
+            "snapshot_tree_type_raw_hex": "0x40000002",
+            "tree_oid": 501,
+            "tree_type_raw_hex": "0x40000002"
+          },
+          "vol_omap_sample": [
+            {
+              "flags_hex": "0x00000000",
+              "index": 0,
+              "node_paddr": 501,
+              "oid": 1028,
+              "paddr": 495,
+              "size": 4096,
+              "xid": 18
+            },
+            {
+              "flags_hex": "0x00000000",
+              "index": 1,
+              "node_paddr": 501,
+              "oid": 1030,
+              "paddr": 491,
+              "size": 4096,
+              "xid": 18
+            },
+            {
+              "flags_hex": "0x00000000",
+              "index": 2,
+              "node_paddr": 501,
+              "oid": 1031,
+              "paddr": 499,
+              "size": 4096,
+              "xid": 19
+            }
+          ],
+          "vol_omap_visited_nodes": 1,
+          "volume_fields": {
+            "extentref_tree_oid": 489,
+            "extentref_tree_type_raw_hex": "0x40000002",
+            "features_raw": 2,
+            "fs_flags_raw": 1,
+            "fs_index": 0,
+            "incompat_features_raw": 1,
+            "magic_hex": "0x42535041",
+            "omap_oid": 500,
+            "paddr": 505,
+            "ro_compat_features_raw": 0,
+            "root_tree_oid": 1028,
+            "root_tree_type_raw_hex": "0x00000002",
+            "snap_meta_tree_oid": 351,
+            "snap_meta_tree_type_raw_hex": "0x40000002"
+          }
+        }
+      ],
+      "walk_notes": [
+        {
+          "paddr": 7,
+          "stage": "ring_checkpoint_map",
+          "validation": {
+            "errors": [],
+            "header": {
+              "checksum_computed_hex": "0x813df2303ec1bc1a",
+              "checksum_matches": true,
+              "checksum_stored_hex": "0x813df2303ec1bc1a",
+              "object_subtype_hex": "0x00000000",
+              "object_type": 12,
+              "object_type_flags_hex": "0x40000000",
+              "object_type_raw_hex": "0x4000000c",
+              "oid": 7,
+              "paddr": 7,
+              "xid": 20
+            },
+            "ok": true
+          }
+        },
+        {
+          "paddr": 8,
+          "stage": "ring_trailing_nxsb",
+          "validation": {
+            "errors": [],
+            "header": {
+              "checksum_computed_hex": "0xf47bbf375170ae87",
+              "checksum_matches": true,
+              "checksum_stored_hex": "0xf47bbf375170ae87",
+              "object_subtype_hex": "0x00000000",
+              "object_type": 1,
+              "object_type_flags_hex": "0x80000000",
+              "object_type_raw_hex": "0x80000001",
+              "oid": 1,
+              "paddr": 8,
+              "xid": 20
+            },
+            "ok": true
+          }
+        }
+      ],
+      "xid": 20
+    },
+    {
+      "failure_blocks": [],
+      "omap_leaf_sample": [
+        {
+          "flags_hex": "0x00000000",
+          "index": 0,
+          "node_paddr": 504,
+          "oid": 1026,
+          "paddr": 502,
+          "size": 4096,
+          "xid": 19
+        }
+      ],
+      "omap_phys": {
+        "flags": 1,
+        "most_recent_snap": 0,
+        "paddr": 503,
+        "snapshot_count": 0,
+        "snapshot_tree_oid": 0,
+        "snapshot_tree_type_raw_hex": "0x40000002",
+        "tree_oid": 504,
+        "tree_type_raw_hex": "0x40000002"
+      },
+      "omap_walk_leaf_count": 1,
+      "omap_walk_visited_nodes": 1,
+      "paddr": 6,
+      "stage_failed": null,
+      "volumes": [
+        {
+          "fs_oid": 1026,
+          "fs_root_lookup": {
+            "flags_hex": "0x00000000",
+            "index": 0,
+            "node_paddr": 501,
+            "oid": 1028,
+            "paddr": 495,
+            "size": 4096,
+            "xid": 18
+          },
+          "fs_root_validation": {
+            "errors": [],
+            "header": {
+              "checksum_computed_hex": "0xe22307be4a281c23",
+              "checksum_matches": true,
+              "checksum_stored_hex": "0xe22307be4a281c23",
+              "object_subtype_hex": "0x0000000e",
+              "object_type": 2,
+              "object_type_flags_hex": "0x00000000",
+              "object_type_raw_hex": "0x00000002",
+              "oid": 1028,
+              "paddr": 495,
+              "xid": 18
+            },
+            "ok": true
+          },
+          "header_validation": {
+            "errors": [],
+            "header": {
+              "checksum_computed_hex": "0x07664b9354460283",
+              "checksum_matches": true,
+              "checksum_stored_hex": "0x07664b9354460283",
+              "object_subtype_hex": "0x00000000",
+              "object_type": 13,
+              "object_type_flags_hex": "0x00000000",
+              "object_type_raw_hex": "0x0000000d",
+              "oid": 1026,
+              "paddr": 502,
+              "xid": 19
+            },
+            "ok": true
+          },
+          "omap_entry": {
+            "flags_hex": "0x00000000",
+            "index": 0,
+            "node_paddr": 504,
+            "oid": 1026,
+            "paddr": 502,
+            "size": 4096,
+            "xid": 19
+          },
+          "stage_failed": null,
+          "vol_omap_leaf_count": 3,
+          "vol_omap_phys": {
+            "flags": 0,
+            "most_recent_snap": 0,
+            "paddr": 500,
+            "snapshot_count": 0,
+            "snapshot_tree_oid": 0,
+            "snapshot_tree_type_raw_hex": "0x40000002",
+            "tree_oid": 501,
+            "tree_type_raw_hex": "0x40000002"
+          },
+          "vol_omap_sample": [
+            {
+              "flags_hex": "0x00000000",
+              "index": 0,
+              "node_paddr": 501,
+              "oid": 1028,
+              "paddr": 495,
+              "size": 4096,
+              "xid": 18
+            },
+            {
+              "flags_hex": "0x00000000",
+              "index": 1,
+              "node_paddr": 501,
+              "oid": 1030,
+              "paddr": 491,
+              "size": 4096,
+              "xid": 18
+            },
+            {
+              "flags_hex": "0x00000000",
+              "index": 2,
+              "node_paddr": 501,
+              "oid": 1031,
+              "paddr": 499,
+              "size": 4096,
+              "xid": 19
+            }
+          ],
+          "vol_omap_visited_nodes": 1,
+          "volume_fields": {
+            "extentref_tree_oid": 489,
+            "extentref_tree_type_raw_hex": "0x40000002",
+            "features_raw": 2,
+            "fs_flags_raw": 1,
+            "fs_index": 0,
+            "incompat_features_raw": 1,
+            "magic_hex": "0x42535041",
+            "omap_oid": 500,
+            "paddr": 502,
+            "ro_compat_features_raw": 0,
+            "root_tree_oid": 1028,
+            "root_tree_type_raw_hex": "0x00000002",
+            "snap_meta_tree_oid": 351,
+            "snap_meta_tree_type_raw_hex": "0x40000002"
+          }
+        }
+      ],
+      "walk_notes": [
+        {
+          "paddr": 5,
+          "stage": "ring_checkpoint_map",
+          "validation": {
+            "errors": [],
+            "header": {
+              "checksum_computed_hex": "0x813da8483ec20615",
+              "checksum_matches": true,
+              "checksum_stored_hex": "0x813da8483ec20615",
+              "object_subtype_hex": "0x00000000",
+              "object_type": 12,
+              "object_type_flags_hex": "0x40000000",
+              "object_type_raw_hex": "0x4000000c",
+              "oid": 5,
+              "paddr": 5,
+              "xid": 19
+            },
+            "ok": true
+          }
+        },
+        {
+          "paddr": 6,
+          "stage": "ring_trailing_nxsb",
+          "validation": {
+            "errors": [],
+            "header": {
+              "checksum_computed_hex": "0xf47b7dff5170efd2",
+              "checksum_matches": true,
+              "checksum_stored_hex": "0xf47b7dff5170efd2",
+              "object_subtype_hex": "0x00000000",
+              "object_type": 1,
+              "object_type_flags_hex": "0x80000000",
+              "object_type_raw_hex": "0x80000001",
+              "oid": 1,
+              "paddr": 6,
+              "xid": 19
+            },
+            "ok": true
+          }
+        }
+      ],
+      "xid": 19
+    },
+    {
+      "failure_blocks": [],
+      "omap_leaf_sample": [
+        {
+          "flags_hex": "0x00000000",
+          "index": 0,
+          "node_paddr": 498,
+          "oid": 1026,
+          "paddr": 496,
+          "size": 4096,
+          "xid": 18
+        }
+      ],
+      "omap_phys": {
+        "flags": 1,
+        "most_recent_snap": 0,
+        "paddr": 497,
+        "snapshot_count": 0,
+        "snapshot_tree_oid": 0,
+        "snapshot_tree_type_raw_hex": "0x40000002",
+        "tree_oid": 498,
+        "tree_type_raw_hex": "0x40000002"
+      },
+      "omap_walk_leaf_count": 1,
+      "omap_walk_visited_nodes": 1,
+      "paddr": 4,
+      "stage_failed": null,
+      "volumes": [
+        {
+          "fs_oid": 1026,
+          "fs_root_lookup": {
+            "flags_hex": "0x00000000",
+            "index": 0,
+            "node_paddr": 493,
+            "oid": 1028,
+            "paddr": 495,
+            "size": 4096,
+            "xid": 18
+          },
+          "fs_root_validation": {
+            "errors": [],
+            "header": {
+              "checksum_computed_hex": "0xe22307be4a281c23",
+              "checksum_matches": true,
+              "checksum_stored_hex": "0xe22307be4a281c23",
+              "object_subtype_hex": "0x0000000e",
+              "object_type": 2,
+              "object_type_flags_hex": "0x00000000",
+              "object_type_raw_hex": "0x00000002",
+              "oid": 1028,
+              "paddr": 495,
+              "xid": 18
+            },
+            "ok": true
+          },
+          "header_validation": {
+            "errors": [],
+            "header": {
+              "checksum_computed_hex": "0xc3279c74991f6d03",
+              "checksum_matches": true,
+              "checksum_stored_hex": "0xc3279c74991f6d03",
+              "object_subtype_hex": "0x00000000",
+              "object_type": 13,
+              "object_type_flags_hex": "0x00000000",
+              "object_type_raw_hex": "0x0000000d",
+              "oid": 1026,
+              "paddr": 496,
+              "xid": 18
+            },
+            "ok": true
+          },
+          "omap_entry": {
+            "flags_hex": "0x00000000",
+            "index": 0,
+            "node_paddr": 498,
+            "oid": 1026,
+            "paddr": 496,
+            "size": 4096,
+            "xid": 18
+          },
+          "stage_failed": null,
+          "vol_omap_leaf_count": 3,
+          "vol_omap_phys": {
+            "flags": 0,
+            "most_recent_snap": 0,
+            "paddr": 492,
+            "snapshot_count": 0,
+            "snapshot_tree_oid": 0,
+            "snapshot_tree_type_raw_hex": "0x40000002",
+            "tree_oid": 493,
+            "tree_type_raw_hex": "0x40000002"
+          },
+          "vol_omap_sample": [
+            {
+              "flags_hex": "0x00000000",
+              "index": 0,
+              "node_paddr": 493,
+              "oid": 1028,
+              "paddr": 495,
+              "size": 4096,
+              "xid": 18
+            },
+            {
+              "flags_hex": "0x00000000",
+              "index": 1,
+              "node_paddr": 493,
+              "oid": 1030,
+              "paddr": 491,
+              "size": 4096,
+              "xid": 18
+            },
+            {
+              "flags_hex": "0x00000000",
+              "index": 2,
+              "node_paddr": 493,
+              "oid": 1031,
+              "paddr": 494,
+              "size": 4096,
+              "xid": 18
+            }
+          ],
+          "vol_omap_visited_nodes": 1,
+          "volume_fields": {
+            "extentref_tree_oid": 489,
+            "extentref_tree_type_raw_hex": "0x40000002",
+            "features_raw": 2,
+            "fs_flags_raw": 1,
+            "fs_index": 0,
+            "incompat_features_raw": 1,
+            "magic_hex": "0x42535041",
+            "omap_oid": 492,
+            "paddr": 496,
+            "ro_compat_features_raw": 0,
+            "root_tree_oid": 1028,
+            "root_tree_type_raw_hex": "0x00000002",
+            "snap_meta_tree_oid": 351,
+            "snap_meta_tree_type_raw_hex": "0x40000002"
+          }
+        }
+      ],
+      "walk_notes": [
+        {
+          "paddr": 3,
+          "stage": "ring_checkpoint_map",
+          "validation": {
+            "errors": [],
+            "header": {
+              "checksum_computed_hex": "0x813d5e603ec25010",
+              "checksum_matches": true,
+              "checksum_stored_hex": "0x813d5e603ec25010",
+              "object_subtype_hex": "0x00000000",
+              "object_type": 12,
+              "object_type_flags_hex": "0x40000000",
+              "object_type_raw_hex": "0x4000000c",
+              "oid": 3,
+              "paddr": 3,
+              "xid": 18
+            },
+            "ok": true
+          }
+        },
+        {
+          "paddr": 4,
+          "stage": "ring_trailing_nxsb",
+          "validation": {
+            "errors": [],
+            "header": {
+              "checksum_computed_hex": "0xf47b0921517164d1",
+              "checksum_matches": true,
+              "checksum_stored_hex": "0xf47b0921517164d1",
+              "object_subtype_hex": "0x00000000",
+              "object_type": 1,
+              "object_type_flags_hex": "0x80000000",
+              "object_type_raw_hex": "0x80000001",
+              "oid": 1,
+              "paddr": 4,
+              "xid": 18
+            },
+            "ok": true
+          }
+        }
+      ],
+      "xid": 18
+    },
+    {
+      "failure_blocks": [],
+      "omap_leaf_sample": [
+        {
+          "flags_hex": "0x00000000",
+          "index": 0,
+          "node_paddr": 487,
+          "oid": 1026,
+          "paddr": 485,
+          "size": 4096,
+          "xid": 17
+        }
+      ],
+      "omap_phys": {
+        "flags": 1,
+        "most_recent_snap": 0,
+        "paddr": 486,
+        "snapshot_count": 0,
+        "snapshot_tree_oid": 0,
+        "snapshot_tree_type_raw_hex": "0x40000002",
+        "tree_oid": 487,
+        "tree_type_raw_hex": "0x40000002"
+      },
+      "omap_walk_leaf_count": 1,
+      "omap_walk_visited_nodes": 1,
+      "paddr": 2,
+      "stage_failed": null,
+      "volumes": [
+        {
+          "fs_oid": 1026,
+          "fs_root_lookup": {
+            "flags_hex": "0x00000000",
+            "index": 0,
+            "node_paddr": 482,
+            "oid": 1028,
+            "paddr": 484,
+            "size": 4096,
+            "xid": 17
+          },
+          "fs_root_validation": {
+            "errors": [],
+            "header": {
+              "checksum_computed_hex": "0x99bd041962a51fd1",
+              "checksum_matches": true,
+              "checksum_stored_hex": "0x99bd041962a51fd1",
+              "object_subtype_hex": "0x0000000e",
+              "object_type": 2,
+              "object_type_flags_hex": "0x00000000",
+              "object_type_raw_hex": "0x00000002",
+              "oid": 1028,
+              "paddr": 484,
+              "xid": 17
+            },
+            "ok": true
+          },
+          "header_validation": {
+            "errors": [],
+            "header": {
+              "checksum_computed_hex": "0xdf4383e98feaf594",
+              "checksum_matches": true,
+              "checksum_stored_hex": "0xdf4383e98feaf594",
+              "object_subtype_hex": "0x00000000",
+              "object_type": 13,
+              "object_type_flags_hex": "0x00000000",
+              "object_type_raw_hex": "0x0000000d",
+              "oid": 1026,
+              "paddr": 485,
+              "xid": 17
+            },
+            "ok": true
+          },
+          "omap_entry": {
+            "flags_hex": "0x00000000",
+            "index": 0,
+            "node_paddr": 487,
+            "oid": 1026,
+            "paddr": 485,
+            "size": 4096,
+            "xid": 17
+          },
+          "stage_failed": null,
+          "vol_omap_leaf_count": 3,
+          "vol_omap_phys": {
+            "flags": 0,
+            "most_recent_snap": 0,
+            "paddr": 481,
+            "snapshot_count": 0,
+            "snapshot_tree_oid": 0,
+            "snapshot_tree_type_raw_hex": "0x40000002",
+            "tree_oid": 482,
+            "tree_type_raw_hex": "0x40000002"
+          },
+          "vol_omap_sample": [
+            {
+              "flags_hex": "0x00000000",
+              "index": 0,
+              "node_paddr": 482,
+              "oid": 1028,
+              "paddr": 484,
+              "size": 4096,
+              "xid": 17
+            },
+            {
+              "flags_hex": "0x00000000",
+              "index": 1,
+              "node_paddr": 482,
+              "oid": 1030,
+              "paddr": 480,
+              "size": 4096,
+              "xid": 17
+            },
+            {
+              "flags_hex": "0x00000000",
+              "index": 2,
+              "node_paddr": 482,
+              "oid": 1031,
+              "paddr": 483,
+              "size": 4096,
+              "xid": 17
+            }
+          ],
+          "vol_omap_visited_nodes": 1,
+          "volume_fields": {
+            "extentref_tree_oid": 479,
+            "extentref_tree_type_raw_hex": "0x40000002",
+            "features_raw": 2,
+            "fs_flags_raw": 1,
+            "fs_index": 0,
+            "incompat_features_raw": 1,
+            "magic_hex": "0x42535041",
+            "omap_oid": 481,
+            "paddr": 485,
+            "ro_compat_features_raw": 0,
+            "root_tree_oid": 1028,
+            "root_tree_type_raw_hex": "0x00000002",
+            "snap_meta_tree_oid": 351,
+            "snap_meta_tree_type_raw_hex": "0x40000002"
+          }
+        }
+      ],
+      "walk_notes": [
+        {
+          "paddr": 1,
+          "stage": "ring_checkpoint_map",
+          "validation": {
+            "errors": [],
+            "header": {
+              "checksum_computed_hex": "0x813d14783ec29a0b",
+              "checksum_matches": true,
+              "checksum_stored_hex": "0x813d14783ec29a0b",
+              "object_subtype_hex": "0x00000000",
+              "object_type": 12,
+              "object_type_flags_hex": "0x40000000",
+              "object_type_raw_hex": "0x4000000c",
+              "oid": 1,
+              "paddr": 1,
+              "xid": 17
+            },
+            "ok": true
+          }
+        },
+        {
+          "paddr": 2,
+          "stage": "ring_trailing_nxsb",
+          "validation": {
+            "errors": [],
+            "header": {
+              "checksum_computed_hex": "0xf47a77ed5171f62e",
+              "checksum_matches": true,
+              "checksum_stored_hex": "0xf47a77ed5171f62e",
+              "object_subtype_hex": "0x00000000",
+              "object_type": 1,
+              "object_type_flags_hex": "0x80000000",
+              "object_type_raw_hex": "0x80000001",
+              "oid": 1,
+              "paddr": 2,
+              "xid": 17
+            },
+            "ok": true
+          }
+        }
+      ],
+      "xid": 17
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "namespace_matched": true,
+  "per_record_failure_count": 0,
+  "records_with_xfields": 14,
+  "status": "executed",
+  "verdict": "validated_sr_015_cursor_rule",
+  "verdict_detail": "All 14 records with xfields have xf_used_data == sum(round_up(x_size, 8)); namespace and logical-size oracle parity preserved.",
+  "xfield_used_data_fail": 0,
+  "xfield_used_data_pass": 14
+}

@@ -36,6 +36,11 @@ gate, then promote only resolved slices into this directory.
   obj-header replay at returned paddrs, SR-006 hard stops, and cross-tool
   oracle pairing with `go-apfs identitydump`. Verdict on the proof fixture:
   `validated_omap_lookup_contract`.
+- `../research/experiments/EX-15-block-1031-context-replay/README.md`:
+  research log proving the EX-14 `checksum mismatch at block 1031` was a Rust
+  FS-tree traversal bug (internal-node values are virtual OIDs, not paddrs)
+  and recording the patch + two synthetic regression tests in
+  `crates/apfs-fastindex/src/fs_records.rs`.
 
 ## Open Native Slice (Gate A)
 

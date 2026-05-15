@@ -1,0 +1,24 @@
+{
+  "blocks": [
+    {
+      "block_size": 4096,
+      "first_64_bytes_hex": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "header": {
+        "checksum_computed_hex": "0xffffffffffffffff",
+        "checksum_matches": false,
+        "checksum_stored_hex": "0x0000000000000000",
+        "object_subtype_hex": "0x00000000",
+        "object_type": 0,
+        "object_type_flags_hex": "0x00000000",
+        "object_type_raw_hex": "0x00000000",
+        "oid": 0,
+        "paddr": 1031,
+        "xid": 0
+      },
+      "is_nxsb_magic": false,
+      "nx_magic_at_0x20_hex": "0x00000000",
+      "paddr": 1031,
+      "sha256": "ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7"
+    }
+  ]
+}

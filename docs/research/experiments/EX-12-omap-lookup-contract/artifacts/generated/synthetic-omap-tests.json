@@ -1,5 +1,5 @@
 {
-  "summary_line": "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 28 filtered out; finished in 0.00s",
+  "summary_line": "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 30 filtered out; finished in 0.00s",
   "test_count": 14,
   "test_names": [
     "omap::tests::lookup_rejects_crypto_generation_value",

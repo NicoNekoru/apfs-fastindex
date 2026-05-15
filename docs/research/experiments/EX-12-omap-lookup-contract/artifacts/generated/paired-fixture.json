@@ -48,8 +48,8 @@
     "root_tree_oracle_pairs": [
       {
         "checksum_match": false,
-        "identity_checksum": 5717441740679570226,
-        "identity_content_hash": "5dae6f320af43d210de29504aac4804a04c32557a2a980d8d2a97271d198cbca",
+        "identity_checksum": 15945270244319882993,
+        "identity_content_hash": "3c0c90beb246c24173164a126859c7f8e95999e6c38e9b6078ca2522b6ce6178",
         "identity_object_xid": 12,
         "identity_oid": 1028,
         "identity_paddr": 427,
@@ -60,8 +60,8 @@
         "rust_obj_header_oid": 1028,
         "rust_obj_header_xid": 13,
         "rust_oid": 1028,
-        "rust_on_disk_block_sha256": "6b0cd09755f527087b2cedf9435d337a4b2562dd79877c7958c26122f86ba7a3",
-        "rust_on_disk_checksum": 10030029124799656514,
+        "rust_on_disk_block_sha256": "2f3bcb338147e0e36b87a8f0075c1430e657dff618da4eab2825d8e90379f1f8",
+        "rust_on_disk_checksum": 12223687377421522001,
         "rust_paddr": 433,
         "volume_oid": 1026
       }
@@ -73,14 +73,14 @@
       {
         "fs_oid_index": 0,
         "obj_header": {
-          "checksum": 16063376059861198814,
+          "checksum": 6154801025965777815,
           "object_subtype_raw": 0,
           "object_type_raw": 13,
           "oid": 1026,
           "xid": 14
         },
         "object_type_base": 13,
-        "root_tree_block_sha256": "6b0cd09755f527087b2cedf9435d337a4b2562dd79877c7958c26122f86ba7a3",
+        "root_tree_block_sha256": "2f3bcb338147e0e36b87a8f0075c1430e657dff618da4eab2825d8e90379f1f8",
         "root_tree_lower_bound": {
           "candidate_count": 1,
           "matches": true,
@@ -100,7 +100,7 @@
           }
         },
         "root_tree_obj_header": {
-          "checksum": 10030029124799656514,
+          "checksum": 12223687377421522001,
           "object_subtype_raw": 14,
           "object_type_raw": 2,
           "oid": 1028,
@@ -160,7 +160,7 @@
     "volumes_ok": true
   },
   "identitydump": {
-    "device": "/dev/rdisk5",
+    "device": "/dev/rdisk7",
     "entries": [
       {
         "file_id": 17,
@@ -206,18 +206,18 @@
     ],
     "node_summaries": [
       {
-        "checksum": 5717441740679570226,
+        "checksum": 15945270244319882993,
         "domain": "volume_omap",
         "is_leaf": true,
         "key_count": 53,
-        "logical_size_total": 1048899,
+        "logical_size_total": 1048898,
         "max_file_id": 28,
         "min_file_id": 1,
         "name_count": 22,
         "name_sample": [
           ".fseventsd",
-          "00000000056c67f9",
-          "00000000056c67fa",
+          "000000000b9e4889",
+          "000000000b9e488a",
           "clone.txt",
           "com.apple.fs.symlink",
           "com.apple.provenance",
@@ -236,7 +236,7 @@
           "purgeable-drecs-fixed",
           "root"
         ],
-        "node_key": "volume_omap|1028|12|427|5717441740679570226|OBJECT_TYPE_BTREE|OBJECT_TYPE_FSTREE|5dae6f320af43d210de29504aac4804a04c32557a2a980d8d2a97271d198cbca",
+        "node_key": "volume_omap|1028|12|427|15945270244319882993|OBJECT_TYPE_BTREE|OBJECT_TYPE_FSTREE|3c0c90beb246c24173164a126859c7f8e95999e6c38e9b6078ca2522b6ce6178",
         "object_xid": 12,
         "oid": 1028,
         "paddr": 427,
@@ -251,14 +251,14 @@
         },
         "role": "fs_root_tree",
         "subtype": "OBJECT_TYPE_FSTREE",
-        "summary_hash": "c18bfe6a0181461fd76bc5890d79dc20bdf5725dbe5e75d4a2006bab33465f10",
+        "summary_hash": "c17d5f838e72c0bcac92ce9d8da22ad3fabcb08cb2691b631038a5e2bdf83439",
         "type": "OBJECT_TYPE_BTREE"
       }
     ],
     "nodes": [
       {
-        "checksum": 5717441740679570226,
-        "content_hash": "5dae6f320af43d210de29504aac4804a04c32557a2a980d8d2a97271d198cbca",
+        "checksum": 15945270244319882993,
+        "content_hash": "3c0c90beb246c24173164a126859c7f8e95999e6c38e9b6078ca2522b6ce6178",
         "domain": "volume_omap",
         "flags": "OBJ_VIRTUAL",
         "is_leaf": true,
@@ -381,8 +381,8 @@
       }
     ],
     "root_tree": {
-      "checksum": 5717441740679570226,
-      "content_hash": "5dae6f320af43d210de29504aac4804a04c32557a2a980d8d2a97271d198cbca",
+      "checksum": 15945270244319882993,
+      "content_hash": "3c0c90beb246c24173164a126859c7f8e95999e6c38e9b6078ca2522b6ce6178",
       "domain": "volume_omap",
       "flags": "OBJ_VIRTUAL",
       "is_leaf": true,
@@ -401,7 +401,7 @@
     "checkpoint_candidates": [
       {
         "block_address": 2,
-        "checksum": 13053559008253264684,
+        "checksum": 1833168822853037020,
         "descriptor_index": 1,
         "object_subtype": 0,
         "object_type_raw": 2147483649,
@@ -410,7 +410,7 @@
       },
       {
         "block_address": 4,
-        "checksum": 13053664801887675097,
+        "checksum": 1833274616487447433,
         "descriptor_index": 3,
         "object_subtype": 0,
         "object_type_raw": 2147483649,
@@ -419,7 +419,7 @@
       },
       {
         "block_address": 6,
-        "checksum": 13053354095363620288,
+        "checksum": 1832963909963392624,
         "descriptor_index": 5,
         "object_subtype": 0,
         "object_type_raw": 2147483649,
@@ -428,7 +428,7 @@
       },
       {
         "block_address": 8,
-        "checksum": 13053464527562709299,
+        "checksum": 1833074342162481635,
         "descriptor_index": 7,
         "object_subtype": 0,
         "object_type_raw": 2147483649,
@@ -461,8 +461,8 @@
       },
       "source": {
         "allowlist_reason": "caller-supplied raw APFS container device",
-        "raw_container_path": "/dev/rdisk5",
-        "requested_path": "/dev/rdisk5",
+        "raw_container_path": "/dev/rdisk7",
+        "requested_path": "/dev/rdisk7",
         "source_kind": "raw_device"
       }
     },
@@ -544,7 +544,7 @@
         "next_xid": 15,
         "object_header": {
           "block_address": 4,
-          "checksum": 13053664801887675097,
+          "checksum": 1833274616487447433,
           "object_subtype": 0,
           "object_type": 1,
           "object_type_flags": 2147483648,
@@ -560,7 +560,7 @@
         "reaper_oid": 1025,
         "spaceman_oid": 1024,
         "unsupported_incompatible_features": 0,
-        "uuid_hex": "01efe00e-7cbb-4d00-b126-24b641042004",
+        "uuid_hex": "2fd54b97-52db-4766-8014-c7952a3ddebb",
         "volume_oids": [
           1026
         ],
@@ -709,7 +709,7 @@
             "num_symlinks": 1,
             "object_header": {
               "block_address": 439,
-              "checksum": 16063376059861198814,
+              "checksum": 6154801025965777815,
               "object_subtype": 0,
               "object_type": 13,
               "object_type_flags": 0,
@@ -734,7 +734,7 @@
             "unsupported_incompatible_features": 0,
             "virtual_oid": 1026,
             "volume_name": "SKELPROOF",
-            "volume_uuid_hex": "0ebcf5fe-b5fb-4140-9ee3-172eb65fa7ec",
+            "volume_uuid_hex": "bffddfab-618c-4cf9-a414-334ab4b82bef",
             "xid": 14
           },
           "volume_oid": 1026,
@@ -785,36 +785,36 @@
       "create symlink dst/link.txt -> moved.txt"
     ],
     "image_name": "skeleton-proof.dmg",
-    "image_path": "/tmp/apfsfi-skeleton-6jopvt4h/skeleton-proof.dmg",
+    "image_path": "/tmp/apfsfi-skeleton-_pto371v/skeleton-proof.dmg",
     "image_size_bytes": 167772160,
     "nomount_entities": [
       {
         "content-hint": "GUID_partition_scheme",
-        "dev-entry": "/dev/disk4",
+        "dev-entry": "/dev/disk6",
         "potentially-mountable": false,
         "unmapped-content-hint": "GUID_partition_scheme"
       },
       {
         "content-hint": "Apple_APFS",
-        "dev-entry": "/dev/disk4s1",
+        "dev-entry": "/dev/disk6s1",
         "potentially-mountable": false,
         "unmapped-content-hint": "7C3457EF-0000-11AA-AA11-00306543ECAC"
       },
       {
-        "content-hint": "EF57347C-0000-11AA-AA11-00306543ECAC",
-        "dev-entry": "/dev/disk5",
-        "potentially-mountable": false,
-        "unmapped-content-hint": "EF57347C-0000-11AA-AA11-00306543ECAC"
-      },
-      {
         "content-hint": "41504653-0000-11AA-AA11-00306543ECAC",
-        "dev-entry": "/dev/disk5s1",
+        "dev-entry": "/dev/disk7s1",
         "potentially-mountable": true,
         "unmapped-content-hint": "41504653-0000-11AA-AA11-00306543ECAC",
         "volume-kind": "apfs"
+      },
+      {
+        "content-hint": "EF57347C-0000-11AA-AA11-00306543ECAC",
+        "dev-entry": "/dev/disk7",
+        "potentially-mountable": false,
+        "unmapped-content-hint": "EF57347C-0000-11AA-AA11-00306543ECAC"
       }
     ],
-    "raw_container_path": "/dev/rdisk5",
+    "raw_container_path": "/dev/rdisk7",
     "source_id": "generated-proof-fixture"
   }
 }

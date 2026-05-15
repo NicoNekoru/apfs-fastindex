@@ -1,0 +1,63 @@
+{
+  "entries": [
+    {
+      "inode": 2,
+      "nlink": 5,
+      "path": ".",
+      "type": "dir"
+    },
+    {
+      "inode": 17,
+      "nlink": 7,
+      "path": "dst",
+      "type": "dir"
+    },
+    {
+      "allocated_bytes": 4096,
+      "inode": 24,
+      "logical_size": 6,
+      "nlink": 1,
+      "path": "dst/clone.txt",
+      "type": "file"
+    },
+    {
+      "allocated_bytes": 4096,
+      "inode": 20,
+      "logical_size": 11,
+      "nlink": 2,
+      "path": "dst/hard.txt",
+      "type": "file"
+    },
+    {
+      "inode": 26,
+      "logical_size": 9,
+      "nlink": 1,
+      "path": "dst/link.txt",
+      "symlink_target": "moved.txt",
+      "type": "symlink"
+    },
+    {
+      "allocated_bytes": 4096,
+      "inode": 20,
+      "logical_size": 11,
+      "nlink": 2,
+      "path": "dst/moved.txt",
+      "type": "file"
+    },
+    {
+      "allocated_bytes": 32768,
+      "inode": 23,
+      "logical_size": 1048576,
+      "nlink": 1,
+      "path": "dst/sparse.bin",
+      "type": "file"
+    },
+    {
+      "inode": 16,
+      "nlink": 2,
+      "path": "src",
+      "type": "dir"
+    }
+  ],
+  "volume_label": "EX16CI"
+}

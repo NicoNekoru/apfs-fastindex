@@ -1,0 +1,23 @@
+{
+  "device": "/dev/rdisk7",
+  "entry_count": 15,
+  "node_count": 3,
+  "ok": true,
+  "returncode": 0,
+  "root_tree": {
+    "checksum": 16294876390625909795,
+    "content_hash": "28fc546e2d8d5bfceb5d125f5d9c1830f59dd88660c26f65fb494540c68398c1",
+    "domain": "volume_omap",
+    "flags": "OBJ_VIRTUAL",
+    "is_root": true,
+    "key_count": 2,
+    "level": 1,
+    "object_xid": 18,
+    "oid": 1028,
+    "paddr": 495,
+    "role": "fs_root_tree",
+    "subtype": "OBJECT_TYPE_FSTREE",
+    "type": "OBJECT_TYPE_BTREE"
+  },
+  "volume": "EX15CI"
+}

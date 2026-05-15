@@ -601,6 +601,7 @@ fn attempt_native_dump<R: Read + Seek>(
                         *volume_oid,
                         root_value.paddr,
                         container.xid,
+                        &volume_omap_resolver,
                     )?),
                     Err(err) => {
                         validation_gaps.push(format!(

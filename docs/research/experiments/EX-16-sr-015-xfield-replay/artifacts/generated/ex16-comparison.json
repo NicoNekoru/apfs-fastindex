@@ -1,0 +1,13 @@
+{
+  "matched": true,
+  "namespace": {
+    "matched": true,
+    "mismatches": [],
+    "missing_paths": [],
+    "unexpected_paths": []
+  },
+  "per_record_failures": [],
+  "records_with_xfields": 14,
+  "xfield_used_data_fail": 0,
+  "xfield_used_data_pass": 14
+}

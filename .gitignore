@@ -40,7 +40,6 @@ build/
 *.toc
 *.vrb
 *.xdv
-/docs/manual/*.pdf
 
 # Coverage and profiling output
 /coverage/
@@ -69,3 +68,7 @@ build/
 *.log
 *.tmp
 *.temp
+
+# Snapshot artifacts 
+*.dmg
+*.sparsebundle

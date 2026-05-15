@@ -3,7 +3,7 @@
   "checkpoint_candidates": [
     {
       "block_address": 2,
-      "checksum": 16370515834402361828,
+      "checksum": 16059216355015793871,
       "descriptor_index": 1,
       "object_type_raw": 2147483649,
       "oid": 1,
@@ -11,7 +11,7 @@
     },
     {
       "block_address": 4,
-      "checksum": 16370621628036772241,
+      "checksum": 16059322148650204284,
       "descriptor_index": 3,
       "object_type_raw": 2147483649,
       "oid": 1,
@@ -19,7 +19,7 @@
     },
     {
       "block_address": 6,
-      "checksum": 16370310921512717432,
+      "checksum": 16059011442126149475,
       "descriptor_index": 5,
       "object_type_raw": 2147483649,
       "oid": 1,
@@ -27,7 +27,7 @@
     },
     {
       "block_address": 8,
-      "checksum": 16370421353711806443,
+      "checksum": 16059121874325238486,
       "descriptor_index": 7,
       "object_type_raw": 2147483649,
       "oid": 1,
@@ -176,7 +176,7 @@
   ],
   "selected_checkpoint": {
     "block_address": 4,
-    "checksum": 16370621628036772241,
+    "checksum": 16059322148650204284,
     "descriptor_index": 3,
     "oid": 1,
     "xid": 14
@@ -199,31 +199,31 @@
     "nomount_entities": [
       {
         "content-hint": "GUID_partition_scheme",
-        "dev-entry": "/dev/disk4",
+        "dev-entry": "/dev/disk6",
         "potentially-mountable": false,
         "unmapped-content-hint": "GUID_partition_scheme"
       },
       {
         "content-hint": "Apple_APFS",
-        "dev-entry": "/dev/disk4s1",
+        "dev-entry": "/dev/disk6s1",
         "potentially-mountable": false,
         "unmapped-content-hint": "7C3457EF-0000-11AA-AA11-00306543ECAC"
       },
       {
         "content-hint": "41504653-0000-11AA-AA11-00306543ECAC",
-        "dev-entry": "/dev/disk5s1",
+        "dev-entry": "/dev/disk7s1",
         "potentially-mountable": true,
         "unmapped-content-hint": "41504653-0000-11AA-AA11-00306543ECAC",
         "volume-kind": "apfs"
       },
       {
         "content-hint": "EF57347C-0000-11AA-AA11-00306543ECAC",
-        "dev-entry": "/dev/disk5",
+        "dev-entry": "/dev/disk7",
         "potentially-mountable": false,
         "unmapped-content-hint": "EF57347C-0000-11AA-AA11-00306543ECAC"
       }
     ],
-    "raw_container_path": "/dev/rdisk5",
+    "raw_container_path": "/dev/rdisk7",
     "source_id": "generated-proof-fixture"
   },
   "verdict": "validated_checkpoint_context"

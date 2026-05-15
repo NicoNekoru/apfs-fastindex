@@ -1,0 +1,138 @@
+{
+  "entries": [
+    {
+      "inode": 2,
+      "nlink": 7,
+      "path": ".",
+      "type": "dir"
+    },
+    {
+      "inode": 17,
+      "nlink": 6,
+      "path": "dst",
+      "type": "dir"
+    },
+    {
+      "allocated_bytes": 4096,
+      "inode": 27,
+      "logical_size": 6,
+      "nlink": 1,
+      "path": "dst/clone.txt",
+      "type": "file"
+    },
+    {
+      "allocated_bytes": 4096,
+      "inode": 22,
+      "logical_size": 11,
+      "nlink": 2,
+      "path": "dst/hard.txt",
+      "type": "file"
+    },
+    {
+      "inode": 29,
+      "logical_size": 9,
+      "nlink": 1,
+      "path": "dst/link.txt",
+      "symlink_target": "moved.txt",
+      "type": "symlink"
+    },
+    {
+      "allocated_bytes": 4096,
+      "inode": 22,
+      "logical_size": 11,
+      "nlink": 2,
+      "path": "dst/moved.txt",
+      "type": "file"
+    },
+    {
+      "inode": 18,
+      "nlink": 7,
+      "path": "names",
+      "type": "dir"
+    },
+    {
+      "allocated_bytes": 4096,
+      "inode": 30,
+      "logical_size": 2,
+      "nlink": 1,
+      "path": "names/n1",
+      "type": "file"
+    },
+    {
+      "allocated_bytes": 4096,
+      "inode": 31,
+      "logical_size": 6,
+      "nlink": 1,
+      "path": "names/name08ch",
+      "type": "file"
+    },
+    {
+      "allocated_bytes": 4096,
+      "inode": 32,
+      "logical_size": 5,
+      "nlink": 1,
+      "path": "names/name09chr",
+      "type": "file"
+    },
+    {
+      "allocated_bytes": 4096,
+      "inode": 33,
+      "logical_size": 8,
+      "nlink": 1,
+      "path": "names/name15charsxxx",
+      "type": "file"
+    },
+    {
+      "allocated_bytes": 4096,
+      "inode": 34,
+      "logical_size": 10,
+      "nlink": 1,
+      "path": "names/name17charsxxxxx",
+      "type": "file"
+    },
+    {
+      "inode": 19,
+      "nlink": 4,
+      "path": "sparse",
+      "type": "dir"
+    },
+    {
+      "allocated_bytes": 32768,
+      "inode": 25,
+      "logical_size": 1048576,
+      "nlink": 1,
+      "path": "sparse/sparse-1m.bin",
+      "type": "file"
+    },
+    {
+      "allocated_bytes": 20480,
+      "inode": 26,
+      "logical_size": 1048699,
+      "nlink": 1,
+      "path": "sparse/sparse-unaligned-name.bin",
+      "type": "file"
+    },
+    {
+      "inode": 16,
+      "nlink": 2,
+      "path": "src",
+      "type": "dir"
+    }
+  ],
+  "summary": {
+    "dir_count": 5,
+    "entry_count": 16,
+    "file_count": 10,
+    "hard_link_paths": [
+      "dst/hard.txt",
+      "dst/moved.txt"
+    ],
+    "sparse_candidates": [
+      "sparse/sparse-1m.bin",
+      "sparse/sparse-unaligned-name.bin"
+    ],
+    "symlink_count": 1,
+    "unique_inode_logical_total": 2097323
+  },
+  "volume_label": "EX15CI"
+}

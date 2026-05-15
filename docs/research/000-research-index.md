@@ -186,10 +186,14 @@ Long-range product roadmap:
 
 1. Isolate the `EX-14` upstream context blocker: the expanded fixture cannot
    validate body layout until the checksum mismatch at block `1031` is explained
-   or reproduced as a malformed-source hard stop.
+   or reproduced as a malformed-source hard stop. **Closed by EX-15** (root
+   cause: FS-tree internal-node values are virtual OIDs requiring volume-OMAP
+   resolution; patched in `crates/apfs-fastindex/src/fs_records.rs`).
 2. Replay `EX-13` with the source-backed xfield cursor rule from `SR-015`,
    recording `xf_used_data`, padded value lengths, decoded fields, and the same
-   namespace/logical-size comparison.
+   namespace/logical-size comparison. **Closed by EX-16**: 14/14 records
+   pass `xf_used_data == sum(round_up(x_size, 8))`; namespace and
+   logical-size oracle parity preserved.
 3. Add synthetic negative record-body cases from `SR-016`: short fixed bodies,
    malformed names, duplicate/out-of-bounds xfields, invalid xattr forms,
    missing sibling mappings, and drec/inode type mismatches.
@@ -262,9 +266,26 @@ Long-range product roadmap:
   retained detached unencrypted fixture saved a mounted/POSIX oracle and Rust
   context artifact; Rust reached source gating and found `4` valid checkpoint
   candidates (`highest_xid=20`) but returned no `selected_checkpoint` after
-  `APFS object validation failed: checksum mismatch at block 1031`. Treat this
-  as a checkpoint/OMAP-context blocker before retrying the xfield layout pass or
-  implementing Rust FS-record body decoding.
+  `APFS object validation failed: checksum mismatch at block 1031`. EX-15
+  closed this blocker.
+- `EX-16` SR-015 xfield replay; re-ran EX-13's proof fixture under the SR-015
+  single cursor rule (`cursor += round_up(x_size, 8)` starting immediately
+  after the metadata table). All `14` records with xfields satisfy
+  `xf_used_data == sum(round_up(x_size, 8))` and namespace + logical-size
+  oracle parity is preserved. Verdict `validated_sr_015_cursor_rule`; SR-015
+  may now be encoded in Rust body decoding (gated by EX-18 byte-for-byte
+  field diff). The sparse-file inode that EX-13 needed candidate scoring for
+  decodes cleanly under one rule.
+- `EX-15` block-1031 context replay; rebuilt the EX-14 fixture deterministically,
+  proved with `fsck_apfs -n`, `go-apfs identitydump`, and a Python SR-005 /
+  SR-007 / SR-006 replay that the image is well-formed and every NXSB candidate
+  validates. Root cause was hypothesis (c): `fs_records::walk_fs_node` treated
+  FS-tree internal-node values as physical paddrs, but FS-trees are virtual and
+  the 8-byte internal value is a child virtual OID requiring `(oid, max_xid)`
+  resolution through the volume OMAP. Block `1031` was the bare OID
+  misinterpreted as a paddr. Fix landed in `crates/apfs-fastindex/src/fs_records.rs`
+  with two synthetic regression tests; Rust now publishes `selected_checkpoint`
+  with `fs_records_dumped_count = 1` on the EX-14 fixture shape.
 - `SR-015` through `SR-018` tightened the post-EX-13 parser gates: xfields have
   one source-backed padded-value cursor rule, malformed record bodies fail
   closed before row emission, logical size has a scoped precedence table, and

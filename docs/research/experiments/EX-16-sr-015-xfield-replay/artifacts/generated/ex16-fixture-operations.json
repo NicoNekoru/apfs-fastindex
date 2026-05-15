@@ -1,0 +1,13 @@
+{
+  "operations": [
+    "create src and dst directories",
+    "create src/base.txt",
+    "rename src/base.txt -> src/renamed.txt",
+    "move src/renamed.txt -> dst/moved.txt",
+    "create hard link dst/hard.txt",
+    "create sparse file dst/sparse.bin",
+    "clone dst/moved.txt -> dst/clone.txt",
+    "append to dst/moved.txt",
+    "create symlink dst/link.txt -> moved.txt"
+  ]
+}

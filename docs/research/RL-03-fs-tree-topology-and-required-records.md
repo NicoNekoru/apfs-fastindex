@@ -3,7 +3,7 @@
 Status: Open
 Priority: P0
 Owner: TBD
-Last Updated: 2026-05-13
+Last Updated: 2026-05-14
 
 ## Core Question
 - Which APFS trees and record types are required to build a complete directory index and size model?
@@ -134,6 +134,34 @@ Last Updated: 2026-05-13
 - [2026-05-13] Spec/Observation: `SR-016` turns record-body parsing into an
   explicit gate for fixed-size bodies, variable-length names, xfields, xattrs,
   sibling records, and drec/inode type consistency before namespace rows emit.
+- [2026-05-14] Observation: `EX-16` executed the SR-015 single cursor replay
+  on the EX-13 proof fixture. All `14` records with xfields satisfy
+  `xf_used_data == sum(round_up(x_size, 8))`; per-record oracle constraints
+  (inode name in dir_rec/sibling name set, dstream size equals mounted
+  logical_size, sparse_bytes within logical size, drec sibling_id maps to the
+  child file_id) all pass with `0` failures; namespace and per-file
+  logical-size reconstruction (using the SR-015-decoded xfields) matches the
+  mounted POSIX oracle with `0` mismatches. The sparse-file inode that
+  EX-13 had needed candidate scoring for (`oid=23`, three xfields:
+  NAME=11→16, DSTREAM=40, SPARSE_BYTES=8) decodes cleanly under one rule.
+  SR-015 is now an Observation backed by an executed probe and may be
+  encoded into Rust body decoding (gated by EX-18 byte-for-byte field diff).
+- [2026-05-14] Observation: `EX-15` resolved the EX-14 block-1031 blocker. The
+  FS-tree topology contract is tighter than the prior Rust code expected:
+  FS-trees are **virtual** B-trees, and each internal-node 8-byte value is a
+  **child virtual OID**, not a physical paddr. The walker must resolve every
+  internal value through the volume OMAP at `(child_oid, max_xid)` before
+  reading the child block. Confirmed against `linux-apfs-rw` /
+  `dissect.apfs` / `go-apfs` traversal behavior, against `fsck_apfs -n`,
+  and via two synthetic regression tests
+  (`fs_tree_internal_value_is_virtual_oid_resolved_via_omap` and
+  `fs_tree_internal_oid_missing_from_omap_is_hard_stop`). Patched in
+  `crates/apfs-fastindex/src/fs_records.rs`; `dump_fs_records` now requires a
+  `&OmapResolver` argument, and the caller in `lib.rs` passes the volume OMAP
+  resolver it already opens for `root_tree_virtual_oid` lookup. Re-running
+  Rust against the EX-15 fixture now publishes `selected_checkpoint` with
+  `fs_records_dumped_count = 1` and family counts `inode=20, xattr=17,
+  sibling_link=2, dstream_id=12, file_extent=18, dir_rec=21, sibling_map=2`.
 
 ## Interim Decisions
 - Separate "required for namespace" from "required for accounting."
@@ -160,9 +188,15 @@ Last Updated: 2026-05-13
   context on the variant fixture. Do not implement Rust FS-record body structs
   until a focused checkpoint-context successor explains the block `1031`
   checksum failure or produces a stable selected root for the variant.
+  **Closed by EX-15**: the EX-14 blocker was an FS-tree internal-OID
+  resolution bug, not a checkpoint/OMAP-context problem. With the patch,
+  Rust now reaches the FS-record family dumper on the EX-14 fixture shape;
+  Rust FS-record body structs remain gated by EX-16 (SR-015 xfield replay)
+  and EX-18 (Rust body field dump diff against Python).
 - Replace EX-13 candidate scoring with the deterministic xfield cursor rule only
   after a replay gate records `xf_used_data` and revalidates the saved body
-  oracle. Do not port the candidate scorer into Rust.
+  oracle. Do not port the candidate scorer into Rust. **Done by EX-16**:
+  cursor rule validated; candidate scorer stays in Python history only.
 
 ## Exit Criteria
 - A required-record matrix exists for each product mode.

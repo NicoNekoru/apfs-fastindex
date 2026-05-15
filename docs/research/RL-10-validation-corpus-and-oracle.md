@@ -3,7 +3,7 @@
 Status: Open
 Priority: P0
 Owner: TBD
-Last Updated: 2026-05-13
+Last Updated: 2026-05-14
 
 ## Core Question
 - How do we prove the parser and incremental engine are correct?
@@ -150,6 +150,23 @@ Last Updated: 2026-05-13
 - [2026-05-13] Spec/Observation: `SR-016` through `SR-018` add required negative
   and edge fixtures for record-body malformation, compression-size conflicts,
   and APFS name-hash/case behavior before Rust broadens beyond row enumeration.
+- [2026-05-14] Observation: `EX-16` adds a per-record structural oracle:
+  `xf_used_data == sum(round_up(x_size, 8))` over an inode/dir_rec's xfields.
+  This is independent of any product output and is therefore reusable across
+  any future fixture-replay probe. The EX-13 proof fixture's `14` xfield
+  records pass with no exceptions. Future body probes should record this
+  equality per record and treat any mismatch as a fail-closed signature for
+  SR-016. (EX-17 will exercise the negative side with synthetic malformed
+  xfield blobs.)
+- [2026-05-14] Observation: `EX-15` resolved the EX-14 context-provider blocker
+  via a deterministic rebuild + tri-oracle replay pattern that is reusable for
+  any future "Rust aborts at block N" investigation: rebuild the fixture,
+  retain the `.dmg` image, run `fsck_apfs -n` and `go-apfs identitydump`
+  unchanged, then replay every SR-005 / SR-006 / SR-007 validation in Python
+  one candidate at a time and dump the raw bytes of any block the Rust path
+  rejects. The pattern caught the EX-14 signature as a Rust FS-tree traversal
+  bug (internal-node values are virtual OIDs, not paddrs) rather than a
+  checkpoint-selection or malformed-image issue.
 
 ## Interim Decisions
 - Every optimization must be validated against a fresh full-scan oracle.

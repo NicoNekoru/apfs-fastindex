@@ -1,0 +1,21 @@
+{
+  "candidate_xids": [
+    17,
+    18,
+    19,
+    20
+  ],
+  "fsck_returncode": 0,
+  "go_apfs_ok": true,
+  "ok_replay_xids": [
+    20,
+    19,
+    18,
+    17
+  ],
+  "retained_image": "/Users/kai/Projects/apfs-fastindex/docs/research/experiments/EX-15-block-1031-context-replay/artifacts/generated/retained-image.dmg",
+  "rust_returned_selected_checkpoint": true,
+  "status": "executed",
+  "verdict": "rust_now_selects_context",
+  "verdict_detail": "Rust returned a selected_checkpoint; deterministic rebuild does not reproduce the EX-14 blocker. Record run-to-run flakiness signature and move to EX-16."
+}

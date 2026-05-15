@@ -3,7 +3,7 @@
 Status: Open
 Priority: P0
 Owner: TBD
-Last Updated: 2026-05-13
+Last Updated: 2026-05-14
 
 ## Core Question
 - What size metrics will the product report, and how can those metrics be computed correctly on APFS?
@@ -104,6 +104,13 @@ Last Updated: 2026-05-13
   compressed files, with conflicts failing closed.
 - [2026-05-13] Spec/Observation: `SR-015` supports sparse logical-size decoding
   by replacing EX-13 xfield candidate scoring with one padded-value cursor rule.
+- [2026-05-14] Observation: `EX-16` executed SR-015 against the EX-13 proof
+  fixture. Every `INO_EXT_TYPE_DSTREAM.size` decoded under the single cursor
+  rule equals the mounted POSIX `st_size` for the corresponding inode, and
+  every `INO_EXT_TYPE_SPARSE_BYTES` lies within `[0, logical_size]` for
+  sparse inodes. Ordinary uncompressed logical size for v1 is now safe to
+  source from `INO_EXT_TYPE_DSTREAM.size` decoded by the SR-015 cursor rule.
+  Compression precedence remains SR-017/EX-19 territory.
 
 ## Interim Decisions
 - v1 may need to distinguish "logical size" mode from "physical accounting" mode.
@@ -133,10 +140,13 @@ Last Updated: 2026-05-13
   body dump, not on Rust record-body parsing.
 - Do not promote sparse/logical-size extraction from EX-13 into Rust on the
   basis of EX-14. The variant must first reach selected FS-tree context and then
-  prove dstream/sparse-byte parity in the same run.
+  prove dstream/sparse-byte parity in the same run. **EX-15 unblocked Rust
+  context**; **EX-16 validated the dstream/sparse-byte parity**. The next
+  gate for logical-size promotion is EX-18 (Rust body-field dump diff).
 - V1 logical-size row emission may implement the SR-017 precedence table only
   after the SR-015 xfield replay gate; compressed rows still require same-state
-  evidence when raw candidate size fields disagree.
+  evidence when raw candidate size fields disagree. **SR-015 gate done by
+  EX-16**; SR-017 compressed precedence still pending EX-19.
 
 ## Exit Criteria
 - Defined product-facing size semantics.

@@ -47,7 +47,11 @@ What the Rust path currently proves on the proof fixture:
   resolved through it,
 - the FS-tree is walked read-only and a record-family dump is emitted
   (`inode`, `xattr`, `sibling_link`, `dstream_id`, `file_extent`, `dir_rec`,
-  `sibling_map`, snapshot families, and an `unsupported` bucket).
+  `sibling_map`, snapshot families, and an `unsupported` bucket). FS-tree
+  internal-node values are resolved as **virtual child OIDs** through the
+  volume OMAP at `(child_oid, scan_xid)` before each child block is read
+  (EX-15 root cause; prior code read the value as a paddr and tripped a
+  Fletcher-64 gate on the bare OID).
 
 What it still does not prove:
 
