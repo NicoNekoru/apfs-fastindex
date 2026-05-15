@@ -54,7 +54,10 @@ keeps going. Mount-boundary skipping is the default; pass
 - `src/apfs_fastindex/`: Python proof-of-concept, fallback walker,
   oracle diff, benchmark harness, and the
   `rust_mwp_smoke` cross-tool check.
-- `viz/`: drop-in HTML treemap.
+- `viz/`: drop-in HTML treemap (the web demo).
+- `app/`: native macOS shell (SwiftUI + WKWebView wrapper around the
+  viz; Phase 1 of the native trajectory). Build with `cd app && swift
+  run`.
 - `docs/research/`: `RL-*` rolling synthesis, `SR-*` source reviews,
   `EX-*` controlled probes.
 - `docs/implementation/`: implementation-facing specs, including the

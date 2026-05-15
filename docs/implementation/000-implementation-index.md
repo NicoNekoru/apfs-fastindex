@@ -137,6 +137,23 @@ treemap to look at while the scanner contract is still moving;
 expect it to be retired once a native shell lands. The JSON shape
 the scanner emits is the durable interface.
 
+**Native shell — Phase 1 landed.** `app/` contains a SwiftPM macOS
+target (SwiftUI + WKWebView). It owns:
+
+- the target picker, mode/cross-mount toggles, and Scan / Cancel
+  controls (toolbar);
+- the `apfs-fastindex-scan` subprocess (`ScanController` streams the
+  stderr progress JSON into a live status bar and hands the stdout
+  scan JSON to the viz);
+- a typed JS↔Swift bridge (`BridgeProtocol.swift`) that Phase 2 will
+  use to surface a right-click context menu (Reveal in Finder, Move
+  to Trash, Copy Path); Phase 3 the top-N sidebar + path search;
+  Phase 4 the bundled scanner binary + signing/notarization story.
+
+The bundled viz inside `app/Sources/ApfsFastindex/Resources/viz/`
+mirrors the canonical `viz/` directory at the repo root; both must
+stay in sync until Phase 4 makes the copy a build-time step.
+
 The earlier body-decoding slice has now landed; the steps below are
 preserved for traceability.
 
