@@ -59,6 +59,33 @@
     border: 1px solid var(--border);
     color: var(--text);
   }
+  header .metric-toggle {
+    display: flex;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    font-size: 12px;
+  }
+  header .metric-toggle button {
+    background: transparent;
+    color: var(--muted);
+    border: none;
+    padding: 5px 10px;
+    cursor: pointer;
+    border-radius: 0;
+  }
+  header .metric-toggle button:hover {
+    color: var(--text);
+    background: var(--hover);
+  }
+  header .metric-toggle button.active {
+    background: var(--accent);
+    color: #fff;
+  }
+  header .metric-toggle button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
   header button:disabled { opacity: 0.5; cursor: not-allowed; }
   #drop-zone {
     flex: 1;
@@ -235,6 +262,13 @@
 <header>
   <h1>apfs-fastindex treemap</h1>
   <div class="claim" id="claim">Drop an apfs-fastindex-scan JSON file to begin.</div>
+  <div class="metric-toggle" role="group" aria-label="Treemap metric">
+    <button id="metric-logical" class="active" type="button"
+            title="Size rectangles by logical size (st_size)">Logical</button>
+    <button id="metric-allocated" type="button"
+            title="Size rectangles by allocated bytes (st_blocks*512)"
+            disabled>Allocated</button>
+  </div>
   <button id="load-btn">Open JSON…</button>
   <button id="reset-btn" class="secondary" disabled>Reset zoom</button>
   <input type="file" id="file-input" accept=".json,application/json" hidden>
@@ -258,7 +292,8 @@
 <div id="status-bar" hidden>
   <span><span class="pill" id="status-mode">—</span></span>
   <span id="status-entries">— entries</span>
-  <span id="status-total">— bytes</span>
+  <span id="status-total">— logical</span>
+  <span id="status-total-allocated">— allocated</span>
   <span id="status-current">/</span>
   <span style="flex:1"></span>
   <span class="pill warn" id="status-skips" hidden>0 skipped</span>
@@ -286,8 +321,11 @@ const statusBar = document.getElementById("status-bar");
 const statusMode = document.getElementById("status-mode");
 const statusEntries = document.getElementById("status-entries");
 const statusTotal = document.getElementById("status-total");
+const statusTotalAllocated = document.getElementById("status-total-allocated");
 const statusCurrent = document.getElementById("status-current");
 const statusSkips = document.getElementById("status-skips");
+const metricLogicalBtn = document.getElementById("metric-logical");
+const metricAllocatedBtn = document.getElementById("metric-allocated");
 const skipsModal = document.getElementById("skips-modal");
 const skipsClose = document.getElementById("skips-close");
 const skipsList = document.getElementById("skips-list");
@@ -298,6 +336,18 @@ let currentSkips = [];
 
 let rootNode = null;
 let currentNode = null;
+
+/// Which size metric drives the treemap layout.
+/// "logical" -> `entry.logical_size` (always present; SR-017).
+/// "allocated" -> `entry.allocated_size` (SR-019 + EX-22; may be null for
+/// sparse / decmpfs / unsupported case classes; a subtree containing at
+/// least one null leaf collapses its allocated total to null and is
+/// rendered with a muted "unclaimed" pattern under that metric).
+let activeMetric = "logical";
+/// True iff the loaded scan exposes the allocated_size column at all.
+/// Older scans (pre-R2-A) don't carry it; in that case we hide the
+/// Allocated toggle entirely.
+let allocatedAvailable = false;
 
 loadBtn.addEventListener("click", () => fileInput.click());
 fileInput.addEventListener("change", (ev) => {
@@ -320,6 +370,47 @@ document.body.addEventListener("drop", (e) => {
 resetBtn.addEventListener("click", () => {
   if (rootNode) navigate(rootNode);
 });
+metricLogicalBtn.addEventListener("click", () => setActiveMetric("logical"));
+metricAllocatedBtn.addEventListener("click", () => setActiveMetric("allocated"));
+
+function setActiveMetric(metric) {
+  if (metric === activeMetric) return;
+  if (metric === "allocated" && !allocatedAvailable) return;
+  activeMetric = metric;
+  metricLogicalBtn.classList.toggle("active", metric === "logical");
+  metricAllocatedBtn.classList.toggle("active", metric === "allocated");
+  if (rootNode && currentNode) {
+    // Re-walk the tree so the active metric is what `value` reports.
+    applyActiveMetric(rootNode);
+    statusTotal.textContent = `logical: ${formatBytes(rootNode.valueLogical)}`;
+    statusTotalAllocated.textContent = `allocated: ${formatAllocated(rootNode.valueAllocated)}`;
+    navigate(currentNode);
+  }
+}
+
+/// Re-walk the tree and copy the active metric's total into `value`.
+/// d3's `.sum()` would do this for us if the data only ever had one
+/// metric, but we need both totals simultaneously (status bar shows
+/// both, regardless of which one drives layout). Precomputing avoids
+/// re-summing the whole tree on every render.
+function applyActiveMetric(root) {
+  function walk(node) {
+    if (node.children && node.children.length > 0) {
+      for (const child of node.children) walk(child);
+      node.value = activeMetric === "allocated"
+        ? (node.valueAllocated === null ? 0 : node.valueAllocated)
+        : (node.valueLogical || 0);
+    } else {
+      node.value = activeMetric === "allocated"
+        // A leaf with allocated_size === null collapses to zero for
+        // layout purposes (we render it with the unclaimed pattern in
+        // `leafColor` so the user sees why the rectangle vanished).
+        ? (node.allocatedSize === null ? 0 : (node.allocatedSize || 0))
+        : (node.logicalSize || 0);
+    }
+  }
+  walk(root);
+}
 statusSkips.addEventListener("click", () => {
   if (currentSkips.length === 0) return;
   skipsTitle.textContent = `Skipped paths (${currentSkips.length})`;
@@ -369,13 +460,29 @@ function ingest(doc, filename) {
     alert("This JSON has no entries to render. Did the scanner emit namespace rows?");
     return;
   }
+  // Detect the SR-019 / EX-22 allocated_size column. The Rust crate
+  // emits the field whenever the scan happened post-R2-A; older scans
+  // omit it (the toggle stays disabled). Even on a post-R2-A scan, raw
+  // mode can leave the column null for sparse / decmpfs rows, which
+  // collapses the directory aggregate to null; the metric toggle is
+  // still enabled because we have *some* allocated data to render.
+  allocatedAvailable = entries.some(e =>
+    Object.prototype.hasOwnProperty.call(e, "allocated_size"));
+  metricAllocatedBtn.disabled = !allocatedAvailable;
+  if (!allocatedAvailable && activeMetric === "allocated") {
+    setActiveMetric("logical");
+  }
   rootNode = buildHierarchy(entries, aggregates);
+  applyActiveMetric(rootNode);
   currentNode = rootNode;
   currentSkips = walkSkips;
   claim.textContent = doc.correctness_claim || filename;
   statusMode.textContent = mode;
   statusEntries.textContent = `${entries.length.toLocaleString()} entries`;
-  statusTotal.textContent = formatBytes(rootNode.value);
+  statusTotal.textContent = `logical: ${formatBytes(rootNode.valueLogical)}`;
+  statusTotalAllocated.textContent =
+    `allocated: ${formatAllocated(rootNode.valueAllocated)}`;
+  statusTotalAllocated.style.display = allocatedAvailable ? "" : "none";
   if (walkSkips.length > 0) {
     statusSkips.hidden = false;
     statusSkips.textContent = `${walkSkips.length.toLocaleString()} skipped`;
@@ -387,6 +494,12 @@ function ingest(doc, filename) {
   main.hidden = false;
   statusBar.hidden = false;
   resetBtn.disabled = false;
+  // Publish the parsed root + the column-availability flag so embedders
+  // (the SwiftUI shell) can read the SR-019 / EX-22 totals without
+  // re-walking the tree themselves. `let rootNode` at script scope is
+  // not on window by default; explicit assignment is the contract.
+  window.rootNode = rootNode;
+  window.allocatedAvailable = allocatedAvailable;
   navigate(rootNode);
 }
 // Expose `ingest` on the global scope so the native shell shim can call
@@ -397,56 +510,94 @@ window.ingest = ingest;
 
 function buildHierarchy(entries, aggregates) {
   // Build a tree keyed by path components. Files contribute leaves with
-  // their `logical_size`. Directories are interior nodes.
-  const root = { name: ".", kind: "dir", path: ".", children: new Map(), value: 0 };
+  // both their `logical_size` (always present) and `allocated_size`
+  // (Option<u64> from the Rust crate; null collapses the directory
+  // total per SR-019 / EX-22).
+  const root = newDirNode(".", ".");
   for (const entry of entries) {
     const parts = entry.path.split("/").filter(Boolean);
     let cursor = root;
     for (let i = 0; i < parts.length - 1; i++) {
       const name = parts[i];
       if (!cursor.children.has(name)) {
-        const child = { name, kind: "dir", path: parts.slice(0, i + 1).join("/"), children: new Map(), value: 0 };
-        cursor.children.set(name, child);
+        cursor.children.set(name, newDirNode(name, parts.slice(0, i + 1).join("/")));
       }
       cursor = cursor.children.get(name);
     }
     const leafName = parts[parts.length - 1];
     if (entry.entry_kind === "dir") {
       if (!cursor.children.has(leafName)) {
-        cursor.children.set(leafName, {
-          name: leafName,
-          kind: "dir",
-          path: entry.path,
-          children: new Map(),
-          value: 0,
-        });
+        cursor.children.set(leafName, newDirNode(leafName, entry.path));
       }
     } else {
-      // File / symlink / other: contribute size as a leaf.
+      // File / symlink / other: contribute size as a leaf. `allocated_size`
+      // is read as Option<u64>: `undefined` means the field is missing
+      // from this row entirely (pre-R2-A scan); `null` means the
+      // scanner deliberately fail-closed (sparse / decmpfs). The two
+      // are different shape-wise but render identically as "unclaimed."
+      const rawAllocated = Object.prototype.hasOwnProperty.call(entry, "allocated_size")
+        ? entry.allocated_size
+        : undefined;
+      const allocatedSize = rawAllocated === null || rawAllocated === undefined
+        ? null
+        : Number(rawAllocated) || 0;
       cursor.children.set(leafName, {
         name: leafName,
         kind: entry.entry_kind,
         path: entry.path,
-        value: entry.logical_size || 0,
+        logicalSize: entry.logical_size || 0,
+        allocatedSize,
+        // `value` is set by `applyActiveMetric` so a metric switch
+        // doesn't have to rebuild the tree.
+        value: 0,
         symlinkTarget: entry.symlink_target || null,
       });
     }
   }
-  // Convert children Maps to arrays and compute aggregate values.
+  // Convert children Maps to arrays and compute both per-node totals.
+  // `valueAllocated === null` collapses up the tree: any parent whose
+  // subtree contains a null leaf has a null allocated total (SR-019
+  // None-collapse policy mirrored from the Rust + Python aggregate).
   function finalize(node) {
-    if (!node.children) return node.value || 0;
+    if (!node.children) {
+      node.valueLogical = node.logicalSize || 0;
+      node.valueAllocated = node.allocatedSize;
+      return;
+    }
     const arr = [];
-    let total = 0;
+    let logical = 0;
+    let allocated = 0;
+    let allocatedCollapsed = false;
     for (const child of node.children.values()) {
-      total += finalize(child);
+      finalize(child);
+      logical += child.valueLogical;
+      if (child.valueAllocated === null) {
+        allocatedCollapsed = true;
+      } else if (!allocatedCollapsed) {
+        allocated += child.valueAllocated;
+      }
       arr.push(child);
     }
     node.children = arr;
-    node.value = total;
-    return total;
+    node.valueLogical = logical;
+    node.valueAllocated = allocatedCollapsed ? null : allocated;
   }
   finalize(root);
   return root;
+}
+
+function newDirNode(name, path) {
+  return {
+    name,
+    kind: "dir",
+    path,
+    children: new Map(),
+    value: 0,
+    logicalSize: 0,
+    allocatedSize: null,
+    valueLogical: 0,
+    valueAllocated: 0,
+  };
 }
 
 function navigate(node) {
@@ -614,6 +765,9 @@ function pixelArea(d) {
 
 function dirLabel(d) {
   const name = d.data.name === "." ? "/" : d.data.name;
+  if (activeMetric === "allocated" && d.data.valueAllocated === null) {
+    return `${name} · allocated unclaimed`;
+  }
   return `${name} · ${formatBytes(d.value)}`;
 }
 
@@ -647,6 +801,13 @@ const EXT_COLORS = {
 };
 
 function leafColor(data) {
+  // A leaf with no allocated_size under the active "allocated" metric
+  // is a SR-019 fail-closed row (sparse / decmpfs). Render it muted
+  // so the user can see *where* the unclaimed rows are rather than
+  // wondering why their treemap shrank.
+  if (activeMetric === "allocated" && data.allocatedSize === null) {
+    return "#3b3f4a";
+  }
   if (data.kind === "symlink") return "#7d8a99";
   if (data.kind !== "file") return "#5b6779";
   const name = data.name || "";
@@ -675,8 +836,13 @@ function showTooltip(event, data) {
   const path = data.path === "." ? "/" : "/" + data.path;
   const lines = [
     `<div class="path">${escapeHtml(path)}</div>`,
-    `<div class="meta">${data.kind} · ${formatBytes(data.value)}</div>`,
+    `<div class="meta">${data.kind} · logical ${formatBytes(data.valueLogical)}</div>`,
   ];
+  if (allocatedAvailable) {
+    lines.push(
+      `<div class="meta">allocated ${formatAllocated(data.valueAllocated)}</div>`
+    );
+  }
   if (data.symlinkTarget) {
     lines.push(`<div class="meta">→ ${escapeHtml(data.symlinkTarget)}</div>`);
   }
@@ -703,6 +869,15 @@ function formatBytes(bytes) {
   const i = Math.min(units.length - 1, Math.floor(Math.log10(Math.abs(bytes)) / 3));
   const value = bytes / Math.pow(1000, i);
   return `${value.toFixed(value >= 100 || i === 0 ? 0 : value >= 10 ? 1 : 2)} ${units[i]}`;
+}
+
+/// Format an allocated-size value that may be `null` (SR-019 / EX-22
+/// fail-closed: at least one contributing inode in this subtree has no
+/// validated allocated_size, so the aggregate is intentionally not
+/// claimed). Renders as "unclaimed" rather than a misleading zero.
+function formatAllocated(value) {
+  if (value === null || value === undefined) return "unclaimed";
+  return formatBytes(value);
 }
 
 function escapeHtml(s) {
