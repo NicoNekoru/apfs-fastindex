@@ -456,6 +456,13 @@ function ingest(doc, filename) {
   const aggregates = parserOutput.aggregates || [];
   const walkSkips = parserOutput.walk_skips || [];
   const mode = doc.mode || (parserOutput.backend_name || "raw").replace(/^rust-/, "");
+  // SourceDescriptor carries the source class the scanner ran against.
+  // The native shell uses this to decide whether file operations
+  // (Reveal in Finder / Move to Trash / …) are valid for the loaded
+  // scan: only `mounted_directory` resolves to real on-disk paths the
+  // host can act on. `dmg_image` and `raw_device` are detached or
+  // unmountable from the shell's perspective.
+  window.scanSource = parserOutput.source || null;
   if (entries.length === 0) {
     alert("This JSON has no entries to render. Did the scanner emit namespace rows?");
     return;
@@ -717,7 +724,8 @@ function render(node) {
       if (d.data.kind === "dir" && d.data.children && d.data.children.length > 0) {
         navigate(d.data);
       }
-    });
+    })
+    .on("contextmenu", (event, d) => emitContextMenu(event, d.data));
 
   dirCell.append("text")
     .attr("class", "dir-label")
@@ -744,7 +752,9 @@ function render(node) {
     .attr("height", d => Math.max(0, d.y1 - d.y0))
     .attr("fill", d => leafColor(d.data))
     .on("mousemove", (event, d) => showTooltip(event, d.data))
-    .on("mouseleave", hideTooltip);
+    .on("mouseleave", hideTooltip)
+    .on("click", (_, d) => emitSelected(d.data))
+    .on("contextmenu", (event, d) => emitContextMenu(event, d.data));
 
   leafCell.append("text")
     .attr("x", 4)
@@ -861,6 +871,50 @@ function showTooltip(event, data) {
 
 function hideTooltip() {
   tooltip.style.display = "none";
+}
+
+// Bridge helpers: post structured messages to the SwiftUI shell when
+// hosted inside the native app. In the standalone HTML demo
+// `window.webkit` is undefined and these become no-ops, so the page
+// still works exactly the same with no shell attached.
+function postBridge(message) {
+  try {
+    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.app) {
+      window.webkit.messageHandlers.app.postMessage(message);
+    }
+  } catch (_err) { /* see VizWebView.swift's postToSwift comment */ }
+}
+
+function leafSizeFor(data) {
+  if (activeMetric === "allocated") {
+    return data.allocatedSize === null || data.allocatedSize === undefined
+      ? 0
+      : Number(data.allocatedSize);
+  }
+  return Number(data.logicalSize || 0);
+}
+
+function emitSelected(data) {
+  postBridge({
+    type: "selected",
+    path: data.path === "." ? "" : data.path,
+    kind: data.kind || "file",
+    size: leafSizeFor(data),
+  });
+}
+
+function emitContextMenu(event, data) {
+  // The host installs an NSMenu at the click location. Suppress the
+  // default browser context menu (otherwise the standalone HTML
+  // shows it too, which is just noise).
+  event.preventDefault();
+  postBridge({
+    type: "context_menu",
+    path: data.path === "." ? "" : data.path,
+    kind: data.kind || "file",
+    x: event.clientX,
+    y: event.clientY,
+  });
 }
 
 function formatBytes(bytes) {
