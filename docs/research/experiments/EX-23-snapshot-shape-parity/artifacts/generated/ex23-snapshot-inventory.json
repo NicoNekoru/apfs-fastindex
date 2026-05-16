@@ -1,0 +1,85 @@
+{
+  "inventory": [
+    {
+      "device": "/dev/disk3s1s1",
+      "diskutil_snapshots": [
+        {
+          "name": "com.apple.os.update-5514FF97DEE9C60C7FBF462B06A418D5FC4A882D5AF41D2BAF0A1419FB9B9F86",
+          "purgeable": false,
+          "uuid": "3E1AC922-F4EC-433E-B4D0-0052ADD81E03",
+          "xid": 2293965
+        }
+      ],
+      "mountpoint": "/",
+      "skipped_sealed_system_snapshots": [
+        "com.apple.os.update-5514FF97DEE9C60C7FBF462B06A418D5FC4A882D5AF41D2BAF0A1419FB9B9F86"
+      ],
+      "tmutil_snapshots": [],
+      "user_visible_snapshot_names": []
+    },
+    {
+      "device": "/dev/disk3s6",
+      "diskutil_snapshots": [],
+      "mountpoint": "/System/Volumes/VM",
+      "skipped_sealed_system_snapshots": [],
+      "tmutil_snapshots": [],
+      "user_visible_snapshot_names": []
+    },
+    {
+      "device": "/dev/disk3s2",
+      "diskutil_snapshots": [],
+      "mountpoint": "/System/Volumes/Preboot",
+      "skipped_sealed_system_snapshots": [],
+      "tmutil_snapshots": [],
+      "user_visible_snapshot_names": []
+    },
+    {
+      "device": "/dev/disk3s4",
+      "diskutil_snapshots": [],
+      "mountpoint": "/System/Volumes/Update",
+      "skipped_sealed_system_snapshots": [],
+      "tmutil_snapshots": [],
+      "user_visible_snapshot_names": []
+    },
+    {
+      "device": "/dev/disk1s2",
+      "diskutil_snapshots": [],
+      "mountpoint": "/System/Volumes/xarts",
+      "skipped_sealed_system_snapshots": [],
+      "tmutil_snapshots": [],
+      "user_visible_snapshot_names": []
+    },
+    {
+      "device": "/dev/disk1s1",
+      "diskutil_snapshots": [],
+      "mountpoint": "/System/Volumes/iSCPreboot",
+      "skipped_sealed_system_snapshots": [],
+      "tmutil_snapshots": [],
+      "user_visible_snapshot_names": []
+    },
+    {
+      "device": "/dev/disk1s3",
+      "diskutil_snapshots": [],
+      "mountpoint": "/System/Volumes/Hardware",
+      "skipped_sealed_system_snapshots": [],
+      "tmutil_snapshots": [],
+      "user_visible_snapshot_names": []
+    },
+    {
+      "device": "/dev/disk3s5",
+      "diskutil_snapshots": [],
+      "mountpoint": "/System/Volumes/Data",
+      "skipped_sealed_system_snapshots": [],
+      "tmutil_snapshots": [],
+      "user_visible_snapshot_names": []
+    },
+    {
+      "device": "/dev/disk5s1",
+      "diskutil_snapshots": [],
+      "mountpoint": "/Volumes/inkcal.sh 1.0.0-arm64",
+      "skipped_sealed_system_snapshots": [],
+      "tmutil_snapshots": [],
+      "user_visible_snapshot_names": []
+    }
+  ]
+}

@@ -1,0 +1,149 @@
+\chapter*{Appendix: Experiment Register}
+\addcontentsline{toc}{chapter}{Appendix: Experiment Register}
+
+A reference index of the controlled probes the manual cites. Each
+entry names the question the probe answered and the verdict it
+produced. Full READMEs, fixture-build scripts, and saved artifacts
+live under \path{docs/research/experiments/EX-*/}.
+
+\begin{longtable}{p{0.10\textwidth}p{0.62\textwidth}p{0.20\textwidth}}
+\textbf{Probe} & \textbf{Question and result} & \textbf{Verdict} \\
+\hline
+\endhead
+
+EX-01 &
+Does the latest visible NXSB on a mounted lab image stay stable under
+concurrent writes? Found that it does not; latest-state raw reads do
+not have a stable oracle on live mounted volumes.
+& live-state-non-stable \\
+
+EX-02 &
+What minimum FS-record taxonomy reproduces the v1 namespace plus
+logical-size oracle? Identified DIR\_REC, INODE, dstream fields,
+XATTR, SIBLING\_LINK, SIBLING\_MAP as the v1 record families.
+& required-record-set \\
+
+EX-03 &
+On a detached APFS image, does the raw walker reproduce the mounted
+POSIX namespace plus logical size? First positive proof loop.
+& pinned-state-parity \\
+
+EX-04 &
+Does the EX-03 parity hold across case-insensitive and case-sensitive
+APFS variants? Expanded fixture corpus; parity held.
+& expanded-corpus-parity \\
+
+EX-05 &
+On a still-mounted lab image under write churn, does latest-state
+raw output match any baseline or final mounted oracle? Counterexample
+result: it does not. Live latest cannot be a v1 model.
+& live-latest-not-validatable \\
+
+EX-06 &
+Across mutations to a tracked subtree, which identity fields stay
+stable? OID stays stable; paddr, XID, checksum, and block hash all
+change. Bare-OID cache is unsafe (chapter~10).
+& oid-alone-unsafe \\
+
+EX-07 &
+Under exact node-identity matches across the full nine-field key,
+does subtree-summary reuse ever produce a wrong summary? First run
+found zero false reuse in the detached lab corpus. Cache idea
+remains alive but unproven for production.
+& zero-false-reuse-on-corpus \\
+
+EX-08 &
+What does the read-path support matrix look like on a safe host?
+Detached unencrypted image-backed APFS is supported for narrow v1.
+Mounted images are readable but not supported. Startup-disk raw read
+is blocked by privilege.
+& read-path-matrix-baseline \\
+
+EX-09 &
+Which size metrics belong in v1, and which require their own
+oracle? Defined the accounting register: logical size is v1;
+allocated, exclusive, shared, snapshot-retained are deferred.
+& accounting-register \\
+
+EX-10 &
+Does the native Rust checkpoint scanner reach selected NXSB,
+checkpoint-map, container OMAP, volume superblock decode, volume
+OMAP, and FS-tree root validation on the proof fixture? Yes.
+& native-checkpoint-scanner \\
+
+EX-11 &
+Does the checkpoint-map ring validate end-to-end with
+\texttt{CHECKPOINT\_MAP\_LAST} enforced? Yes, on the proof fixture
+and on synthetic malformed cases.
+& checkpoint-map-integrity \\
+
+EX-12 &
+Does the native OMAP resolver satisfy SR-006 lower-bound
+\texttt{(oid, max\_xid)} semantics, with hard stops at the encryption
+and unknown-flag cases? Yes; cross-validated against
+\texttt{go-apfs identitydump}.
+& validated-omap-lookup-contract \\
+
+EX-13 &
+Does a Python raw-byte body decoder reconstruct the mounted namespace
+and logical-size oracle on the proof fixture? Yes, modulo
+candidate-scored xfield layout (later resolved by SR-015 / EX-16).
+& validated-native-record-body-contract \\
+
+EX-14 &
+Does a second, denser xfield-bearing fixture variant resolve the
+xfield layout question? Returned \texttt{oracle\_inconclusive}: Rust
+aborted with a checksum mismatch at block 1031 before xfield
+comparison could run. Blocker tracked into EX-15.
+& oracle-inconclusive \\
+
+EX-15 &
+What does block 1031 actually contain, and which of (a)~stale-
+checkpoint selection, (b)~missing checkpoint-map rule, (c)~Rust
+validation bug, or (d)~malformed source is the cause? Hypothesis
+(c). FS-tree internal-node 8-byte values are virtual OIDs requiring
+volume-OMAP resolution, not paddrs. Fix landed; two regression tests
+added.
+& validated-fs-tree-internal-oid-resolution-gap \\
+
+EX-16 &
+Does the SR-015 single xfield cursor rule decode every required
+xfield in the proof fixture with
+\texttt{xf\_used\_data == sum(round\_up(x\_size, 8))} and oracle
+parity? Yes, 14 of 14 records.
+& validated-sr-015-cursor-rule \\
+
+EX-17 &
+Does the Rust body decoder hard-stop on every SR-016 per-record
+malformed case with a typed \texttt{InvalidObject}? Yes; 21 unit
+tests, all passing.
+& validated-sr-016-fail-closed-unit-tests \\
+
+EX-18 &
+Does the Rust body decoder produce field-level identical output to
+the Python decoder on the proof fixture? Yes: 53 records, identical
+\texttt{(node\_paddr, entry\_index)} set, zero divergent fields.
+& field-level-parity \\
+
+EX-19 &
+Does the SR-017 per-inode logical-size precedence reproduce
+\texttt{st\_size} for ordinary, sparse, clone, hard-linked, symlink,
+and compressed cases? Yes, 5 of 5 unique inodes; the compressed case
+requires \texttt{INODE\_HAS\_UNCOMPRESSED\_SIZE} to beat the decmpfs
+header.
+& validated-sr-017-precedence \\
+
+EX-20 &
+Do Rust paths match POSIX paths byte-for-byte on both case-
+insensitive and case-sensitive APFS volumes? Yes; volume case and
+normalisation flags propagate correctly. Lookup-by-name still not
+claimed.
+& validated-sr-018-name-preservation \\
+
+EX-21 &
+Does a POSIX-traversal fallback emit the same
+\texttt{NamespaceEntry} / \texttt{DirectoryAggregate} shape as Rust
+raw mode on the proof fixture? Yes; Python and Rust ports both pass.
+& validated-fallback-skeleton \\
+
+\end{longtable}

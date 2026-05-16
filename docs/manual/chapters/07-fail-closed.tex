@@ -1,0 +1,215 @@
+\chapter{The Fail-Closed Boundary}
+
+A parser that emits rows for cases it does not understand is worse than
+a parser that emits nothing. The user can react to a missing row by
+looking elsewhere; a silently wrong row propagates into aggregates, into
+treemaps, and into actions the user takes on the basis of those
+aggregates. The cost of being silently wrong is unbounded. The cost of
+hard-stopping with a typed reason is bounded: the caller chooses a
+fallback, and no false output reaches the user.
+
+Fail-closed is therefore not an aesthetic preference. It is the only
+discipline that bounds the cost of incomplete understanding.
+
+\section{Where The Boundary Sits}
+
+The boundary is concentrated in two single chokepoints:
+
+\begin{description}
+  \item[Object headers.] One function
+    (\texttt{validate\_object\_block} in the Rust crate) validates
+    every block before any reader trusts its body. It checks the
+    Fletcher-64 checksum, the object type, the expected storage
+    class, the encryption flag, the no-header flag, optional
+    \texttt{o\_oid == paddr} for physical objects, and the optional
+    max-XID guard.
+  \item[Record bodies.] One function (\texttt{decode\_fs\_record})
+    validates every FS-tree leaf record against the rules below
+    before any emission path trusts the decoded values.
+\end{description}
+
+There is no second path through either chokepoint. A block that fails
+header validation never reaches a body decoder; a record that fails
+body validation never reaches the namespace builder. The discipline is
+maintained by the topology of the calls, not by every caller
+remembering to validate.
+
+A representative hard stop, from the body decoder:
+
+\begin{minted}{rust}
+if blob_header.xf_used_data as usize != padded_total {
+    return Err(ScanError::InvalidObject(format!(
+        "xf_used_data {} disagrees with padded value-area sum {}",
+        blob_header.xf_used_data, padded_total,
+    )));
+}
+\end{minted}
+
+The error carries the rule that failed, the observed value, and the
+expected value. The caller dispatches on the variant
+(\texttt{InvalidObject}), and the substring is preserved for
+diagnostic display.
+
+\section{The Per-Record Catalogue}
+
+\textbf{Observation.} Twenty-one per-record fail-closed cases are
+enforced by Rust unit tests on synthetic raw blocks. Each test
+asserts that the body decoder returns a typed
+\texttt{InvalidObject(reason)} with the rule's substring.
+
+\subsection{Short bodies}
+
+\begin{enumerate}
+  \item Inode value shorter than the fixed \texttt{j\_inode\_val\_t}
+    struct.
+  \item Directory-record value shorter than the fixed
+    \texttt{j\_drec\_val\_t} struct.
+  \item Sibling-link value with \texttt{name\_len} exceeding the bytes
+    actually available.
+  \item Sibling-map value shorter than 8 bytes.
+\end{enumerate}
+
+\subsection{Malformed names}
+
+\begin{enumerate}
+  \setcounter{enumi}{4}
+  \item Variable-length name length longer than the bytes available.
+  \item Embedded NUL inside a required name (other than the
+    null-terminator).
+  \item Non-UTF-8 bytes in a required name.
+  \item Directory-entry type outside the POSIX \texttt{DT\_*}
+    allowlist.
+\end{enumerate}
+
+\subsection{Malformed xfields}
+
+\begin{enumerate}
+  \setcounter{enumi}{8}
+  \item Duplicate xfield types inside one blob.
+  \item \texttt{xf\_used\_data} disagreeing with
+    \texttt{sum(round\_up(x\_size, 8))}.
+  \item Xfield value cursor running past the blob.
+  \item Xfield metadata table running past the blob.
+  \item Xfield blob shorter than the 4-byte \texttt{xf\_blob\_t}
+    header.
+  \item Required xfield with the wrong \texttt{x\_size}
+    (\texttt{DSTREAM} of length other than 40).
+  \item Required xfield with the wrong \texttt{x\_size}
+    (\texttt{SIBLING\_ID} of length other than 8).
+\end{enumerate}
+
+\subsection{Malformed xattrs}
+
+\begin{enumerate}
+  \setcounter{enumi}{15}
+  \item Xattr value shorter than the fixed header.
+  \item Xattr sets both \texttt{EMBEDDED} and \texttt{STREAM} flags.
+  \item Xattr sets neither flag.
+  \item Xattr sets unknown flag bits.
+  \item Xattr body length disagrees with \texttt{xdata\_len}.
+  \item Xattr stream body shorter than \texttt{j\_xattr\_dstream\_t}.
+\end{enumerate}
+
+\section{The Cross-Record Cases}
+
+Three SR-016 cases depend on consistency across more than one record
+and therefore cannot be enforced by synthetic single-record tests.
+They are deferred to fixture-level probes; the open questions chapter
+tracks their status.
+
+\begin{description}
+  \item[Drec type vs inode mode.] A directory entry's
+    \texttt{DT\_*} type and the referenced inode's \texttt{S\_IFMT}
+    mode must agree. A regular-file inode pointed at by a
+    \texttt{DT\_DIR} entry is malformed at the volume level even
+    though both records validate in isolation.
+  \item[Sibling-map closure.] A directory entry that carries
+    \texttt{DREC\_EXT\_TYPE\_SIBLING\_ID} requires a SIBLING\_MAP
+    record that maps that sibling ID to the entry's child file ID.
+    A missing closure produces a hard-link group with a dangling
+    edge.
+  \item[Compressed-size precedence conflict.] An inode that sets
+    \texttt{INODE\_HAS\_UNCOMPRESSED\_SIZE} but does not carry a
+    \texttt{com.apple.decmpfs} xattr is internally inconsistent at
+    the cross-record level. Chapter~8 develops the precedence rule
+    that prevents the conflict from producing wrong rows.
+\end{description}
+
+These cases will close as the project lands EX-22 and the future
+cross-record consistency probe.
+
+\section{Why The Boundary Is Tighter Than It Looks}
+
+The fail-closed catalogue may seem heavy for a parser that, in
+ordinary operation, encounters none of these cases. The point of the
+catalogue is what happens in the not-ordinary case.
+
+Three concrete situations exercise the boundary in practice:
+
+\begin{description}
+  \item[Format drift.] APFS reserves bits and types over time. A
+    container written by a newer macOS may carry an xattr flag, an
+    xfield type, or an incompatible-feature bit the parser does not
+    recognise. The unknown-bit hard stops mean a newer container
+    produces a typed refusal rather than a quietly wrong row.
+  \item[Genuinely malformed images.] Recovery scenarios, partial
+    image dumps, or test corpora may include containers with
+    structurally inconsistent records. The catalogue refuses them
+    with a precise reason, which the caller can present as a
+    diagnostic.
+  \item[Parser bugs.] If a future change to the body decoder
+    silently re-introduces an off-by-one in the xfield cursor, the
+    \texttt{xf\_used\_data} structural assertion catches it on the
+    first record with a non-multiple-of-eight \texttt{x\_size}. The
+    catalogue is also a regression suite.
+\end{description}
+
+The catalogue is therefore proportional to the cost it prevents, not
+to the frequency with which it is exercised.
+
+\section{The Object-Header Side}
+
+The header-validation chokepoint is smaller but no less load-bearing.
+A block that does not validate is never decoded; a block that
+validates under the wrong storage class is also rejected, because
+\texttt{validate\_object\_block} takes the expected storage as a
+parameter.
+
+The storage classes the parser uses:
+
+\begin{description}
+  \item[\texttt{Physical}.] The object's \texttt{o\_oid} equals its
+    physical block address. Container superblocks, checkpoint maps,
+    OMAP nodes, and free-queue nodes are physical.
+  \item[\texttt{Virtual}.] The object lives in a virtual address
+    space resolved by an OMAP. \texttt{o\_oid} is independent of the
+    block's paddr; the validator checks
+    \texttt{o\_oid == omap\_lookup.oid} instead. Volume superblocks
+    (looked up through the container OMAP), FS-tree roots and
+    internal nodes (looked up through the volume OMAP), and dstream
+    extent nodes are virtual.
+  \item[\texttt{Ephemeral}.] In-memory between transactions; reached
+    through the checkpoint map. The parser uses the checkpoint map's
+    mapping, never an ephemeral storage flag.
+\end{description}
+
+Mixing classes is a structural mistake. Chapter~3 records the empirical
+correction that checkpoint-map \emph{blocks} are themselves physical,
+not ephemeral, despite naming objects that are ephemeral; chapter~5
+records that FS-tree roots are virtual despite living at a known
+paddr that the volume OMAP returns. The parser keeps both rules
+isolated to their call sites.
+
+\section{The Boundary And The Fallback}
+
+The fail-closed boundary is the upstream half of the support contract;
+the fallback path (chapter~11) is the downstream half. When the
+boundary refuses a source, the caller is not stuck: it dispatches to
+the POSIX-traversal fallback, which produces the same shape of output
+through supported APIs. The user sees an answer; the wrong answer is
+not produced.
+
+This is the design pattern the rest of the manual presupposes: known
+behaviour is enforced as a hard rule, unknown behaviour is escalated
+to a path that asks the operating system rather than guessing on its
+behalf.

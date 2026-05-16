@@ -72,6 +72,7 @@ Current source reviews:
 - `SR-017` logical-size source precedence
 - `SR-018` name normalization and case behavior
 - `SR-019` allocated-size source precedence (R2-A entry)
+- `SR-020` snapshot API and mount lifecycle (R2-B entry)
 
 ### `EX-*` Experiment Notes
 
@@ -332,6 +333,18 @@ Long-range product roadmap:
   linux-apfs-rw-vs-apfsck disagreement on macOS-produced images.
   The Rust slice ships sparse explicitly fail-closed; an EX-22b
   sparse-corpus probe is the gate for promoting sparse rows.
+- `EX-23` snapshot shape parity (best-effort, never-sudo);
+  enumerated 9 mounted APFS volumes on the host, found the only
+  present snapshot (sealed-system OS-update on `/`) is excluded
+  by SR-020, and exited verdict `blocked_no_snapshots_at_all`
+  with the reproducer for a privileged rerun. R2-B's shape-parity
+  claim stays in `not_claimed` until a user-visible snapshot is
+  mountable for the diff; the probe is re-runnable and will
+  detect any future user-created TM local snapshot
+  automatically. SR-020 already documented the entitlement gate
+  (`fs_snapshot_create` needs root + `com.apple.developer.vfs.snapshot`),
+  so this is the predicted negative-progress outcome on a clean
+  dev workstation.
 - `EX-21` fallback path skeleton; landed a POSIX-traversal-backed
   fallback in `src/apfs_fastindex/fallback_traversal.py` that emits the
   same `NamespaceEntry` + `DirectoryAggregate` shape as the Rust raw
@@ -420,6 +433,20 @@ Long-range product roadmap:
   `not_claimed`); symlink → `0`; dir → `0`; else fail closed.
   Extent-reference tree stays out of scope for R2-A (it is the
   exclusive/shared/snapshot-retained prerequisite).
+- `SR-020` opens R2-B: mines xnu, manpages, Apple support docs, and
+  community writeups for the user-space APFS snapshot surface on
+  macOS 13-14. Bottom line: read-only enumeration is unprivileged
+  (`fs_snapshot_list`, `diskutil apfs listSnapshots`,
+  `tmutil listlocalsnapshots`); every mutating call needs root + the
+  DTS-issued private entitlement `com.apple.developer.vfs.snapshot`;
+  unprivileged callers can only use `tmutil localsnapshot` (no caller-
+  supplied name; TM-included volumes only) for create, and need root
+  for `mount_apfs -s` to mount. Implication: the R2-B Rust integration
+  must take a `--snapshot <mountpoint>` flag that defers to an
+  already-mounted snapshot; the scanner does not assume snapshot-
+  create privilege. EX-23 is a best-effort probe that scans an
+  existing TM local snapshot if present and records a
+  `blocked_on_privilege` summary otherwise.
 
 ## Research Tracks
 

@@ -1,9 +1,9 @@
 # RL-11 Snapshots, Volume Groups, and Firmlinks
 
-Status: Open (R2-B lane active)
+Status: Open (R2-B lane active; entitlement-gated for snapshot create)
 Priority: P1
 Owner: TBD
-Last Updated: 2026-05-14
+Last Updated: 2026-05-16 (SR-020)
 
 ## Core Question
 - What exactly are we indexing: a raw APFS volume, a snapshot, a volume group, or the user-visible merged namespace?
@@ -66,6 +66,20 @@ Last Updated: 2026-05-14
   requirements: roles, volume-group UUIDs, mounted snapshot identity, firmlink
   table interpretation, and user-visible POSIX/API output must be joined in a
   separate oracle before any Finder-visible root mode exists.
+- [2026-05-16] Spec/Observation: `SR-020` documents the user-space
+  snapshot API on macOS 13-14. Read-only enumeration is free
+  (`fs_snapshot_list`, `diskutil apfs listSnapshots`,
+  `tmutil listlocalsnapshots`); every mutating call
+  (`fs_snapshot_create / _delete / _rename / _mount / _revert /
+  _root`) requires root and the DTS-issued private entitlement
+  `com.apple.developer.vfs.snapshot`. Unprivileged callers can
+  create via `tmutil localsnapshot` only (TM-included volumes,
+  caller cannot choose the name) and need root to mount via
+  `mount_apfs -s <snapshot-name> <mountpoint>` (always read-only).
+  This pins R2-B's product surface: the scanner takes a
+  `--snapshot <mountpoint>` flag that defers to an *already-mounted*
+  snapshot directory; it does not call `mount_apfs` itself and
+  does not assume snapshot-create privilege.
 - [2026-05-14] Scope: **R2-B opens here.** "Snapshot-assisted scanning"
   is promoted from deferred to an explicit R2 research lane (see
   spec.md §4.3 and §12 step 8). Motivation: APFS snapshots are free,
@@ -96,20 +110,22 @@ Last Updated: 2026-05-14
   is stable enough to compare as one input to a merged-root oracle.
 - `/usr/share/firmlinks` and `diskutil apfs list` are candidate diagnostic
   inputs for that future mode, not v1 parser dependencies.
-- **R2-B direction:** snapshot-assisted scanning proceeds as a fresh
-  `SR-020` source review (Apple's `tmutil localsnapshot` /
-  `fs_snapshot_*` semantics, mount semantics of `com.apple.TimeMachine`
-  local snapshots vs APFS-native named snapshots, lifetime and
-  visibility) followed by an `EX-23` fixture probe. EX-23 builds a
-  directory, takes a snapshot via documented APIs, mounts the
-  snapshot, walks both the live directory and the snapshot through
-  the existing fallback walker, and asserts the snapshot output is a
-  shape-parity match for the live output on the unchanged subtree.
-  R2-B does not promote the snapshot path into a default behavior;
-  it only proves that "scan the snapshot" is a viable supplement.
-  Snapshot-retained byte attribution stays out of scope until the
-  R2-A physical-size lane completes and a dedicated probe defines
-  the attribution rule.
+- **R2-B direction (post-SR-020):** snapshot-assisted scanning is
+  realisable, but the snapshot create step is entitlement-gated
+  (SR-020). The scanner product surface is therefore a
+  `--snapshot <mountpoint>` flag that consumes an already-mounted
+  snapshot directory; the scanner runs the existing fallback
+  walker against it and emits the same `NamespaceEntry` +
+  `DirectoryAggregate` shape. `EX-23` is a best-effort probe:
+  enumerate any existing snapshot on the host's APFS volume via
+  `tmutil listlocalsnapshots`; if one is already mounted (the
+  user has touched it themselves), walk both the live volume and
+  the snapshot mountpoint and diff the shape on unchanged paths;
+  otherwise record `blocked_on_privilege` with the missing
+  privilege named. The probe must never leave a snapshot mount
+  behind. Snapshot-retained byte attribution stays out of scope
+  until R2-A completes and a dedicated probe defines the
+  attribution rule.
 - The current default for raw mode remains "fail closed when the
   source class is unsupported." R2-B may surface snapshot-based
   scanning as an *option* (e.g., a `--snapshot` flag on the CLI),

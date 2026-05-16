@@ -1,0 +1,114 @@
+{
+  "apfs_mounts": [
+    {
+      "device": "/dev/disk3s1s1",
+      "fs_type": "apfs",
+      "mountpoint": "/",
+      "options": [
+        "sealed",
+        "local",
+        "read-only",
+        "journaled"
+      ],
+      "snapshot_in_options": false
+    },
+    {
+      "device": "/dev/disk3s6",
+      "fs_type": "apfs",
+      "mountpoint": "/System/Volumes/VM",
+      "options": [
+        "local",
+        "noexec",
+        "journaled",
+        "noatime",
+        "nobrowse"
+      ],
+      "snapshot_in_options": false
+    },
+    {
+      "device": "/dev/disk3s2",
+      "fs_type": "apfs",
+      "mountpoint": "/System/Volumes/Preboot",
+      "options": [
+        "local",
+        "journaled",
+        "nobrowse"
+      ],
+      "snapshot_in_options": false
+    },
+    {
+      "device": "/dev/disk3s4",
+      "fs_type": "apfs",
+      "mountpoint": "/System/Volumes/Update",
+      "options": [
+        "local",
+        "journaled",
+        "nobrowse"
+      ],
+      "snapshot_in_options": false
+    },
+    {
+      "device": "/dev/disk1s2",
+      "fs_type": "apfs",
+      "mountpoint": "/System/Volumes/xarts",
+      "options": [
+        "local",
+        "noexec",
+        "journaled",
+        "noatime",
+        "nobrowse"
+      ],
+      "snapshot_in_options": false
+    },
+    {
+      "device": "/dev/disk1s1",
+      "fs_type": "apfs",
+      "mountpoint": "/System/Volumes/iSCPreboot",
+      "options": [
+        "local",
+        "journaled",
+        "nobrowse"
+      ],
+      "snapshot_in_options": false
+    },
+    {
+      "device": "/dev/disk1s3",
+      "fs_type": "apfs",
+      "mountpoint": "/System/Volumes/Hardware",
+      "options": [
+        "local",
+        "journaled",
+        "nobrowse"
+      ],
+      "snapshot_in_options": false
+    },
+    {
+      "device": "/dev/disk3s5",
+      "fs_type": "apfs",
+      "mountpoint": "/System/Volumes/Data",
+      "options": [
+        "local",
+        "journaled",
+        "nobrowse",
+        "protect",
+        "root data"
+      ],
+      "snapshot_in_options": false
+    },
+    {
+      "device": "/dev/disk5s1",
+      "fs_type": "apfs",
+      "mountpoint": "/Volumes/inkcal.sh 1.0.0-arm64",
+      "options": [
+        "local",
+        "nodev",
+        "nosuid",
+        "read-only",
+        "journaled",
+        "noowners",
+        "mounted by kai"
+      ],
+      "snapshot_in_options": false
+    }
+  ]
+}

@@ -82,6 +82,17 @@ gate, then promote only resolved slices into this directory.
   `src/apfs_fastindex/fallback_traversal.py` (Python) and
   `crates/apfs-fastindex/src/fallback.rs` (Rust, used by the
   `apfs-fastindex-scan` CLI when the source is a directory).
+- `../research/experiments/EX-23-snapshot-shape-parity/README.md`:
+  research log for R2-B's best-effort snapshot shape-parity
+  probe (never sudo per SR-020). First-run verdict
+  `blocked_no_snapshots_at_all`: the only snapshot on the host
+  is the sealed-system OS-update one, which SR-020 excludes.
+  The R2-B Rust integration (`--snapshot <mountpoint>` flag on
+  `apfs-fastindex-scan`) is **not** landed yet; the lane stays
+  in `not_claimed` until a privileged rerun produces
+  `validated_snapshot_shape_parity`. SR-020 documents the
+  entitlement gate (mutating snapshot calls need root + the
+  DTS-issued private entitlement `com.apple.developer.vfs.snapshot`).
 - `measurement-baseline.md`: first reproducible measurement
   (entries/sec, wall time, CPU breakdown) for raw and fallback modes
   on three reference targets. Standing baseline for any future
