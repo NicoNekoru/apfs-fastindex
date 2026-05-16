@@ -325,7 +325,28 @@ private let vizBridgeShim: String = """
         const parserOutput = (doc && (doc.parser_output || doc)) || {};
         const entries = parserOutput.entries || [];
         const rootPath = (entries[0] && entries[0].path) || '';
-        postToSwift({ type: 'ingest_succeeded', rootPath: rootPath, totalEntries: entries.length });
+        // `window.ingest(doc)` already populated rootNode with both
+        // metrics; reuse those totals so Swift doesn't have to
+        // re-sum the tree. `allocatedTotal === null` is the SR-019 /
+        // EX-22 unclaimed marker and is preserved as JSON null.
+        let logicalTotal = 0;
+        let allocatedTotal = null;
+        let allocatedAvailable = false;
+        try {
+          if (window.rootNode) {
+            logicalTotal = window.rootNode.valueLogical || 0;
+            allocatedTotal = window.rootNode.valueAllocated;
+          }
+          allocatedAvailable = !!window.allocatedAvailable;
+        } catch (_ignored) { /* the viz still rendered fine */ }
+        postToSwift({
+          type: 'ingest_succeeded',
+          rootPath: rootPath,
+          totalEntries: entries.length,
+          logicalTotal: logicalTotal,
+          allocatedTotal: allocatedTotal,
+          allocatedAvailable: allocatedAvailable
+        });
       };
       xhr.onerror = function() {
         const msg = 'scan fetch transport error';

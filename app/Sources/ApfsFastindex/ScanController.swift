@@ -34,6 +34,16 @@ final class ScanController: ObservableObject {
     @Published var lastError: String? = nil
     @Published var selectedPath: String = ""
     @Published var correctnessClaim: String = ""
+    /// Sum of `entry.logical_size` across the loaded scan's root,
+    /// populated once the viz finishes ingest. `0` until then.
+    @Published var logicalTotal: UInt64 = 0
+    /// Sum of `entry.allocated_size` across the loaded scan's root.
+    /// `nil` means SR-019 / EX-22 None-collapse fired (at least one
+    /// sparse or decmpfs row in the subtree). When
+    /// `allocatedColumnAvailable == false` the scan pre-dates R2-A
+    /// and this column should be hidden entirely.
+    @Published var allocatedTotal: UInt64? = nil
+    @Published var allocatedColumnAvailable: Bool = false
 
     /// Latest scan-result URL written to disk so the viz can load it via
     /// XHR. We retain it for the lifetime of the scan + page render; the
@@ -82,6 +92,48 @@ final class ScanController: ObservableObject {
         return "ready"
     }
 
+    /// Human-readable size-totals string for the status bar, matching the
+    /// viz's `formatBytes` / `formatAllocated` semantics. Empty when no
+    /// scan has finished ingesting yet (i.e., logicalTotal is still 0
+    /// AND the column hasn't reported in).
+    var totalsText: String {
+        if logicalTotal == 0 && !allocatedColumnAvailable {
+            return ""
+        }
+        let logical = "logical: \(Self.formatBytes(logicalTotal))"
+        guard allocatedColumnAvailable else { return logical }
+        let allocated: String
+        if let bytes = allocatedTotal {
+            allocated = "allocated: \(Self.formatBytes(bytes))"
+        } else {
+            // SR-019 / EX-22 None-collapse: at least one sparse or
+            // decmpfs row in the subtree means the aggregate is
+            // deliberately not claimed. Surface that verbatim rather
+            // than a misleading zero.
+            allocated = "allocated: unclaimed"
+        }
+        return "\(logical) · \(allocated)"
+    }
+
+    /// Mirrors the JS `formatBytes()` in `viz/index.html` so the native
+    /// status bar and the in-page tooltip agree on units.
+    static func formatBytes(_ bytes: UInt64) -> String {
+        if bytes == 0 { return "0 B" }
+        let units = ["B", "KB", "MB", "GB", "TB", "PB"]
+        let value = Double(bytes)
+        let exponent = min(units.count - 1, Int(log10(value) / 3))
+        let scaled = value / pow(1000.0, Double(exponent))
+        let format: String
+        if scaled >= 100 || exponent == 0 {
+            format = "%.0f %@"
+        } else if scaled >= 10 {
+            format = "%.1f %@"
+        } else {
+            format = "%.2f %@"
+        }
+        return String(format: format, scaled, units[exponent])
+    }
+
     func bindWebView(_ webView: WKWebView) {
         self.webView = webView
         // The Coordinator we registered in `makeNSView` is both the
@@ -111,6 +163,9 @@ final class ScanController: ObservableObject {
         elapsedMs = 0
         lastError = nil
         correctnessClaim = ""
+        logicalTotal = 0
+        allocatedTotal = nil
+        allocatedColumnAvailable = false
         pendingProgress = nil
         // Discard any previous temp scan file before starting a new one.
         cleanupLastTempScan()
@@ -356,8 +411,20 @@ final class ScanController: ObservableObject {
             NSLog("[viz] console.error: %@", message)
         case .ingestStarted:
             NSLog("[viz] ingest started")
-        case .ingestSucceeded(let root, let total):
-            NSLog("[viz] ingest ok: root=%@ entries=%llu", root, total)
+            self.logicalTotal = 0
+            self.allocatedTotal = nil
+            self.allocatedColumnAvailable = false
+        case .ingestSucceeded(let root, let total, let logical, let allocated, let allocatedAvailable):
+            NSLog(
+                "[viz] ingest ok: root=%@ entries=%llu logical=%llu allocated=%@",
+                root,
+                total,
+                logical,
+                allocated.map { String($0) } ?? "unclaimed"
+            )
+            self.logicalTotal = logical
+            self.allocatedTotal = allocated
+            self.allocatedColumnAvailable = allocatedAvailable
         case .ingestFailed(let message):
             NSLog("[viz] ingest failed: %@", message)
             self.lastError = "viz failed to load scan: \(message)"

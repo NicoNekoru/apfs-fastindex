@@ -9,7 +9,13 @@ enum BridgeMessage {
     case moveToTrash(paths: [String])
     case consoleError(message: String)
     case ingestStarted
-    case ingestSucceeded(rootPath: String, totalEntries: UInt64)
+    case ingestSucceeded(
+        rootPath: String,
+        totalEntries: UInt64,
+        logicalTotal: UInt64,
+        allocatedTotal: UInt64?,
+        allocatedAvailable: Bool
+    )
     case ingestFailed(message: String)
 
     init?(payload: Any) {
@@ -40,7 +46,27 @@ enum BridgeMessage {
         case "ingest_succeeded":
             let root = (dict["rootPath"] as? String) ?? ""
             let total = (dict["totalEntries"] as? NSNumber)?.uint64Value ?? 0
-            self = .ingestSucceeded(rootPath: root, totalEntries: total)
+            let logicalTotal = (dict["logicalTotal"] as? NSNumber)?.uint64Value ?? 0
+            // `allocatedTotal` is JSON null when the SR-019 / EX-22
+            // None-collapse fired anywhere in the subtree; preserve
+            // that as Swift `nil` so the status bar can render
+            // "unclaimed" rather than a misleading zero.
+            let allocatedTotal: UInt64?
+            if dict["allocatedTotal"] is NSNull {
+                allocatedTotal = nil
+            } else if let num = dict["allocatedTotal"] as? NSNumber {
+                allocatedTotal = num.uint64Value
+            } else {
+                allocatedTotal = nil
+            }
+            let allocatedAvailable = (dict["allocatedAvailable"] as? Bool) ?? false
+            self = .ingestSucceeded(
+                rootPath: root,
+                totalEntries: total,
+                logicalTotal: logicalTotal,
+                allocatedTotal: allocatedTotal,
+                allocatedAvailable: allocatedAvailable
+            )
         case "ingest_failed":
             self = .ingestFailed(message: (dict["message"] as? String) ?? "")
         default:
