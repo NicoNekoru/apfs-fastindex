@@ -5,7 +5,7 @@ Title: Snapshot shape parity (live-directory walk vs snapshot-mount walk)
 Date: 2026-05-16
 Owner: Claude
 Status: Executed (best-effort)
-Result: depends on host state — see `summary.json`
+Result: `blocked_no_snapshots_at_all` (first run, 2026-05-16)
 Related RLs:
 - RL-06 Namespace Reconstruction
 - RL-08 Live Volume, Encryption, and Read Path
@@ -186,8 +186,38 @@ existence.
 
 ## Observed Results
 
-_(filled in by the probe; see `artifacts/generated/summary.json`
-for the verdict from the most recent run on this host)_
+First-run verdict (host inventory captured 2026-05-16):
+`blocked_no_snapshots_at_all`.
+
+The probe enumerated 9 mounted APFS volumes on the host (`/`,
+`/System/Volumes/{VM,Preboot,Update,xarts,iSCPreboot,Hardware,Data}`,
+`/Volumes/inkcal.sh 1.0.0-arm64`). Of those:
+
+- `/dev/disk3s1s1 -> /` reported **one** snapshot via
+  `diskutil apfs listSnapshots -plist`:
+  `com.apple.os.update-5514FF97DEE9C60C7FBF462B06A418D5FC4A882D5AF41D2BAF0A1419FB9B9F86`,
+  XID 2293965, Purgeable=No. SR-020 records this as the
+  sealed-system OS-update snapshot, which the probe skips by
+  name prefix.
+- Every other volume reported zero snapshots in both
+  `tmutil listlocalsnapshots` and
+  `diskutil apfs listSnapshots`.
+
+After the sealed-system filter, the probe had zero user-visible
+snapshots anywhere on the host. The probe therefore exited
+`blocked_no_snapshots_at_all` and saved the inventory for a
+future privileged rerun (the reproducer block in `summary.json`
+is empty because there is nothing to mount; to unblock,
+`tmutil localsnapshot` must first be run on any TM-included
+volume to produce a `com.apple.TimeMachine.*.local` snapshot,
+*then* `sudo mount_apfs -s ...` can mount it).
+
+This is the expected outcome on a clean developer workstation
+that has not been used as a TM-included machine. The probe is
+intentionally re-runnable: when a snapshot becomes available
+(either because the user took one, or because a privileged
+caller created one), the probe will detect and diff it
+automatically.
 
 ## Artifacts Saved
 
@@ -201,31 +231,39 @@ for the verdict from the most recent run on this host)_
 
 ## Interpretation
 
-_(filled in by the probe run; the patterns to look for are:)_
-
-- `validated_snapshot_shape_parity`: the fallback walker is
-  snapshot-safe; the R2-B Rust integration (a `--snapshot
-  <mountpoint>` flag deferring to an already-mounted snapshot)
-  can land without further evidence.
-- `shape_divergence`: the fallback walker needs a fix before
-  R2-B can claim shape parity. Most likely failure modes:
+- `blocked_no_snapshots_at_all` is the first-run verdict, and it
+  is exactly the outcome SR-020 predicted for an unprivileged
+  process on a dev workstation without prior TM-snapshot usage.
+  The lane is not failing — it is correctly entitlement-gated.
+- The Rust integration can still land. R2-B's product surface
+  is a `--snapshot <mountpoint>` flag on the existing fallback
+  scanner that consumes an already-mounted snapshot directory
+  (the user owns the `sudo mount_apfs -s` step). The scanner's
+  behaviour does not change; the flag is a label that tags the
+  source as a snapshot in `correctness_claim` and `not_claimed`
+  so the consumer can describe what they scanned. **The
+  shape-parity claim** itself stays `not_claimed` until a
+  privileged rerun of EX-23 produces a positive verdict; until
+  then the flag accurately tells the user "this is a snapshot
+  scan; I have not validated that it matches the live walk on
+  this host."
+- A future positive verdict would unlock:
+  - moving the snapshot-mount cell of the RL-08 support matrix
+    from `not_claimed` to `fallback_supported`;
+  - adding a manual chapter on snapshot-assisted scanning; and
+  - a separate probe class for snapshot-retained byte
+    accounting (which requires R2-A's allocated-size column to
+    converge first).
+- If a future rerun produces `shape_divergence`, the most
+  likely failure modes to investigate are:
   - paths emitted only in the snapshot walk because the
     snapshot mount exposes a different name normalization
     (SR-018);
   - `file_id` differences (APFS virtual OIDs are stable across
     snapshots, but the kernel may publish them via different
-    `st_ino` values inside a snapshot mount — that would be
-    worth catching);
-  - symlink-target divergence (rare; would indicate the
-    snapshot reread the xattr differently).
-- `blocked_no_mounted_user_snapshot`: the expected outcome on a
-  clean developer machine. The R2-B Rust integration can still
-  land *behind a flag* with this verdict, because the flag
-  pushes the privileged step (snapshot mount) onto the user
-  and the scanner's own behaviour is unchanged. A future
-  privileged rerun of EX-23 (or a fixture-class probe with the
-  entitlement) is the gate for promoting the column to
-  `claimed`.
+    `st_ino` values inside a snapshot mount);
+  - symlink-target divergence (would indicate the snapshot
+    reread the xattr differently).
 
 ## What This Rules Out
 
@@ -257,14 +295,23 @@ _(filled in by the probe run; the patterns to look for are:)_
 
 ## Next Exact Step
 
-- Run the probe in its current best-effort form. Record the
-  verdict.
-- If `validated_snapshot_shape_parity`: implement the
-  `--snapshot <mountpoint>` Rust CLI flag (sugar over
-  `--mode fallback <mountpoint>` plus a tag in
-  `correctness_claim` that the source was a snapshot mount).
-- If `blocked_*`: park the column at `not_claimed` and document
-  the reproducer in the summary for a future privileged rerun.
-- Open `EX-23b` if a positive run is later achievable with sudo,
-  to validate the diff under multiple snapshot ages and across
-  the system / data volume pair.
+- Land the `--snapshot <mountpoint>` Rust CLI flag in R2-B's
+  Rust slice (it sugars over `--mode fallback <mountpoint>`
+  plus a snapshot-source tag in `correctness_claim` /
+  `not_claimed`). The flag is operationally useful immediately
+  (it makes the snapshot scanning story documentable); the
+  shape-parity claim itself stays in `not_claimed` until a
+  privileged rerun of EX-23 produces
+  `validated_snapshot_shape_parity`.
+- A privileged user wanting to advance the lane should run:
+  ```
+  tmutil localsnapshot /                    # create snapshot (TM volumes)
+  tmutil listlocalsnapshots /               # discover its name
+  sudo mkdir -p /tmp/apfsfi-ex23-snap
+  sudo mount_apfs -s <snapshot-name> / /tmp/apfsfi-ex23-snap
+  python3 docs/research/experiments/EX-23-snapshot-shape-parity/artifacts/probe_ex23.py
+  sudo umount /tmp/apfsfi-ex23-snap
+  ```
+- Open `EX-23b` if a positive rerun is later achievable, to
+  validate the diff under multiple snapshot ages and across the
+  System / Data volume pair.
