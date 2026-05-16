@@ -14,7 +14,9 @@ enum BridgeMessage {
         totalEntries: UInt64,
         logicalTotal: UInt64,
         allocatedTotal: UInt64?,
-        allocatedAvailable: Bool
+        allocatedAvailable: Bool,
+        sourceKind: String,
+        sourceRequestedPath: String
     )
     case ingestFailed(message: String)
 
@@ -60,12 +62,16 @@ enum BridgeMessage {
                 allocatedTotal = nil
             }
             let allocatedAvailable = (dict["allocatedAvailable"] as? Bool) ?? false
+            let sourceKind = (dict["sourceKind"] as? String) ?? ""
+            let sourceRequestedPath = (dict["sourceRequestedPath"] as? String) ?? ""
             self = .ingestSucceeded(
                 rootPath: root,
                 totalEntries: total,
                 logicalTotal: logicalTotal,
                 allocatedTotal: allocatedTotal,
-                allocatedAvailable: allocatedAvailable
+                allocatedAvailable: allocatedAvailable,
+                sourceKind: sourceKind,
+                sourceRequestedPath: sourceRequestedPath
             )
         case "ingest_failed":
             self = .ingestFailed(message: (dict["message"] as? String) ?? "")
