@@ -21,14 +21,10 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
-import os
 import platform
-import shutil
 import statistics
 import subprocess
-import sys
 from pathlib import Path
-from typing import Any
 
 ARTIFACT_DIR = Path(__file__).resolve().parent
 GENERATED_DIR = ARTIFACT_DIR / "generated"
