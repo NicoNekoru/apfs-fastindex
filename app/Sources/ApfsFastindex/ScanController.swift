@@ -124,6 +124,7 @@ final class ScanController: ObservableObject {
         return "ready"
     }
 
+<<<<<<< HEAD
     /// True iff the viz has a usable scan loaded. The toolbar collapses
     /// from the "pick a target" prompt to a compact summary whenever
     /// this is true, so the user isn't asked to start a scan they
@@ -202,6 +203,8 @@ final class ScanController: ObservableObject {
         return statusText
     }
 
+=======
+>>>>>>> 845d94f (feat(app): surface logical+allocated totals in the SwiftUI status bar)
     /// Human-readable size-totals string for the status bar, matching the
     /// viz's `formatBytes` / `formatAllocated` semantics. Empty when no
     /// scan has finished ingesting yet (i.e., logicalTotal is still 0
