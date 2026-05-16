@@ -71,6 +71,7 @@ Current source reviews:
 - `SR-016` record-body fail-closed boundary
 - `SR-017` logical-size source precedence
 - `SR-018` name normalization and case behavior
+- `SR-019` allocated-size source precedence (R2-A entry)
 
 ### `EX-*` Experiment Notes
 
@@ -391,6 +392,18 @@ Long-range product roadmap:
   closed before row emission, logical size has a scoped precedence table, and
   stored UTF-8 names must be preserved without claiming full APFS lookup
   semantics.
+- `SR-019` opens R2-A: mines Apple's PDF (commit 2020-06-22) plus
+  linux-apfs-rw / apfsprogs / libfsapfs / TSK / dissect.apfs /
+  apfs-fuse / go-apfs to pin per-file allocated-bytes precedence on
+  `j_dstream_t.alloced_size`. Surfaces the kernel-vs-fsck disagreement
+  (linux-apfs-rw writes `alloced_size = round_up(ds_size, blocksize)`;
+  apfsck enforces `Σ extent.len == alloced_size`) and the
+  decoded-but-dropped pattern (libfsapfs/apfs-fuse/go-apfs all decode
+  the field, none surfaces it). v1 emission: regular+dstream →
+  `Some(alloced_size)`; regular+decmpfs → fail closed (`None`,
+  `not_claimed`); symlink → `0`; dir → `0`; else fail closed.
+  Extent-reference tree stays out of scope for R2-A (it is the
+  exclusive/shared/snapshot-retained prerequisite).
 
 ## Research Tracks
 
