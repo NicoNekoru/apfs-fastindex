@@ -1,0 +1,81 @@
+{
+  "entries": [
+    {
+      "compressed_flag": false,
+      "inode": 2,
+      "path": ".",
+      "st_blocks": 0,
+      "st_blocks_x_512": 0,
+      "st_flags": 0,
+      "st_size": 288,
+      "type": "dir"
+    },
+    {
+      "compressed_flag": false,
+      "inode": 20,
+      "nlink": 1,
+      "path": "clone.txt",
+      "st_blocks": 8,
+      "st_blocks_x_512": 4096,
+      "st_flags": 0,
+      "st_size": 29,
+      "type": "file"
+    },
+    {
+      "compressed_flag": true,
+      "inode": 24,
+      "nlink": 1,
+      "path": "compressed.txt",
+      "st_blocks": 8,
+      "st_blocks_x_512": 4096,
+      "st_flags": 32,
+      "st_size": 53248,
+      "type": "file"
+    },
+    {
+      "compressed_flag": false,
+      "inode": 16,
+      "nlink": 2,
+      "path": "hard.txt",
+      "st_blocks": 8,
+      "st_blocks_x_512": 4096,
+      "st_flags": 0,
+      "st_size": 29,
+      "type": "file"
+    },
+    {
+      "compressed_flag": false,
+      "inode": 23,
+      "nlink": 1,
+      "path": "link.txt",
+      "st_blocks": 0,
+      "st_blocks_x_512": 0,
+      "st_flags": 0,
+      "st_size": 12,
+      "symlink_target": "ordinary.txt",
+      "type": "symlink"
+    },
+    {
+      "compressed_flag": false,
+      "inode": 16,
+      "nlink": 2,
+      "path": "ordinary.txt",
+      "st_blocks": 8,
+      "st_blocks_x_512": 4096,
+      "st_flags": 0,
+      "st_size": 29,
+      "type": "file"
+    },
+    {
+      "compressed_flag": false,
+      "inode": 19,
+      "nlink": 1,
+      "path": "sparse.bin",
+      "st_blocks": 48,
+      "st_blocks_x_512": 24576,
+      "st_flags": 0,
+      "st_size": 1052897,
+      "type": "file"
+    }
+  ]
+}
