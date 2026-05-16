@@ -1,0 +1,193 @@
+\chapter{Support, Readability, and the Fallback}
+
+The chapter develops a vocabulary the rest of the manual has used
+implicitly: what does it mean to "support" a source. The vocabulary
+matters because every product decision sits on top of it. A source
+that is supported is one the product makes a correctness claim on; a
+source that is merely readable is not. The two are easy to confuse.
+
+\section{Four Properties, In Order}
+
+\textbf{Observation.} Four properties characterise a source's
+relationship to the parser. The order matters; each builds on the
+last.
+
+\begin{description}
+  \item[Readable.] Raw bytes can be opened and sampled. A device file
+    exists and \texttt{read()} returns data.
+  \item[Parsable.] Checkpoint and root discovery succeed; raw
+    traversal runs without aborting.
+  \item[Validatable.] The parser's output can be compared to a named
+    oracle for the requested mode. A namespace can be diffed
+    against a POSIX traversal; a logical size against
+    \texttt{st\_size}.
+  \item[Supported.] The source is in the product allowlist for the
+    requested mode. Validation has been performed; results were
+    correct; the source class belongs in production.
+\end{description}
+
+The first three are technical. The fourth is editorial: it is the
+project's decision about which sources are stable enough to make a
+correctness claim on. A source can be readable and parsable and
+validatable in one moment and not be supported because the moment is
+not durable.
+
+\section{Readable Is Not Supported}
+
+The common confusion is between readability and support. A mounted
+live volume is readable. It may, on a still moment, be parsable. It
+may, against a momentary POSIX snapshot, even be validatable. It is
+not supported, because the validation cannot be stable: the next
+moment moves the visible checkpoint, the next POSIX snapshot
+disagrees with the parser snapshot, and the user has no way to tell
+which row is from which moment.
+
+The right rule: support a source class only when the validation
+recipe is reproducible. If the validation works once and then is
+not reproducible because the source state has moved, the source
+class is not supported even though one validation passed.
+
+\section{The Current Allowlist}
+
+The R1 raw-mode allowlist is intentionally short.
+
+\begin{itemize}
+  \item Detached, unencrypted, image-backed APFS containers. The
+    \texttt{.dmg} layer fixes the visible state at detach time.
+  \item Caller-supplied raw APFS container devices under
+    \texttt{/dev/disk*} or \texttt{/dev/rdisk*} where the caller
+    has committed that the checkpoint will not advance.
+  \item Explicitly stable APFS sources --- a tightly controlled lab
+    volume where the operator pins the state.
+\end{itemize}
+
+What is not on the list: live mounted startup disks, FileVault
+volumes the user is using, multi-device or Fusion containers,
+sealed system volumes, snapshots opened through the operating
+system's snapshot framework, and any container whose
+\texttt{omap\_phys.flags} indicate an encryption operation in
+flight.
+
+The allowlist will grow only after a paired oracle and a new probe
+clear the corresponding entry in the support matrix.
+
+\section{Fail-Closed Triggers}
+
+A source that does not satisfy the allowlist must fail closed before
+emitting rows. The categorical triggers, with the chapter that
+develops each:
+
+\begin{description}
+  \item Ambiguous or malformed checkpoint state (chapter~3).
+  \item Non-contiguous checkpoint descriptor layout (chapter~3).
+  \item Unsupported incompatible feature bits in the container or
+    volume (chapter~3, chapter~5).
+  \item OMAP-open or OMAP-lookup encryption flags (chapter~4).
+  \item Unknown bits in any \texttt{flags} field the parser inspects
+    (chapter~4, chapter~7).
+  \item Encryption keys or hardware-backed key requirements the
+    parser cannot reach (chapter~4).
+  \item Fusion or multi-device storage requirements (chapter~3).
+  \item Requested merged-root or boot-root semantics (chapter~13).
+  \item Snapshot or sealed-volume semantics outside the target mode
+    (chapter~13).
+  \item No validated corpus for the source class.
+\end{description}
+
+Each trigger is a typed error with a substring naming the rule. The
+caller dispatches on the error rather than retrying.
+
+\section{The Fallback}
+
+When the parser refuses a source, the product is not stuck. The
+fallback path emits the same shape of output through supported
+operating-system APIs.
+
+\textbf{Observation.} A POSIX-traversal fallback in both Python
+(\texttt{fallback\_traversal.py}) and Rust (\texttt{fallback.rs})
+emits \texttt{NamespaceEntry} and \texttt{DirectoryAggregate} rows
+that, on the proof fixture, match the raw-mode output of the same
+volume exactly. Same entry count, same paths, same
+\texttt{entry\_kind}, same \texttt{logical\_size}, same
+\texttt{symlink\_target}, same per-directory aggregates.
+
+The fallback walker uses \texttt{os.walk} plus \texttt{os.lstat} plus
+\texttt{os.readlink} in the Python version, and the equivalent
+\texttt{read\_dir} plus \texttt{symlink\_metadata} plus
+\texttt{read\_link} in the Rust version. Both paths apply the SR-017
+precedence rule at the trivial step: \texttt{st\_size} for regular
+files, \texttt{readlink} byte length for symlinks. Both apply the
+unique-inode aggregate policy from chapter~8.
+
+Two consequences follow.
+
+\paragraph{The contract is mode-independent.} The product emits the
+same shape of output regardless of which backend produced it. The
+caller does not have to know whether the row came from a raw FS-tree
+walk or a POSIX traversal; the field set and the semantic mode are
+identical.
+
+\paragraph{The slow path is not slow.} Chapter~12 shows that the
+fallback sustains roughly 130 thousand entries per second on warm
+directory trees with ordinary \texttt{lstat}, and roughly 157
+thousand with macOS's \texttt{getattrlistbulk}. On a cold whole-
+machine scan the bottleneck is the disk, not the parser. The
+fallback is fast enough to be the default for sources outside the
+raw allowlist, not a degraded mode.
+
+\section{Resilience In The Fallback}
+
+A whole-machine scan as a normal user encounters paths that the
+user does not have permission to read: sandboxed application data,
+sealed-system directories, daemon-owned caches. The fallback walker
+must continue across these without aborting and without producing
+silently incomplete totals.
+
+\textbf{Observation.} Per-entry \texttt{EACCES}, \texttt{EPERM}, and
+\texttt{ENOENT} are recorded in \texttt{parser\_output.walk\_skips}
+with a reason; the walk continues. A normal-user \texttt{/} scan on
+the host the project tested completes with roughly 830 skipped paths
+and reports them in the output document. The caller can render the
+skip list as a diagnostic without it affecting the row stream.
+
+The walker also skips top-level system directories that exist only as
+APFS-internal artefacts on the boot disk
+(\texttt{.fseventsd}, the system snapshot mountpoints) by name,
+rather than letting the operating system raise an error on them.
+That skip is documented in the source so it can be revisited as
+support broadens.
+
+\section{Auto-Dispatch}
+
+The CLI binary \texttt{apfs-fastindex-scan} picks the backend
+automatically based on the source path's shape.
+
+\begin{itemize}
+  \item A \texttt{.dmg} path or a \texttt{/dev/disk*} /
+    \texttt{/dev/rdisk*} device path is dispatched to raw mode.
+  \item A directory path is dispatched to fallback mode.
+  \item The caller can override with \texttt{--mode raw},
+    \texttt{--mode fallback}, or \texttt{--mode auto}.
+\end{itemize}
+
+The auto-dispatch is what makes the support boundary usable as a
+product surface. The user does not have to remember which sources
+are in the allowlist; the binary handles the dispatch and tells the
+caller, through the \texttt{correctness\_claim} and
+\texttt{not\_claimed} fields, which mode actually ran.
+
+\section{Why The Boundary Is Permanent}
+
+The boundary between raw and fallback is not provisional. As the
+project broadens R1 into R2 (chapter~13), each new source class
+gets a separate allowlist row, a separate oracle, and a separate
+probe. The boundary moves only when there is evidence to move it.
+
+This means the manual will keep growing chapters of this shape:
+"\emph{here is the source class, here is the oracle, here is the
+probe, here is the result, here is the support claim}." The work
+finishes only when every source class the product is willing to
+claim has its own line in the matrix.
+
+The unsexy form of the work is the price of having a fast indexer
+that is also correct.

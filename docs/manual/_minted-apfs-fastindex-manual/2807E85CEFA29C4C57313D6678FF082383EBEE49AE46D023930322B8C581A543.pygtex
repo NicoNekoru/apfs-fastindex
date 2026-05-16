@@ -1,0 +1,11 @@
+\begin{Verbatim}[commandchars=\\\{\}]
+\PYG{k+kd}{let}\PYG{+w}{ }\PYG{k}{mut}\PYG{+w}{ }\PYG{n}{cursor}\PYG{+w}{ }\PYG{o}{=}\PYG{+w}{ }\PYG{n}{metadata\PYGZus{}end}\PYG{p}{;}
+\PYG{k+kd}{let}\PYG{+w}{ }\PYG{k}{mut}\PYG{+w}{ }\PYG{n}{padded\PYGZus{}total}\PYG{+w}{ }\PYG{o}{=}\PYG{+w}{ }\PYG{l+m+mi}{0}\PYG{k}{usize}\PYG{p}{;}
+\PYG{k}{for}\PYG{+w}{ }\PYG{n}{entry}\PYG{+w}{ }\PYG{k}{in}\PYG{+w}{ }\PYG{n}{metadata}\PYG{p}{.}\PYG{n}{iter}\PYG{p}{()}\PYG{+w}{ }\PYG{p}{\PYGZob{}}
+\PYG{+w}{    }\PYG{k+kd}{let}\PYG{+w}{ }\PYG{n}{value}\PYG{+w}{ }\PYG{o}{=}\PYG{+w}{ }\PYG{o}{\PYGZam{}}\PYG{n}{blob}\PYG{p}{[}\PYG{n}{cursor}\PYG{+w}{ }\PYG{o}{..}\PYG{+w}{ }\PYG{n}{cursor}\PYG{+w}{ }\PYG{o}{+}\PYG{+w}{ }\PYG{n}{entry}\PYG{p}{.}\PYG{n}{x\PYGZus{}size}\PYG{+w}{ }\PYG{k}{as}\PYG{+w}{ }\PYG{k+kt}{usize}\PYG{p}{];}
+\PYG{+w}{    }\PYG{k+kd}{let}\PYG{+w}{ }\PYG{n}{padded}\PYG{+w}{ }\PYG{o}{=}\PYG{+w}{ }\PYG{p}{(}\PYG{n}{entry}\PYG{p}{.}\PYG{n}{x\PYGZus{}size}\PYG{+w}{ }\PYG{k}{as}\PYG{+w}{ }\PYG{k+kt}{usize}\PYG{+w}{ }\PYG{o}{+}\PYG{+w}{ }\PYG{l+m+mi}{7}\PYG{p}{)}\PYG{+w}{ }\PYG{o}{\PYGZam{}}\PYG{+w}{ }\PYG{o}{!}\PYG{l+m+mi}{7}\PYG{p}{;}
+\PYG{+w}{    }\PYG{n}{cursor}\PYG{+w}{ }\PYG{o}{+=}\PYG{+w}{ }\PYG{n}{padded}\PYG{p}{;}
+\PYG{+w}{    }\PYG{n}{padded\PYGZus{}total}\PYG{+w}{ }\PYG{o}{+=}\PYG{+w}{ }\PYG{n}{padded}\PYG{p}{;}
+\PYG{p}{\PYGZcb{}}
+\PYG{n+nf+fm}{assert\PYGZus{}eq!}\PYG{p}{(}\PYG{n}{padded\PYGZus{}total}\PYG{p}{,}\PYG{+w}{ }\PYG{n}{blob\PYGZus{}header}\PYG{p}{.}\PYG{n}{xf\PYGZus{}used\PYGZus{}data}\PYG{+w}{ }\PYG{k}{as}\PYG{+w}{ }\PYG{k+kt}{usize}\PYG{p}{);}
+\end{Verbatim}

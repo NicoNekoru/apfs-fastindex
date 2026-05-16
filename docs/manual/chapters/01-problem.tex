@@ -1,0 +1,135 @@
+\chapter{Why APFS Resists MFT-Style Indexing}
+
+WizTree owes its speed to a peculiarity of NTFS: the Master File Table.
+The MFT is a single, flat, contiguous structure in which each file is
+one record. Indexing an NTFS volume reduces to reading that table
+sequentially. Subdirectory recursion, repeated stat calls, and
+path-by-path traversal are all unnecessary.
+
+APFS provides nothing of the kind, by design.
+
+\section{What APFS Provides Instead}
+
+An APFS container is a copy-on-write region of transactional B-trees.
+There is no flat metadata table to read; there are at least three
+trees the indexer must touch for every file, in a specific order, all
+under a single chosen transaction state.
+
+\textbf{Spec.} A container holds:
+
+\begin{itemize}
+  \item a stable block-zero locator that points at the
+    \emph{checkpoint descriptor area},
+  \item the descriptor area itself, which carries a ring of container
+    superblocks --- one per transaction --- each of which is a
+    self-consistent view of the container at that transaction,
+  \item the \emph{container object map} (OMAP), a B-tree that resolves
+    virtual object identifiers to physical block addresses under a
+    chosen transaction,
+  \item one or more \emph{volume superblocks}, reached through the
+    container OMAP,
+  \item per-volume OMAPs that resolve the volume's virtual objects,
+  \item per-volume \emph{file-system trees}, B-trees of variable-length
+    records keyed by \texttt{(object\_id, type)} that hold directory
+    entries, inodes, extended attributes, hard-link records, and data
+    stream metadata.
+\end{itemize}
+
+Every metadata read is therefore at least three indirections:
+container, volume, FS tree. The lookups themselves are cheap, but each
+of them needs the correct OMAP and the correct transaction context.
+The naive question --- \emph{where is the MFT?} --- has no answer.
+
+\section{The Right Question}
+
+The right question is structural:
+
+\begin{quote}
+What is the minimum set of structures we must traverse, in what
+order, under what state pin, to correctly enumerate one volume?
+\end{quote}
+
+The answer fills most of this manual. In compressed form:
+
+\begin{enumerate}
+  \item Locate the descriptor area from block zero.
+  \item Select one checkpoint from that area --- the highest-XID
+    checksum-valid container superblock.
+  \item Walk the checkpoint map; resolve the container OMAP.
+  \item Look up the target volume superblock through the container
+    OMAP.
+  \item Open the volume OMAP; look up the FS-tree root.
+  \item Walk the FS tree, resolving internal-node child references
+    through the volume OMAP at every level.
+  \item Decode the FS-tree leaf records into directory entries, inodes,
+    xattrs, sibling links, and dstreams.
+  \item Reconstruct paths, file identity, and logical size from those
+    records.
+\end{enumerate}
+
+Each step is independently load-bearing. Skip the OMAP lookups at the
+FS-tree internal level (chapter~5) and you read random unallocated
+blocks. Choose the wrong checkpoint (chapter~3) and you read an
+incoherent transaction. Mis-decode an xfield blob (chapter~6) and you
+silently emit wrong sizes.
+
+\section{The Narrow v1 Contract}
+
+The project's first product contract is deliberately narrow:
+
+\begin{itemize}
+  \item one APFS volume,
+  \item at one pinned transaction state,
+  \item correct namespace,
+  \item per-file logical size,
+  \item fail closed outside the tested allowlist.
+\end{itemize}
+
+The contract is narrow because the cost of being approximately right is
+unbounded: aggregates derived from silently wrong rows propagate into
+treemaps, into "where did my disk space go" decisions, and into
+filesystem operations the user takes based on the result. The cost of
+being narrowly right and failing closed everywhere else is bounded: the
+fallback path produces a correct answer through supported APIs, more
+slowly.
+
+This is not a hedge. It is the way to ship a fast indexer at all.
+
+\section{Why Live Latest Cannot Be The Default}
+
+A particular instinct deserves to be killed early. The instinct says:
+"just read the latest checkpoint each time; the volume will be
+self-consistent enough." It is wrong on mounted volumes that the user
+is using.
+
+\textbf{Observation.} On a mounted lab image, writes from a concurrent
+process advance the visible latest checkpoint underneath the
+reader's eyes. Reading "latest" twice may return two different
+transactions; mixing objects across them produces an incoherent
+namespace. The result has no oracle to compare against because no
+oracle ever saw the mix. The probe that demonstrated this
+(\texttt{EX-05}) is the load-bearing counterexample for the v1 design.
+
+Live latest is not a v1 model. The supported v1 raw mode requires a
+state that can be pinned and held: a detached image, an explicitly
+stable APFS source, or a tightly controlled lab volume. Outside that
+allowlist the indexer falls back to a supported API.
+
+\section{What This Manual Does Not Promise}
+
+Three product properties are out of scope for this manual, not because
+they are unimportant but because the project has not yet validated
+them. They appear later, in the open-questions chapter, as named
+research lanes:
+
+\begin{itemize}
+  \item physical, exclusive, or shared bytes per file,
+  \item persistent incremental caches that reuse prior subtree
+    summaries,
+  \item the Finder-visible "/" namespace assembled from system and
+    data volumes, firmlinks, and snapshots on a modern macOS startup
+    disk.
+\end{itemize}
+
+A claim from this manual extends only to the things the manual
+explicitly proves.

@@ -1,0 +1,169 @@
+\chapter{Identity, Reuse, and What a Cache Key Cannot Be}
+
+The most attractive idea in any fast-indexer project is that a second
+scan should be faster than the first. The natural mechanism is a
+cache of parsed subtree summaries: walk the FS tree once, summarise
+each node, and on the next run reuse the summary if the node has not
+changed. The chapter is about why the obvious cache key for that
+mechanism is dangerous, and what the right shape of a safe key looks
+like.
+
+\section{The Tempting Mistake}
+
+The most obvious cache key is the OID: it identifies an object across
+versions, it is stable across copy-on-write rewrites, and it is small.
+A summary cache keyed on \texttt{(volume\_uuid, oid)} would deduplicate
+unchanged subtrees across runs.
+
+It would also return stale summaries, silently, the first time the
+volume mutates a subtree the cache already knows.
+
+\textbf{Observation.} The FS-tree root's logical OID stays stable
+across mutations; everything else about the on-disk object changes.
+EX-06 mutated the proof fixture, recorded the FS-tree root identity
+fields before and after, and observed:
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+field & across mutation \\
+\midrule
+logical OID                & stable \\
+physical address (paddr)   & changed \\
+object XID                 & changed \\
+object checksum            & changed \\
+block hash                 & changed \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+A cache keyed on OID would return the pre-mutation summary for the
+post-mutation tree. The parser would emit rows derived from the old
+state and aggregate them into the new state's directory totals. The
+user would see a treemap that does not match the disk.
+
+The OID is a \emph{virtual address}. It names \emph{some} version of
+the object; it does not name a particular content. A cache that wants
+content identity must use a content identifier.
+
+\section{The Shape Of A Safe Cache Key}
+
+A summary cache that is safe under mutation must distinguish entries
+that share an OID but differ in content. The minimum sufficient key
+is a tuple whose members come from several layers:
+
+\begin{description}
+  \item[Source identity.] A volume UUID, a container UUID, and an
+    image fingerprint (for detached sources). Distinguishes one
+    APFS volume from another, and distinguishes the same volume's
+    different image dumps.
+  \item[Parser version.] A monotonic identifier for the body decoder
+    and the namespace builder. A parser change invalidates every
+    summary, because a summary's interpretation depends on the
+    parser that produced it.
+  \item[Summary schema version.] A monotonic identifier for the
+    summary structure itself. A schema change is independent of a
+    parser change.
+  \item[OMAP context.] Whether the OID was resolved through the
+    container OMAP or the volume OMAP. A collision between the two
+    name spaces is rare but representable.
+  \item[OID.] The virtual identifier.
+  \item[Object XID.] The version of the object the summary was built
+    for.
+  \item[Physical address.] Useful as a cross-check; an OMAP that
+    resolves \texttt{(oid, xid)} to a different paddr than the cache
+    expects invalidates the entry.
+  \item[Checksum or content hash.] The strongest individual signal.
+    A block whose checksum has changed must not reuse a summary
+    keyed on the old checksum.
+  \item[Expected type and subtype.] Defensive. An OID that has been
+    re-allocated to a different object class is a new object.
+\end{description}
+
+The key is therefore not a small integer. It is a record of nine
+fields, eight of which the parser already needs to compute for any
+read, and the ninth (parser version) is constant per build.
+
+\section{What EX-07 Proved And What It Did Not}
+
+The project's first probe of the cache idea (EX-07) restricted itself
+to a narrow question: under exact node-identity matches on every
+field of the key above, does subtree reuse ever produce a wrong
+summary?
+
+\textbf{Observation.} EX-07 found zero false reuse for exact
+node-identity matches in the detached lab corpus.
+
+That is the strongest positive result a subtree-reuse cache can ask
+for at this stage. It means the mathematical foundation is sound:
+if two parses see the same node identity, they will get the same
+summary, and reusing one for the other is safe.
+
+It is not yet a production cache theorem. The probe ran on one corpus,
+on detached images, with mutations limited to a small set. Three
+things still have to land before a cache is part of the product:
+
+\begin{enumerate}
+  \item Re-run EX-07's mutation grid against the native Rust full
+    parse (now possible, since R1 is complete) to confirm the
+    finding holds when the parser is the project's own Rust code
+    rather than a third-party reference.
+  \item Build a cache storage design with crash-safe writes; a
+    cache that can corrupt during a kill produces stale-and-wrong
+    rather than absent-and-correct, which is the failure mode the
+    fail-closed discipline is supposed to prevent.
+  \item Specify an invalidation policy that names every condition
+    under which a summary becomes stale: parser version mismatch,
+    missing volume continuity, source identity mismatch,
+    unsupported feature drift, checkpoint rollback, snapshot
+    switch, unknown record-body type, or any new metric the cache
+    did not record.
+\end{enumerate}
+
+Until those gates pass, the safe default is full reparse, validated
+against the namespace and logical-size oracles. A second scan of
+the same volume produces the same answer as the first; it does not
+necessarily produce it faster.
+
+\section{The Identity-Tracking Discipline}
+
+A small detail of EX-06 deserves promotion. The probe did not assume
+which identity fields would change; it recorded all of them, every
+time. That habit --- "record every plausibly-load-bearing identity
+field at every relevant boundary, before deciding which ones matter"
+--- is what made the cache discussion concrete instead of speculative.
+
+The same habit appears in EX-12's OMAP lookup contract: the probe
+records every resolved \texttt{(oid, paddr, xid)} sample and replays
+header validation at each, rather than checking only the resolutions
+that the parser happens to read. The cost of recording is small;
+the cost of discovering, later, that a key field was never captured
+is large.
+
+The discipline generalises beyond caching. A reverse-engineering
+project produces evidence whose value depends on what it recorded
+at the time. The right rule is: when the question is "which fields
+matter," the experiment records all of them.
+
+\section{What This Chapter Forecloses}
+
+The chapter forecloses two specific design moves that other indexers
+sometimes make.
+
+\paragraph{No bare-OID cache.} The parser will never key reuse on
+OID alone, even with parser-version qualification. The mutation
+behaviour above means a bare-OID cache is unsafe in principle, not
+just unsafe under unusual conditions.
+
+\paragraph{No partial summary reuse across mismatched scan XIDs.}
+A summary computed at scan XID $a$ is not reused at scan XID $b$.
+The whole point of pinning the scan XID is that object identity
+includes the XID; relaxing that turns the cache into a stale-state
+producer. The cache may compare keys across runs only when the keys
+agree on every field, scan XID included.
+
+The chapter does not foreclose the cache idea itself. Subtree reuse
+is a real opportunity --- the EX-07 result is encouraging --- but
+the cost of getting it wrong is high enough that the project will
+land it only after the gates above are met. Until then, the v1
+product fully reparses, and the manual records why.

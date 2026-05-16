@@ -1,0 +1,142 @@
+\chapter*{Glossary}
+\addcontentsline{toc}{chapter}{Glossary}
+
+The vocabulary the manual uses, in alphabetical order. Terms that
+appear in code identifiers carry the typewriter font of the
+identifier as well as the prose definition.
+
+\begin{description}
+  \item[Allocated size.] Bytes the filesystem has assigned to a
+    file's content. Distinct from logical size (the user-visible
+    byte length) and from exclusive size (bytes only this inode
+    owns). Out of v1 scope; opens as R2-A.
+  \item[APSB.] APFS volume superblock
+    (\texttt{apfs\_superblock\_t}). Reached through the container
+    OMAP at the scan XID; carries the volume OMAP, the FS-tree
+    root, feature masks, role, UUID, and statistics.
+  \item[Block zero.] The fixed locator block at the start of an
+    APFS container. Carries enough metadata to find the
+    checkpoint descriptor area but is not itself authoritative for
+    the live container state.
+  \item[Checkpoint descriptor area.] A contiguous run of blocks
+    that hold the rotating ring of container superblocks and
+    their associated checkpoint maps. The authoritative live NXSB
+    lives here.
+  \item[Checkpoint map.] A block carrying ephemeral-OID mappings
+    for the selected checkpoint. Walked in order from
+    \texttt{nx\_xp\_desc\_index}; the last block carries the
+    \texttt{CHECKPOINT\_MAP\_LAST} flag.
+  \item[Directory aggregate.] A per-directory total expressed
+    under the unique-inode logical-sum policy: each inode
+    contributes its logical size at most once per aggregate
+    root, regardless of how many hard-linked paths inside that
+    root name it.
+  \item[\texttt{DIR\_REC}.] Directory record. The FS-tree leaf that
+    represents a directory entry; key carries the parent inode's
+    file ID and the name; value carries the child file ID and the
+    POSIX entry type.
+  \item[Dstream.] An APFS data stream. Logical and allocated size
+    plus a default-extent reference; carried inline in the inode's
+    xfields as \texttt{INO\_EXT\_TYPE\_DSTREAM} or in a separate
+    \texttt{j\_dstream\_id\_val\_t} record.
+  \item[Ephemeral object.] An APFS object that lives in memory
+    between transactions and is written into the checkpoint data
+    area at commit. The checkpoint map identifies it by
+    \texttt{(oid, paddr)}.
+  \item[Fail closed.] The project's discipline of refusing
+    unknown, malformed, or out-of-allowlist input with a typed
+    reason, rather than producing a partial or best-effort
+    result.
+  \item[Fallback path.] The supported-API backend that runs when
+    raw mode rejects a source. POSIX walk plus \texttt{lstat}
+    plus optional \texttt{getattrlistbulk}; emits the same row
+    shape as raw mode.
+  \item[Firmlink.] A macOS presentation mechanism that joins
+    selected paths from a System volume to corresponding paths on
+    a Data volume to produce the user-visible startup namespace.
+    Out of v1 scope.
+  \item[\texttt{FsRecordDump} / \texttt{FsRecordRow}.] The Rust
+    crate's structured output for the FS-tree record-family dump
+    and one decoded record respectively. Field-level equal to the
+    independent Python decoder on the proof fixture.
+  \item[FS tree.] The volume-level B-tree of variable-length
+    records keyed by \texttt{(object\_id, type)}. Holds directory
+    entries, inodes, xattrs, sibling-link records, dstream
+    records, and extents.
+  \item[\texttt{getattrlistbulk}.] macOS syscall that returns
+    metadata for many directory entries per call. Used by the
+    fallback walker for the bulk perf path.
+  \item[Hard link.] A directory entry that names an inode already
+    named by another directory entry. APFS represents the
+    relationship through SIBLING\_LINK and SIBLING\_MAP records;
+    the unique-inode aggregate policy ensures the inode's logical
+    size is counted once per aggregate root.
+  \item[\texttt{INODE}.] Inode record. The FS-tree leaf that
+    carries file/dir/symlink identity, mode, parent ID, link
+    count, internal flags, and an xfield tail.
+  \item[Logical size.] User-visible byte length. The v1 size
+    metric, equal to POSIX \texttt{st\_size} for regular files
+    and to the symlink target byte length for symlinks. Distinct
+    from allocated, exclusive, shared, and snapshot-retained
+    sizes.
+  \item[Max XID.] The XID argument to an OMAP lookup. Returns the
+    entry with the highest stored XID less than or equal to the
+    requested value. The whole point of pinning the scan XID.
+  \item[\texttt{NamespaceEntry}.] One row of the namespace
+    output: path, entry kind, file ID, logical size, and
+    optional symlink target. Stable across raw and fallback
+    backends.
+  \item[NX / NXSB.] APFS container superblock
+    (\texttt{nx\_superblock\_t}). The block-zero copy is the
+    locator; the authoritative selected NXSB lives in the
+    descriptor area at the highest valid checkpoint XID.
+  \item[OID.] Object identifier. A virtual address into an APFS
+    OMAP's name space. Not by itself a safe cache key
+    (chapter~10).
+  \item[OMAP.] Object map. The B-tree that resolves virtual OIDs
+    to physical addresses under a chosen scan XID. Container and
+    volume each have their own.
+  \item[Paddr.] Physical block address. The on-disk location of an
+    APFS object. Returned by an OMAP lookup for virtual objects;
+    equal to \texttt{o\_oid} for physical objects.
+  \item[Parsable.] Source property: checkpoint and root discovery
+    succeed; raw traversal runs. Necessary but not sufficient
+    for "supported."
+  \item[Raw mode.] The native APFS-parsing backend. Used when the
+    source is in the raw-mode allowlist (detached \texttt{.dmg},
+    caller-supplied raw device, explicitly stable APFS source).
+  \item[Readable.] Source property: raw bytes can be opened and
+    sampled. Cheap. Not, on its own, evidence of correctness.
+  \item[Scan XID.] The transaction identifier the parser pins for
+    the duration of a run. All object resolution is performed
+    against this XID. Picked as the highest checksum-valid NXSB
+    XID in the descriptor area.
+  \item[Sibling link / sibling map.] Hard-link records.
+    \texttt{j\_sibling\_link\_val\_t} carries a hard-link's
+    sibling-group identifier and the linked name;
+    \texttt{j\_sibling\_map\_val\_t} closes the mapping from
+    sibling ID to inode.
+  \item[Sparse bytes.] \texttt{INO\_EXT\_TYPE\_SPARSE\_BYTES}: the
+    count of bytes the sparse-allocation layer has not committed
+    to disk. An allocation hint, not a logical size. Treat as
+    diagnostic in chapter~8's precedence rule.
+  \item[Supported.] Source property: the source is in the product
+    allowlist for the requested mode. Validation has been
+    performed; results were correct; the source class belongs in
+    production.
+  \item[Validatable.] Source property: parser output can be
+    compared against a named oracle for the requested mode. A
+    prerequisite of "supported" but not, by itself, sufficient.
+  \item[Virtual object.] An APFS object whose
+    \texttt{obj\_phys\_t} storage flag indicates the object
+    is resolvable through an OMAP. \texttt{o\_oid} is independent
+    of the block's paddr; the header is validated against
+    \texttt{omap\_lookup.oid}.
+  \item[XID.] Transaction identifier. Monotonic per container.
+    Used to order checkpoints (chapter~3) and to disambiguate OMAP
+    entries (chapter~4).
+  \item[Xfield.] The variable-length tail of an FS-tree record
+    that carries extended fields. One source-backed cursor rule
+    (chapter~6); fail-closed on any malformed shape
+    (chapter~7).
+\end{description}

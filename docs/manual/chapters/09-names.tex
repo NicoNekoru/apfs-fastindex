@@ -1,0 +1,161 @@
+\chapter{Names Across Volume Modes}
+
+A row in the namespace is identified by a path, and a path is a
+sequence of names. The names come from directory record keys; the
+keys are stored as UTF-8 byte strings. The chapter develops one
+finding and one deliberate non-promise.
+
+\section{The Finding}
+
+\textbf{Observation.} Stored names pass through verbatim.
+
+The Rust body decoder emits the bytes the directory key stores. The
+parser does not normalise, case-fold, or interpret. POSIX traversal
+of the same volume returns the same bytes. The two agree byte for
+byte.
+
+The finding is stated in the simplest form on purpose. Anything more
+elaborate --- "Rust emits the canonical form" or "Rust converts to
+NFC" --- would be wrong on some volume and would silently rename
+files in the output. Emit what the volume stored; the user can
+compare what they see to what \texttt{ls} shows.
+
+\section{Two Volume Modes Exist}
+
+APFS volumes come in two case-and-normalisation modes that v1 cares
+about.
+
+\begin{description}
+  \item[\texttt{APFS} (case-insensitive).]
+    \texttt{case\_insensitive = true},
+    \texttt{normalization\_insensitive = false}. The volume's
+    incompatible-feature mask sets the case-insensitive bit only.
+    The volume is also normalisation-insensitive for lookup, but
+    APFS reserves the explicit incompat bit for the case-sensitive
+    variant. The asymmetry is a quirk of the on-disk format, not a
+    statement about behaviour.
+  \item[\texttt{Case-sensitive APFS}.]
+    \texttt{case\_insensitive = false},
+    \texttt{normalization\_insensitive = true}.
+\end{description}
+
+Both modes appear on real systems, and both have to be supported.
+
+\section{What The Modes Do Affect}
+
+The modes affect \emph{lookup}: when the kernel resolves a path, it
+consults the volume's case and normalisation behaviour to decide
+whether two names refer to the same file. They do not affect row
+\emph{enumeration}: enumeration walks directory keys and returns
+their bytes.
+
+The distinction is the chapter's central claim. The parser can emit
+correct rows on both modes without performing the lookup-equivalence
+test, because the lookup behaviour is the running system's
+responsibility, not the parser's.
+
+\subsection{The Lookup Oracle}
+
+\textbf{Observation.} Across the two volume modes, APFS lookup
+behaves as follows. On the EX-20 same-run fixture using
+\texttt{os.O\_CREAT | os.O\_EXCL}:
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+operation & CI volume & CS volume \\
+\midrule
+create \texttt{plain.txt}                          & accept & accept \\
+create \texttt{CaseName.txt}                       & accept & accept \\
+\texttt{casename.txt} after \texttt{CaseName.txt}  & EEXIST & accept \\
+create NFC \texttt{caf\'e.txt}                     & accept & accept \\
+NFD \texttt{caf\'e.txt} after NFC sibling          & EEXIST & EEXIST \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The case-insensitive volume rejects the lowercase form because lookup
+considers the two names equivalent. Both volumes reject the
+decomposed Unicode form after the precomposed sibling because both
+treat NFC and NFD as the same name for lookup. This is what APFS does;
+no APFS-specific knowledge in the indexer is needed to produce the
+result, because the kernel did the work.
+
+\subsection{Rust Vs POSIX Equality}
+
+\textbf{Observation.} On both volumes the Rust-emitted path bytes
+match POSIX-traversal path bytes exactly. The comparison is byte for
+byte: \texttt{path.encode("utf-8").hex()} produces the same string on
+both sides for every entry. On the CI volume the corpus has four
+entries; on the CS volume it has five (the case-distinct sibling
+also appears); the equality holds for every one of them.
+
+The cleanest way to see this: both sides walk the directory key
+storage. POSIX walks through the kernel; Rust walks through the FS
+tree directly. Neither side applies normalisation, and the bytes are
+the same bytes either way.
+
+\section{The Deliberate Non-Promise}
+
+The parser does not implement APFS lookup-by-name.
+
+The APFS lookup primitive is the directory hash: a CRC32C over the
+name's UTF-32LE codepoints, with NFD normalisation applied to the
+input first, and on case-insensitive volumes Unicode case-fold
+applied before normalisation. Two names with the same hash collide
+within a directory; APFS resolves the collision by storing both keys
+and walking them.
+
+A \emph{find this exact path} feature has to reproduce that hash to
+locate the directory entry. The project has not yet validated a hash
+implementation against a same-run hash oracle, and until it does,
+the parser does not pretend to find files by name.
+
+The asymmetry is deliberate. A row enumeration that is correct ---
+every visible path appears once, with the right bytes --- is useful
+immediately: it powers a treemap, sort-by-size, drill-down, and
+context-menu operations on rows the user has selected. A
+lookup-by-name that is silently wrong returns the user's query
+against the wrong file. The cost of being wrong about a lookup is
+unbounded; the cost of refusing to do the lookup is "the user has
+to navigate to the file rather than type its name." The asymmetry
+of cost dictates the asymmetry of scope.
+
+\section{Names And Aggregates}
+
+The name preservation rule has one further consequence. Directory
+aggregates (chapter~8) key on inode identity, not on path. Two paths
+that hard-link to the same inode contribute that inode's logical
+size once to a directory total, regardless of whether their names
+are casewise or normalisationally different.
+
+The hard-link unification reads SIBLING\_LINK and SIBLING\_MAP
+records to find every name that points at a given inode. The names
+are emitted verbatim in each row; the inode is recorded as the row's
+\texttt{file\_id}; the aggregate keys on the file\_id. Names and
+sizes are decoupled from aggregate identity, which is the right
+shape for a filesystem that allows the same content to live under
+many names.
+
+\section{What Future Work Will Need}
+
+A future lookup-by-name feature will need:
+
+\begin{enumerate}
+  \item A same-run hash oracle: a probe that takes a constructed
+    name, runs APFS's own hash through a controlled API (the
+    kernel's \texttt{O\_EXCL} accept/reject is the cheapest
+    indicator), and produces a positive case and a negative case
+    for the hash equivalence class.
+  \item NFD normalisation tables and Unicode case-fold tables that
+    match the macOS version the volume was written on, accounting
+    for tables changing across Unicode revisions.
+  \item Collision handling: directories may store multiple keys with
+    the same hash, and the lookup must walk all of them.
+  \item Volume-mode dispatch: case-insensitive volumes apply case-fold
+    before normalisation; case-sensitive volumes do not.
+\end{enumerate}
+
+That feature has its own oracle and its own probe sequence and is
+out of v1. The non-promise here is what keeps v1's namespace claim
+defensible.

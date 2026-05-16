@@ -1,0 +1,186 @@
+\chapter{Open Questions}
+
+The narrow v1 contract --- one volume, one pinned state, namespace
+plus logical size, fallback for everything else --- is complete.
+What follows are the named investigation lanes the project has
+opened deliberately, with enough scope clarity that they can be
+worked on without widening v1's support claims by accident.
+
+The chapter is organised by R2 lane rather than by topic. A lane is
+a unit of work whose entire scope --- source class, semantic mode,
+oracle, support claim --- can be specified before the work starts.
+Lanes are isolated from each other; finishing one does not entail
+finishing any other.
+
+\section{R2-A: Physical Size Per File}
+
+The most visible WizTree feature R1 does not yet provide.
+
+\textbf{The question.} For each inode, what number of bytes does
+APFS allocate to its content on disk?
+
+\textbf{Why now.} Two of the candidate sources are already decoded
+by the v1 body parser. \texttt{j\_dstream\_t.alloced\_size} is
+emitted by the inode body decoder; \texttt{j\_file\_extent\_*}
+records are walked by the FS-tree walker and counted in the family
+histogram. The chapter~6 cursor rule already gives us
+correct field reads. What is missing is the precedence rule that
+turns the candidates into one number per inode, with an oracle
+that says when the number is right.
+
+\textbf{Candidate sources.}
+
+\begin{description}
+  \item[\texttt{j\_dstream\_t.alloced\_size}.] The dstream's claim
+    about allocated bytes. Easy to read, but APFS clone records
+    and snapshot-retained data can make the dstream's view
+    incomplete.
+  \item[\texttt{j\_file\_extent\_val\_t} records.] Per-inode
+    extents, walked from the FS tree. Summing the
+    \texttt{length\_and\_flags} of an inode's extents gives the
+    inode's apparent on-disk extent.
+  \item[Extent reference tree.] The container-level structure that
+    tracks block ownership across clones and snapshots. Required
+    when the question is "bytes uniquely owned by this inode" but
+    not when the question is "bytes allocated to this inode's
+    extents."
+\end{description}
+
+\textbf{Oracle.} \texttt{st\_blocks * 512}, for cases that have
+been validated case by case. The match is not always exact ---
+APFS may allocate metadata blocks that \texttt{st\_blocks} does not
+count, and clone behaviour means two inodes' allocated bytes do not
+sum to disk usage. The probe records both numbers and the
+divergence, rather than asserting equality.
+
+\textbf{Entry path.} SR-019 (source review of allocation
+semantics: dstream vs extents vs extent reference tree) then
+EX-22 (same-run fixture: ordinary, sparse, clone, hard link,
+symlink, compressed; \texttt{st\_blocks * 512} per inode; raw
+allocated number per source candidate; divergence breakdown). Pass
+condition: for every case, exactly one source candidate matches
+\texttt{st\_blocks * 512}, and the precedence rule that picks it is
+stated in SR-019.
+
+\textbf{What stays out.} Exclusive bytes (bytes only this inode
+owns, after accounting for clones and snapshots) and shared bytes
+(bytes shared across inodes or snapshots) are separate metrics
+with separate oracles. They are not R2-A. The extent-reference
+tree is decoded only as far as R2-A's allocated-size question
+requires.
+
+\section{R2-B: Snapshot-Assisted Scanning}
+
+The mechanism by which a fast indexer can scan a live machine
+honestly.
+
+\textbf{The question.} If the indexer takes a local APFS snapshot
+of a live volume, mounts it read-only, and walks it through the
+existing fallback, does the result match what the same walker would
+have emitted on the live volume at the snapshot moment?
+
+\textbf{Why now.} The snapshot mechanism is the only published
+macOS API that pins a coherent state of a live volume. The
+fallback walker is shape-equivalent to raw mode on the proof
+fixture (chapter~11). Combining the two lets the indexer scan a
+live volume without depending on the raw-mode allowlist, and
+without needing to handle live churn (chapter~3).
+
+\textbf{Oracle.} The live-volume scan at the snapshot moment is its
+own oracle: the snapshot is, by construction, a copy of the live
+state at the moment it was taken. The probe compares the snapshot
+walk to the live walk, taken simultaneously, for unchanged data.
+
+\textbf{Entry path.} SR-020 (source review of snapshot API:
+\texttt{fs\_snapshot\_create}, snapshot identity, mount lifecycle,
+cleanup) then EX-23 (live-vs-snapshot shape parity fixture). Pass
+condition: every \texttt{NamespaceEntry} and every
+\texttt{DirectoryAggregate} that the snapshot walk produces is
+present and identical in the live walk for paths that did not
+change during the probe.
+
+\textbf{What stays out.} Snapshot-retained bytes (bytes a snapshot
+holds against deletion) is a separate metric and a separate
+oracle. Sealed-system content (the parts of the macOS startup
+volume that user snapshots cannot mount) is a separate access
+class. Neither belongs in R2-B.
+
+\section{R2-C: Scanner Ergonomics}
+
+The lane that does not change semantics, only the surface.
+
+\textbf{The question.} Which parts of the scanner's user-facing
+surface --- backend selection, progress reporting, embeddability
+in a native UI, batch syscalls --- can be improved without moving
+the emission contract?
+
+\textbf{What has landed.} Bulk syscalls for the fallback path
+(\texttt{getattrlistbulk}, chapter~12) and stderr-streamed
+progress events with one update per directory boundary. A native
+macOS shell (\texttt{app/}) that runs the scanner as a subprocess
+and hosts the result in a treemap.
+
+\textbf{What is still in scope.} A native NSMenu for row context
+operations (Reveal in Finder, Move to Trash, Copy Path); a Top-N
+sidebar so a treemap with a long tail is browsable; a search
+field that filters rows by stored UTF-8 name; bundling the
+scanner binary into the app so the user does not need to run
+\texttt{cargo build} themselves; code signing and notarisation
+for a distributable build.
+
+\textbf{What stays out.} The shape of \texttt{ParserOutput} does
+not move in R2-C. A new column would be R2-A or R2-B. R2-C only
+makes the existing columns easier to consume.
+
+\section{Beyond R2}
+
+Three areas are deliberately deferred past R2. Each is large
+enough to warrant its own gate and its own oracle work; each is
+unsafe to open opportunistically.
+
+\paragraph{Encryption.} FileVault-encrypted volumes and
+hardware-backed encryption have separate threat models, separate
+privilege requirements, and separate validation problems. The
+parser currently fails closed on encryption flags; opening
+encryption support requires deciding which classes of key access
+the product is willing to use and which it is not.
+
+\paragraph{Live boot disk.} The startup disk on modern macOS is a
+sealed system volume joined to a data volume by firmlinks, with a
+snapshot pinning the system content. Raw scanning of the System
+volume is constrained by the seal; raw scanning of the Data volume
+is constrained by the live-churn problem; the merged user-visible
+view depends on firmlink table semantics that are themselves
+not fully public. Opening live boot support means building each
+of those subsystems' oracle.
+
+\paragraph{Boot-root merged namespace.} The Finder-visible
+\texttt{/} on a modern Mac is not any single APFS volume's
+namespace. It is the System volume's content joined to the Data
+volume's content through firmlinks, plus the current snapshot
+overlay. The product mode for this is distinct from
+raw-single-volume; it cannot share the same oracle, and its
+support claims must be stated separately.
+
+\paragraph{Persistent incremental cache.} The work of chapter~10
+turns into product only after the full set of cache-invalidation
+conditions has been enumerated, a crash-safe cache storage design
+exists, and an incremental scan has been validated against a
+fresh full reparse. The R2 lanes deliberately precede this work;
+a cache built on top of incomplete metrics or unstable support
+matrices would propagate its instability.
+
+\section{The Manual's Own Future}
+
+The chapter ends where the manual ends. Each lane above will, when
+it lands, become its own chapter: a thesis, the evidence, the
+precedence rule or the oracle pairing, the per-case table, the
+limits of what was checked. The chapter list will lengthen; the
+voice should not change.
+
+The discipline that produced R1 produced something narrow but
+defensible. The discipline that produces R2 will produce something
+broader and still defensible. Anything written here that survives
+the next year of work survives because it was written carefully.
+Anything that does not survive was an error worth recording so the
+next attempt does not repeat it.
