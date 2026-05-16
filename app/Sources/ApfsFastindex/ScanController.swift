@@ -44,6 +44,22 @@ final class ScanController: ObservableObject {
     /// and this column should be hidden entirely.
     @Published var allocatedTotal: UInt64? = nil
     @Published var allocatedColumnAvailable: Bool = false
+    /// SourceDescriptor.source_kind reported by the most recent scan
+    /// the viz successfully ingested. Empty until the first scan
+    /// finishes. The shell uses this to decide whether file operations
+    /// (Reveal in Finder / Move to Trash / Copy Path) are valid for
+    /// the currently-loaded scan: only `mounted_directory` resolves to
+    /// on-disk paths the host can act on.
+    @Published var lastScanSourceKind: String = ""
+    /// Absolute path the scanner was pointed at (parser_output.source.
+    /// requested_path). Combined with an entry's relative path to
+    /// resolve a real on-disk URL for Reveal in Finder / Move to
+    /// Trash. Empty when no scan has loaded yet.
+    @Published var lastScanRequestedPath: String = ""
+    /// Surfaced when a file operation finishes (or fails). The status
+    /// bar shows it for a couple of seconds before going back to the
+    /// scan-summary text. Cleared on next scan / next op.
+    @Published var lastOperationMessage: String? = nil
 
     /// Latest scan-result URL written to disk so the viz can load it via
     /// XHR. We retain it for the lifetime of the scan + page render; the
@@ -395,15 +411,23 @@ final class ScanController: ObservableObject {
         return nil
     }
 
-    // MARK: - Bridge inbound (Phase 2 will populate this)
+    // MARK: - Bridge inbound
 
     func handleBridgeMessage(_ message: BridgeMessage) {
         switch message {
         case .selected(let path, _, _):
             self.selectedPath = path
-        case .contextMenu, .revealInFinder, .moveToTrash:
-            // Reserved for Phase 2.
-            break
+        case .contextMenu(let path, let kind, let x, let y):
+            showContextMenu(forRelativePath: path, kind: kind, viewportX: x, viewportY: y)
+        case .revealInFinder(let path):
+            revealInFinder(relativePath: path)
+        case .moveToTrash(let paths):
+            // The viz currently only emits single-path trash requests
+            // (one row at a time); the protocol carries a list for a
+            // future multi-select pass.
+            for path in paths {
+                moveToTrash(relativePath: path)
+            }
         case .consoleError(let message):
             // Surface viz-side failures in the host log. Without this
             // the page can silently swallow exceptions and we have no
@@ -414,21 +438,224 @@ final class ScanController: ObservableObject {
             self.logicalTotal = 0
             self.allocatedTotal = nil
             self.allocatedColumnAvailable = false
-        case .ingestSucceeded(let root, let total, let logical, let allocated, let allocatedAvailable):
+        case .ingestSucceeded(
+            let root,
+            let total,
+            let logical,
+            let allocated,
+            let allocatedAvailable,
+            let sourceKind,
+            let sourceRequestedPath
+        ):
             NSLog(
-                "[viz] ingest ok: root=%@ entries=%llu logical=%llu allocated=%@",
+                "[viz] ingest ok: root=%@ entries=%llu logical=%llu allocated=%@ source=%@",
                 root,
                 total,
                 logical,
-                allocated.map { String($0) } ?? "unclaimed"
+                allocated.map { String($0) } ?? "unclaimed",
+                sourceKind
             )
             self.logicalTotal = logical
             self.allocatedTotal = allocated
             self.allocatedColumnAvailable = allocatedAvailable
+            self.lastScanSourceKind = sourceKind
+            self.lastScanRequestedPath = sourceRequestedPath
+            self.lastOperationMessage = nil
         case .ingestFailed(let message):
             NSLog("[viz] ingest failed: %@", message)
             self.lastError = "viz failed to load scan: \(message)"
         }
+    }
+
+    // MARK: - File operations
+
+    /// True iff the currently-loaded scan resolves to on-disk paths
+    /// the host can act on. `mounted_directory` is the fallback walker
+    /// against a live directory; `dmg_image` and `raw_device` are
+    /// scanners against detached images and have no live filesystem
+    /// behind them.
+    var fileOperationsAvailable: Bool {
+        guard !lastScanRequestedPath.isEmpty else { return false }
+        return lastScanSourceKind == "mounted_directory"
+    }
+
+    /// Resolve an entry's stored relative path against the scan root.
+    /// Returns nil if the scan is not a `mounted_directory` (raw-mode
+    /// entries cannot reach a real file), the entry's path is empty
+    /// (the root row), or the resulting URL doesn't fall inside the
+    /// scan root (defence against `..` traversal in malformed input).
+    func resolveAbsoluteURL(forRelativePath relative: String) -> URL? {
+        guard fileOperationsAvailable else { return nil }
+        guard !relative.isEmpty else { return nil }
+        let root = URL(fileURLWithPath: lastScanRequestedPath)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+        let candidate = root.appendingPathComponent(relative)
+            .standardizedFileURL
+        let rootComponents = root.pathComponents
+        let candidateComponents = candidate.pathComponents
+        guard candidateComponents.count >= rootComponents.count else { return nil }
+        for (index, component) in rootComponents.enumerated() {
+            if candidateComponents[index] != component { return nil }
+        }
+        return candidate
+    }
+
+    func revealInFinder(relativePath: String) {
+        guard let url = resolveAbsoluteURL(forRelativePath: relativePath) else {
+            lastOperationMessage = "cannot reveal: scan source is not a live directory"
+            return
+        }
+        // `activateFileViewerSelecting:` brings Finder forward AND
+        // selects the row, even for symlinks; it doesn't follow them.
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+        lastOperationMessage = "revealed \(url.lastPathComponent) in Finder"
+    }
+
+    func openInFinder(relativePath: String) {
+        guard let url = resolveAbsoluteURL(forRelativePath: relativePath) else {
+            lastOperationMessage = "cannot open: scan source is not a live directory"
+            return
+        }
+        // `open` invokes the default-app handler; equivalent to
+        // double-clicking the file in Finder.
+        NSWorkspace.shared.open(url)
+    }
+
+    func copyPathToPasteboard(relativePath: String) {
+        guard let url = resolveAbsoluteURL(forRelativePath: relativePath) else {
+            // Fall back to copying the relative path so the user
+            // still gets *something* useful even when the scan was a
+            // detached image.
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(relativePath, forType: .string)
+            lastOperationMessage = "copied relative path"
+            return
+        }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(url.path, forType: .string)
+        lastOperationMessage = "copied \(url.lastPathComponent) path"
+    }
+
+    func moveToTrash(relativePath: String) {
+        guard let url = resolveAbsoluteURL(forRelativePath: relativePath) else {
+            lastOperationMessage = "cannot trash: scan source is not a live directory"
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "Move “\(url.lastPathComponent)” to the Trash?"
+        alert.informativeText = url.path
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Move to Trash")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            return
+        }
+        do {
+            var resultingURL: NSURL?
+            try FileManager.default.trashItem(at: url, resultingItemURL: &resultingURL)
+            lastOperationMessage = "moved \(url.lastPathComponent) to Trash"
+        } catch {
+            lastOperationMessage = "trash failed: \(error.localizedDescription)"
+        }
+    }
+
+    /// Build and present an `NSMenu` at the given viewport coordinates.
+    /// Coordinates come from the viz as `event.clientX/Y` (top-left of
+    /// the WKWebView's bounds in points); we hand them off to AppKit
+    /// after the calling NSEvent's window is resolved.
+    func showContextMenu(
+        forRelativePath path: String,
+        kind: String,
+        viewportX: Double,
+        viewportY: Double
+    ) {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        let reachable = fileOperationsAvailable && !path.isEmpty
+
+        let header = NSMenuItem()
+        header.title = path.isEmpty ? "/" : path
+        header.isEnabled = false
+        menu.addItem(header)
+        menu.addItem(.separator())
+
+        let open = NSMenuItem(
+            title: "Open",
+            action: #selector(ContextMenuTarget.open(_:)),
+            keyEquivalent: ""
+        )
+        open.isEnabled = reachable
+        menu.addItem(open)
+
+        let reveal = NSMenuItem(
+            title: "Reveal in Finder",
+            action: #selector(ContextMenuTarget.reveal(_:)),
+            keyEquivalent: ""
+        )
+        reveal.isEnabled = reachable
+        menu.addItem(reveal)
+
+        let copy = NSMenuItem(
+            title: reachable ? "Copy Path" : "Copy Path (relative)",
+            action: #selector(ContextMenuTarget.copyPath(_:)),
+            keyEquivalent: ""
+        )
+        copy.isEnabled = !path.isEmpty
+        menu.addItem(copy)
+
+        menu.addItem(.separator())
+        let trash = NSMenuItem(
+            title: "Move to Trash…",
+            action: #selector(ContextMenuTarget.trash(_:)),
+            keyEquivalent: ""
+        )
+        trash.isEnabled = reachable
+        menu.addItem(trash)
+
+        let target = ContextMenuTarget(controller: self, relativePath: path, kind: kind)
+        for item in menu.items where item.action != nil {
+            item.target = target
+        }
+        // Retain the target for the lifetime of the menu.
+        objc_setAssociatedObject(menu, &ContextMenuTarget.associationKey, target, .OBJC_ASSOCIATION_RETAIN)
+
+        // Anchor at the cursor's screen location rather than at the
+        // (x, y) the viz reported: NSEvent.mouseLocation gives global
+        // screen coords and doesn't depend on whether the WebView's
+        // origin moved between the JS event firing and Swift handling
+        // it.
+        let mouseScreenLocation = NSEvent.mouseLocation
+        guard let window = NSApp.keyWindow ?? NSApp.mainWindow ?? NSApp.windows.first else {
+            return
+        }
+        let pointInWindow = window.convertPoint(fromScreen: mouseScreenLocation)
+        guard let contentView = window.contentView else { return }
+        let pointInView = contentView.convert(pointInWindow, from: nil)
+        let dummyEvent = NSEvent.mouseEvent(
+            with: .rightMouseDown,
+            location: pointInWindow,
+            modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: 0
+        )
+        if let event = dummyEvent {
+            NSMenu.popUpContextMenu(menu, with: event, for: contentView)
+        } else {
+            // Fallback: anchor in the view directly. Slightly less
+            // precise but always works.
+            menu.popUp(positioning: nil, at: pointInView, in: contentView)
+        }
+        // Silence the unused-variable warning when the dummyEvent
+        // path is taken.
+        _ = viewportX
+        _ = viewportY
     }
 
     // MARK: - Binary discovery
@@ -506,5 +733,39 @@ final class ScanBufferBox: @unchecked Sendable {
         lock.lock()
         data.removeAll(keepingCapacity: false)
         lock.unlock()
+    }
+}
+
+/// `NSMenu` requires its action targets to be `NSObject` instances
+/// reachable via `@objc` selectors. `ScanController` is an
+/// `ObservableObject` (not an `NSObject`), so we route the four
+/// menu actions through this tiny adapter. The adapter is associated
+/// with the `NSMenu` (`objc_setAssociatedObject`) so it lives until
+/// the menu dismisses, then is released along with it.
+final class ContextMenuTarget: NSObject {
+    /// Stable address used as the associated-object key.
+    static var associationKey: UInt8 = 0
+
+    weak var controller: ScanController?
+    let relativePath: String
+    let kind: String
+
+    init(controller: ScanController, relativePath: String, kind: String) {
+        self.controller = controller
+        self.relativePath = relativePath
+        self.kind = kind
+    }
+
+    @MainActor @objc func open(_ sender: Any?) {
+        controller?.openInFinder(relativePath: relativePath)
+    }
+    @MainActor @objc func reveal(_ sender: Any?) {
+        controller?.revealInFinder(relativePath: relativePath)
+    }
+    @MainActor @objc func copyPath(_ sender: Any?) {
+        controller?.copyPathToPasteboard(relativePath: relativePath)
+    }
+    @MainActor @objc func trash(_ sender: Any?) {
+        controller?.moveToTrash(relativePath: relativePath)
     }
 }
