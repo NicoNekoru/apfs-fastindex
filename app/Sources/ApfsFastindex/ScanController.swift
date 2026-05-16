@@ -152,13 +152,27 @@ final class ScanController: ObservableObject {
         evaluateClearScan()
     }
 
+    /// Cached decimal formatter for entry counts. The previous build
+    /// allocated a `NumberFormatter` on every read of
+    /// `liveCountersText` and `loadedSummaryText`, both of which
+    /// SwiftUI re-evaluates on every @Published change — i.e. four
+    /// times a second while a scan is running. NumberFormatter
+    /// initialisation walks the CFLocale tables and is the most
+    /// expensive accessor on this hot path. Caching it is a clean
+    /// 4× reduction in allocations per second for the toolbar
+    /// re-renders.
+    private static let entryCountFormatter: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        return f
+    }()
+
     /// Compact "1,234,567 entries · 2.3s" line for the scanning
     /// toolbar. Locale-aware grouping makes huge counts readable
     /// (an `/` scan tops out around 5M entries).
     var liveCountersText: String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        let entries = formatter.string(from: NSNumber(value: scannedCount)) ?? "\(scannedCount)"
+        let entries = Self.entryCountFormatter.string(from: NSNumber(value: scannedCount))
+            ?? "\(scannedCount)"
         let elapsed = Double(elapsedMs) / 1000.0
         let elapsedStr: String
         if elapsed < 10 {
@@ -172,9 +186,8 @@ final class ScanController: ObservableObject {
     /// Post-scan summary for the loaded-toolbar chip: entries count +
     /// elapsed time. The size totals live in the status bar.
     var loadedSummaryText: String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        let entries = formatter.string(from: NSNumber(value: scannedCount)) ?? "\(scannedCount)"
+        let entries = Self.entryCountFormatter.string(from: NSNumber(value: scannedCount))
+            ?? "\(scannedCount)"
         let elapsed = Double(elapsedMs) / 1000.0
         return String(format: "%@ entries · %.1fs", entries, elapsed)
     }

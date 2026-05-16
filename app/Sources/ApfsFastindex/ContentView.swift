@@ -287,14 +287,58 @@ struct ContentView: View {
     }
 
     private func browseForTarget() {
+        // The previous build called `panel.runModal()`, which is
+        // synchronous and spins the main thread's run loop in modal
+        // mode. NSOpenPanel does a noticeable amount of work the
+        // first time it shows (NSDocumentController hookup, sidebar
+        // enumeration, NSURLBookmarkResolution for the recent-items
+        // list); under runModal() all of that runs *before* the
+        // panel paints, so the click on the folder button stalls
+        // visibly. Sheets bind to the window's run loop instead and
+        // present immediately, deferring the slow work to after the
+        // panel is on screen.
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
+        // An empty `allowedContentTypes` means "no filter", which is
+        // what we want (a folder OR a .dmg). Setting it would force
+        // NSOpenPanel into the "filtered" rendering path, which
+        // adds a layout pass per directory.
         panel.allowedContentTypes = []
+        panel.canCreateDirectories = false
+        panel.treatsFilePackagesAsDirectories = false
+        panel.prompt = "Scan"
         panel.message = "Pick a directory to scan, or an APFS .dmg image."
-        if panel.runModal() == .OK, let url = panel.url {
-            controller.targetPath = url.path
+        // Pre-seed the panel's starting directory so it doesn't have
+        // to roll its own default (which on a cold cache walks
+        // ~/Library/Recent and friends). If we have a previously
+        // typed target use that, otherwise fall back to $HOME.
+        let trimmed = controller.targetPath.trimmingCharacters(in: .whitespaces)
+        if !trimmed.isEmpty {
+            let url = URL(fileURLWithPath: trimmed)
+            var isDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) {
+                panel.directoryURL = isDir.boolValue ? url : url.deletingLastPathComponent()
+            } else {
+                panel.directoryURL = URL(fileURLWithPath: NSHomeDirectory())
+            }
+        } else {
+            panel.directoryURL = URL(fileURLWithPath: NSHomeDirectory())
+        }
+
+        let window = NSApp.keyWindow ?? NSApp.mainWindow ?? NSApp.windows.first
+        let completion: (NSApplication.ModalResponse) -> Void = { response in
+            if response == .OK, let url = panel.url {
+                controller.targetPath = url.path
+            }
+        }
+        if let window {
+            panel.beginSheetModal(for: window, completionHandler: completion)
+        } else {
+            // Fallback for the rare case where no window is up yet:
+            // `begin` is still async, just unattached to any window.
+            panel.begin(completionHandler: completion)
         }
     }
 }
