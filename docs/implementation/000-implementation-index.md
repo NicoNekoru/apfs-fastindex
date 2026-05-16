@@ -93,6 +93,19 @@ gate, then promote only resolved slices into this directory.
   `validated_snapshot_shape_parity`. SR-020 documents the
   entitlement gate (mutating snapshot calls need root + the
   DTS-issued private entitlement `com.apple.developer.vfs.snapshot`).
+- `../research/experiments/EX-24-syscall-microbench/README.md`:
+  single-threaded syscall-cost microbench on /Applications;
+  drec_only vs current_walker vs fts(3). Falsified the SR-021
+  vnode-rage perf-lever hypothesis (drec_only and
+  current_walker within 1% on every dimension). fts 1.7× slower;
+  conditional EX-26 follow-up cancelled.
+- `../research/experiments/EX-25-parallel-walker/README.md`:
+  T ∈ {1, 2, 4, 8, 14} scaling sweep on /Applications. Verdict
+  `validated_parallel_scaling` at T=4 (2.47× of T=1; matches
+  Healey-2023's dumac shape and stays clear of the
+  Szorc-2018 / Apple-DTS-2025 APFS-container-lock regime that
+  fires beyond T=4). Drove the Rust slice that landed
+  `--threads N` on `apfs-fastindex-scan`.
 - `measurement-baseline.md`: first reproducible measurement
   (entries/sec, wall time, CPU breakdown) for raw and fallback modes
   on three reference targets. Standing baseline for any future
@@ -126,7 +139,27 @@ All four MWP gates have landed:
    plus the `not_claimed` register.
 
 R1 (Narrow Rust MWP) is complete. **R2-A (allocated_size column)
-also landed.** The Rust scanner now emits
++ R2-C parallel walker also landed.**
+
+**R2-C parallel walker** (EX-25, default `--threads
+min(hw.physicalcpu, 4)`): the fallback walker now spawns a
+per-directory worker pool. Per-worker `BulkReader`, shared
+`WorkQueue` for directory frames, per-worker `entries`/`skips`
+Vecs merged on the main thread after join. End-to-end
+`/Applications` throughput rose from 200,512 ent/s (post-r2c-
+fallback-perf) to 312,879 ent/s at T=4 (**+56%**); cumulative
+since pre-perf baseline is **+82%** (1.82× over 172,283 ent/s).
+EX-25 validated the SR-021 + Szorc-2018 + Apple-DTS-2025
+prediction that the APFS container lock fires beyond T=4
+(T=8 paid 4× T=1 sys-CPU for 1.94× throughput; T=14 paid 9.3× for
+1.38×) — the conservative `min(hw.physicalcpu, 4)` default
+stays in the favourable regime. `--threads 1` reverts to the
+serial walker and re-enables live `--progress` events
+(silenced in parallel mode because the FnMut callback contract
+is not Send). Test count delta: 69 → 70
+(`parallel_walker_matches_serial_shape` asserts byte-for-byte
+identical entries/aggregates/walk_skips across schedulers).
+ The Rust scanner now emits
 `allocated_size: Option<u64>` on `NamespaceEntry` and
 `unique_inode_allocated_total: Option<u64>` on `DirectoryAggregate`
 under the EX-22-amended SR-019 precedence
