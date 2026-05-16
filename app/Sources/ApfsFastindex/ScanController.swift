@@ -59,7 +59,23 @@ final class ScanController: ObservableObject {
     /// Surfaced when a file operation finishes (or fails). The status
     /// bar shows it for a couple of seconds before going back to the
     /// scan-summary text. Cleared on next scan / next op.
-    @Published var lastOperationMessage: String? = nil
+    @Published var lastOperationMessage: String? = nil {
+        didSet {
+            // Generation token so a fast-fire of multiple ops doesn't
+            // have stale timers clear a newer message early.
+            operationMessageGeneration &+= 1
+            let generation = operationMessageGeneration
+            if lastOperationMessage != nil {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { [weak self] in
+                    guard let self else { return }
+                    if self.operationMessageGeneration == generation {
+                        self.lastOperationMessage = nil
+                    }
+                }
+            }
+        }
+    }
+    private var operationMessageGeneration: UInt64 = 0
 
     /// Latest scan-result URL written to disk so the viz can load it via
     /// XHR. We retain it for the lifetime of the scan + page render; the
@@ -106,6 +122,71 @@ final class ScanController: ObservableObject {
             return String(format: "%llu entries, %.2fs", scannedCount, Double(elapsedMs) / 1000.0)
         }
         return "ready"
+    }
+
+    /// True iff the viz has a usable scan loaded. The toolbar collapses
+    /// from the "pick a target" prompt to a compact summary whenever
+    /// this is true, so the user isn't asked to start a scan they
+    /// already finished.
+    var hasLoadedScan: Bool {
+        !isScanning && lastError == nil && scannedCount > 0
+    }
+
+    /// Drop the loaded scan and reset the viz, leaving `targetPath`
+    /// alone so the user can edit it for the next scan. Called from
+    /// the "New…" button in the post-scan toolbar.
+    func clearLoadedScan() {
+        scannedCount = 0
+        skippedCount = 0
+        elapsedMs = 0
+        correctnessClaim = ""
+        logicalTotal = 0
+        allocatedTotal = nil
+        allocatedColumnAvailable = false
+        lastScanSourceKind = ""
+        lastScanRequestedPath = ""
+        selectedPath = ""
+        lastError = nil
+        lastOperationMessage = nil
+        cleanupLastTempScan()
+        evaluateClearScan()
+    }
+
+    /// Compact "1,234,567 entries · 2.3s" line for the scanning
+    /// toolbar. Locale-aware grouping makes huge counts readable
+    /// (an `/` scan tops out around 5M entries).
+    var liveCountersText: String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        let entries = formatter.string(from: NSNumber(value: scannedCount)) ?? "\(scannedCount)"
+        let elapsed = Double(elapsedMs) / 1000.0
+        let elapsedStr: String
+        if elapsed < 10 {
+            elapsedStr = String(format: "%.1fs", elapsed)
+        } else {
+            elapsedStr = String(format: "%.0fs", elapsed)
+        }
+        return "\(entries) entries · \(elapsedStr)"
+    }
+
+    /// Post-scan summary for the loaded-toolbar chip: entries count +
+    /// elapsed time. The size totals live in the status bar.
+    var loadedSummaryText: String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        let entries = formatter.string(from: NSNumber(value: scannedCount)) ?? "\(scannedCount)"
+        let elapsed = Double(elapsedMs) / 1000.0
+        return String(format: "%@ entries · %.1fs", entries, elapsed)
+    }
+
+    /// What the left side of the status bar shows. Transient
+    /// last-operation messages (Reveal in Finder, Move to Trash, …)
+    /// take priority over the steady-state summary so the user gets
+    /// immediate feedback when they invoke a file op; otherwise we
+    /// fall through to `statusText`.
+    var statusBarPrimaryText: String {
+        if let op = lastOperationMessage { return op }
+        return statusText
     }
 
     /// Human-readable size-totals string for the status bar, matching the
@@ -377,6 +458,33 @@ final class ScanController: ObservableObject {
         {"scanned":\(update.scanned),"skipped":\(update.skipped),"elapsedMs":\(update.elapsedMs),"terminal":\(update.terminal ? "true" : "false")}
         """
         let js = "if (window.__apfs_progress__) { __apfs_progress__(\(payload)); }"
+        webView.evaluateJavaScript(js, completionHandler: nil)
+    }
+
+    /// Tell the bundled viz to drop its loaded scan and return to the
+    /// empty state (the "Press Scan in the toolbar to begin." chrome
+    /// the apfs-native-shell style injects). Used by `New…` to keep
+    /// the WKWebView in sync with the controller's reset.
+    private func evaluateClearScan() {
+        guard let webView else { return }
+        vizCoordinator?.currentScanFileURL = nil
+        let js = """
+        (function() {
+          try {
+            const main = document.getElementById('main');
+            const dropZone = document.getElementById('drop-zone');
+            const statusBar = document.getElementById('status-bar');
+            const breadcrumb = document.getElementById('breadcrumb');
+            if (main) main.hidden = true;
+            if (dropZone) dropZone.hidden = false;
+            if (statusBar) statusBar.hidden = true;
+            if (breadcrumb) breadcrumb.style.display = 'none';
+            window.rootNode = null;
+            window.allocatedAvailable = false;
+            window.scanSource = null;
+          } catch (e) { /* viz already gone */ }
+        })();
+        """
         webView.evaluateJavaScript(js, completionHandler: nil)
     }
 
