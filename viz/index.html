@@ -112,6 +112,16 @@
     border-radius: 4px;
     font: 12px ui-monospace, Menlo, monospace;
   }
+  /* `#drop-zone { display: flex }` above has higher specificity than
+     the user-agent `[hidden]` rule (id selector vs attribute
+     selector, same count → source order wins, and ours comes
+     later). Without this override, `dropZone.hidden = true` is a
+     silent no-op: the empty-state placeholder stays painted on top
+     of the loaded treemap, eating half the window. Same defence for
+     `#status-bar` so the standalone HTML's footer can actually
+     vanish when a scan is loaded. */
+  #drop-zone[hidden], #status-bar[hidden], #main[hidden] { display: none !important; }
+
   /* When the page is hosted inside the native app shell, the toolbar
      drives scanning. The standalone drop zone + "Open JSON" button are
      hidden and replaced by a quiet placeholder so the page isn't blank
@@ -128,6 +138,17 @@
   }
   .apfs-native-shell header #load-btn,
   .apfs-native-shell header #reset-btn { display: none; }
+  /* The SwiftUI shell already paints a toolbar with the app name and
+     the controls. Hide the in-page heading so we don't show the same
+     label twice. The metric toggle and the correctness claim stay
+     because the SwiftUI side does not duplicate them. */
+  .apfs-native-shell header h1 { display: none; }
+  /* The SwiftUI shell already paints its own status bar with the
+     mode, entry count, totals, and skipped pill. The in-page
+     #status-bar would duplicate every one of those numbers two
+     pixels below the native one, so hide it entirely in native
+     shell mode. */
+  .apfs-native-shell #status-bar { display: none !important; }
   #breadcrumb {
     padding: 8px 16px;
     background: var(--panel);
