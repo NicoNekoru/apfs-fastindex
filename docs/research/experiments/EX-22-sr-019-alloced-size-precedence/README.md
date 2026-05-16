@@ -4,8 +4,8 @@ ID: EX-22
 Title: SR-019 allocated-size precedence fixture
 Date: 2026-05-16
 Owner: Claude
-Status: Planned
-Result: Pending
+Status: Executed
+Result: `partial_validated_sr_019_alloced_size`
 Related RLs:
 - RL-03 FS Tree Topology and Required Records
 - RL-06 Namespace Reconstruction
@@ -158,7 +158,81 @@ emitted column on it.
 
 ## Observed Results
 
-_(filled in after the run)_
+Per-inode breakdown (5 emit-rows + 1 fail-closed row; hard.txt
+shares ordinary.txt's inode and is correctly absorbed into the
+per-inode rule):
+
+| path           | inode | kind       | picked                  | picked value | st_blocks×512 | match |
+| -------------- | ----- | ---------- | ----------------------- | ------------ | ------------- | ----- |
+| ordinary.txt   | 16    | regular    | `j_dstream_alloced_size`| 4096         | 4096          | ✓     |
+| clone.txt      | 20    | regular    | `j_dstream_alloced_size`| 4096         | 4096          | ✓     |
+| sparse.bin     | 19    | regular    | `j_dstream_alloced_size`| 1056768      | 24576         | ✗     |
+| link.txt       | 23    | symlink    | `zero`                  | 0            | 0             | ✓     |
+| compressed.txt | 24    | compressed | `fail_closed`           | n/a          | 4096          | n/a   |
+
+Family histogram for the volume:
+
+| raw_type | family            | count |
+| -------- | ----------------- | ----- |
+| 0x3      | inode             | 11    |
+| 0x4      | xattr             | 10    |
+| 0x5      | sibling_link      | 2     |
+| 0x6      | dstream_id        | 5     |
+| 0x8      | file_extent       | 8     |
+| 0x9      | dir_rec           | 12    |
+| 0xc      | sibling_map       | 2     |
+
+No `extent_reference` (raw_type 0x2) records were emitted into the
+inode-level FS tree for this fixture; the volume's
+`extentref_tree_oid` points at the per-volume tree that the v1
+walker does not yet enter.
+
+### The sparse-file divergence
+
+`sparse.bin` carries:
+
+- `j_dstream_t.size = 1052897` (== `st_size`),
+- `j_dstream_t.alloced_size = 1056768` (== `round_up(size, 4096)`),
+- `INO_EXT_TYPE_SPARSE_BYTES = 1032192` (the unallocated bytes
+  inside the logical extent).
+
+Mounted oracle: `st_blocks = 48`, `st_blocks * 512 = 24576`.
+
+`alloced_size` overstates the actual on-disk allocation by exactly
+`1056768 - 24576 = 1032192` bytes — i.e. **by the sparse-bytes
+hint**. This matches SR-019's recorded disagreement between the
+two `linux-apfs-rw` projects: the kernel module writes
+`alloced_size = round_up(ds_size, blocksize)`, and APFS on macOS
+follows the *same* rule (so it would fail apfsck's
+`Σ extent.len == alloced_size` check on this volume; we did not
+run apfsck here, but the field arithmetic forces it).
+
+### The Hypothesis worth following up
+
+The identity `alloced_size - sparse_bytes = 1056768 - 1032192 =
+24576 = st_blocks * 512` matches on this fixture. Apple defines
+`INO_EXT_TYPE_SPARSE_BYTES` as the unallocated portion of the
+logical extent (SR-019, §Spec), so by construction
+`alloced_size - sparse_bytes` should equal the bytes the
+filesystem actually committed to disk. This is a **Hypothesis**
+backed by one data point and Apple's own field semantics; it is
+**not** an Observation strong enough to encode as the Rust
+emission rule. The right next step is an EX-22b sparse-corpus
+probe (leading hole, trailing hole, multi-hole, no-hole-but-
+SPARSE_BYTES-set, hole-larger-than-file edge cases) before SR-019
+is amended.
+
+### The compressed case
+
+`compressed.txt` has no `j_dstream_t` xfield (decmpfs stores
+small data inline in the xattr) and so step 1 of SR-019 cannot
+fire; step 2 returns `fail_closed`. The oracle reports
+`st_blocks * 512 = 4096` for this row — i.e. macOS *did* allocate
+one block (presumably the xattr block that holds the decmpfs
+payload). SR-019 v1 deliberately does not emit this number;
+recording it as `not_claimed` is the correct posture until a
+follow-up probe builds an oracle that distinguishes the decmpfs-
+inline footprint from the resource-fork-backed footprint.
 
 ## Artifacts Saved
 
@@ -172,21 +246,57 @@ _(filled in after the run)_
 
 ## Interpretation
 
-_(filled in after the run)_
+- SR-019 step 1 is correct for the *non-sparse* regular cases
+  (ordinary, clone, and by sharing, hard-link) on macOS: the
+  on-disk `j_dstream_t.alloced_size` matches `st_blocks * 512`
+  exactly because `round_up(ds_size, blocksize)` and "actual
+  allocated extent bytes" coincide when no extent is sparse.
+- Step 1 is **not** correct for sparse files on macOS-produced
+  images. The Rust slice must therefore split step 1: `regular +
+  dstream + no SPARSE_BYTES xfield` is safe to emit;
+  `regular + dstream + SPARSE_BYTES xfield present` must
+  fail-closed in v1 (and is a Hypothesis worth promoting via
+  EX-22b once a broader sparse corpus passes the
+  `alloced_size - sparse_bytes` rule).
+- The symlink rule is unchanged: both candidates are 0; the
+  oracle is 0; the rule emits 0; match by construction.
+- The decmpfs fail-closed rule is unchanged. Note that
+  `st_blocks * 512 = 4096` on the decmpfs row is **not** a
+  mismatch by SR-019 v1 — it is exactly the case the rule
+  refuses to emit, and the oracle column survives in the
+  artifact for the future EX-22-compression probe to consume.
+- Hypothesis to record (not promote): on macOS,
+  `allocated_size = alloced_size - sparse_bytes`. Apple's own
+  description of `INO_EXT_TYPE_SPARSE_BYTES` makes this an
+  algebraic identity, not a coincidence. EX-22b must close it.
 
 ## What This Rules Out
 
-_(filled in after the run; expected scope:)_
-
-- Does not rule out per-inode mismatches on Gate-2 source classes
-  (live boot disk, encryption, snapshot-assisted, boot-root).
-- Does not validate exclusive, shared, or snapshot-retained
-  accounting. SR-019 explicitly excludes those.
+- Rules out Hypothesis A (`validated_sr_019_precedence`) for the
+  full case set on the proof fixture. The rule as written in
+  SR-019 v1 is over-broad: step 1 must be split for sparse vs
+  non-sparse regular files.
+- Does not rule out the Rust slice for the non-sparse cases.
+  Ordinary, clone, hard-link, and symlink rows can move forward
+  under the amended precedence: regular + dstream + no
+  SPARSE_BYTES → `Some(alloced_size)`; regular + dstream + has
+  SPARSE_BYTES → `None`; regular + decmpfs → `None`;
+  symlink/dir → `Some(0)`; else → `None`.
+- Does not rule out the `alloced_size - sparse_bytes` rule for a
+  future product mode. Records it as a Hypothesis; EX-22b is the
+  vehicle.
+- Does not validate any exclusive/shared/snapshot-retained
+  metric. SR-019 explicitly excludes those; the extent-reference
+  tree was not entered by the walker in this probe (the family
+  histogram shows zero `extent_reference` raw_type 0x2 rows in
+  the FS tree, consistent with the volume keeping
+  `j_phys_ext_*` records out of the FS tree and in the dedicated
+  `extentref_tree_oid` tree).
 - Does not validate `Σ file_extent.len == alloced_size` on
-  macOS-created images; the probe captures *counts* but does not
-  decode `j_file_extent_val_t` bodies, so it cannot record the
-  byte-level sum without a follow-up EX-22b that extends the Rust
-  body decoder.
+  macOS-created images. The probe captures *counts* (8
+  file_extent records across the fixture) but does not decode
+  `j_file_extent_val_t` bodies; that is its own follow-up if and
+  when needed.
 
 ## Impact on RLs
 
@@ -204,10 +314,17 @@ _(filled in after the run; expected scope:)_
 
 ## Next Exact Step
 
-- Run the probe end-to-end; on Hypothesis A, proceed to the Rust
-  slice (gate `allocated_size: Option<u64>` into `NamespaceEntry`
-  with the fail-closed precedence wired through, extend
-  `--summary`'s `not_claimed` register, and update the smoke test).
-- On Hypothesis B, do **not** promote `alloced_size` into the
-  Rust crate. Scope a follow-up `EX-22b` per the divergent case
-  class.
+- Implement the Rust slice for the amended SR-019 precedence:
+  emit `Some(alloced_size)` for `regular + dstream + no
+  SPARSE_BYTES`; emit `Some(0)` for symlink and directory; emit
+  `None` for `regular + dstream + has SPARSE_BYTES`,
+  `regular + decmpfs`, and anything else. Extend the
+  `--summary` `not_claimed` register to spell out the sparse and
+  decmpfs fail-closed cases by name.
+- Scope an `EX-22b` sparse-corpus probe (leading hole, trailing
+  hole, multi-hole, large-relative-to-file hole, zero-hole-but-
+  SPARSE_BYTES-set boundary) to test whether
+  `alloced_size - sparse_bytes` reproduces `st_blocks * 512` for
+  every shape. If yes, amend SR-019 with the algebraic identity
+  and promote sparse rows from `None` to `Some(_)` in a follow-up
+  Rust slice.
