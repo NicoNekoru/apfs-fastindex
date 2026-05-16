@@ -219,6 +219,14 @@ private let vizBridgeShim: String = """
       // useful before the user sees it.
       const claim = document.getElementById('claim');
       if (claim) claim.textContent = 'Pick a folder, click Scan.';
+      // The viz already routes its own contextmenu events on the
+      // treemap rectangles to `emitContextMenu`. Anywhere else in
+      // the page (headers, breadcrumb, empty regions), suppress the
+      // default WebKit menu so the user never sees "Reload" /
+      // "Inspect Element" / etc. inside a shipped app.
+      document.addEventListener('contextmenu', function (ev) {
+        ev.preventDefault();
+      }, { capture: true });
     } catch (e) {}
   }
   if (document.readyState === 'loading') {
@@ -325,6 +333,16 @@ private let vizBridgeShim: String = """
         const parserOutput = (doc && (doc.parser_output || doc)) || {};
         const entries = parserOutput.entries || [];
         const rootPath = (entries[0] && entries[0].path) || '';
+        const source = parserOutput.source || {};
+        // SourceDescriptor.source_kind tells the host which class of
+        // scan produced these entries: 'mounted_directory' (fallback,
+        // on-disk paths reachable from the shell), 'dmg_image'
+        // (detached image; paths NOT reachable; file ops are
+        // disabled), 'raw_device' (likewise). The shell uses this to
+        // grey out Reveal in Finder / Move to Trash for unreachable
+        // scans.
+        const sourceKind = source.source_kind || '';
+        const sourceRequestedPath = source.requested_path || '';
         // `window.ingest(doc)` already populated rootNode with both
         // metrics; reuse those totals so Swift doesn't have to
         // re-sum the tree. `allocatedTotal === null` is the SR-019 /
@@ -345,7 +363,9 @@ private let vizBridgeShim: String = """
           totalEntries: entries.length,
           logicalTotal: logicalTotal,
           allocatedTotal: allocatedTotal,
-          allocatedAvailable: allocatedAvailable
+          allocatedAvailable: allocatedAvailable,
+          sourceKind: sourceKind,
+          sourceRequestedPath: sourceRequestedPath
         });
       };
       xhr.onerror = function() {

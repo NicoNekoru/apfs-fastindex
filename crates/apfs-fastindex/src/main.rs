@@ -20,7 +20,7 @@ const USAGE: &str = "usage: apfs-fastindex-scan [--summary] [--pretty] [--slim] 
                      symlink targets, scan_state) so the output fits comfortably in a browser.\n\
                      --cross-mounts lets the fallback walker descend into directories on a \
                      different device than the root (default: stop at mount boundaries).\n\
-                     --progress writes one JSON object per second to stderr describing scan \
+                     --progress writes one JSON object every 250 ms to stderr describing scan \
                      progress (fallback mode only; raw mode emits no progress today).";
 
 #[derive(Copy, Clone, PartialEq, Eq)]

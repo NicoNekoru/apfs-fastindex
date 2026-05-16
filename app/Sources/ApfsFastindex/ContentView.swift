@@ -1,13 +1,28 @@
 import SwiftUI
 import AppKit
 
+/// Palette matched to the bundled `viz/index.html` so the SwiftUI
+/// chrome and the WKWebView treemap read as one surface instead of a
+/// dark page sandwiched between a light toolbar and a light status bar.
+/// The user reported "some system, some dark" theming on the previous
+/// build; pinning every chrome color here is the fix.
+enum VizPalette {
+    static let bg      = Color(red: 0x0f/255.0, green: 0x11/255.0, blue: 0x15/255.0)
+    static let panel   = Color(red: 0x1a/255.0, green: 0x1d/255.0, blue: 0x24/255.0)
+    static let border  = Color(red: 0x2a/255.0, green: 0x2e/255.0, blue: 0x38/255.0)
+    static let text    = Color(red: 0xe4/255.0, green: 0xe7/255.0, blue: 0xee/255.0)
+    static let muted   = Color(red: 0x8b/255.0, green: 0x93/255.0, blue: 0xa5/255.0)
+    static let accent  = Color(red: 0x4f/255.0, green: 0x8c/255.0, blue: 0xff/255.0)
+    static let warning = Color(red: 0xfb/255.0, green: 0xbf/255.0, blue: 0x24/255.0)
+}
+
 struct ContentView: View {
     @EnvironmentObject var controller: ScanController
 
     var body: some View {
         VStack(spacing: 0) {
             toolbar
-            Divider()
+            Divider().background(VizPalette.border)
             VizWebView(
                 onMessage: controller.handleBridgeMessage,
                 onReady: controller.bindWebView,
@@ -15,104 +30,215 @@ struct ContentView: View {
                 onDeliverProgress: controller.pendingProgress
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            Divider()
+            Divider().background(VizPalette.border)
             statusBar
         }
-        .background(Color(NSColor.windowBackgroundColor))
+        .background(VizPalette.bg)
+        .preferredColorScheme(.dark)
+        .foregroundStyle(VizPalette.text)
     }
 
-    // Layout strategy:
-    //
-    // - The path field has a `maxWidth` cap so it can't grow indefinitely
-    //   (which is what was previously pushing the Scan button off the
-    //   right edge of the window).
-    // - The right-side action cluster (mode picker, options menu, Scan
-    //   button) is separated from the path-field cluster by a Spacer.
-    //   The Spacer claims whatever's left, anchoring the Scan button to
-    //   the right side of the toolbar with consistent trailing padding.
-    // - `Button(.borderedProminent)` style on Scan makes it a tinted
-    //   "primary" button so it reads as the main action at a glance.
+    // MARK: - Toolbar (state-aware)
+
+    /// The toolbar has three distinct visual modes so the user can
+    /// always tell what's actionable. Previously a single layout was
+    /// shown unconditionally, which meant the prominent "Path or .dmg
+    /// to scan" prompt and the big Scan button kept asking the user
+    /// to start a scan even after one had finished — exactly the
+    /// "Half the UI continues to ask you to scan" complaint.
+    @ViewBuilder
     private var toolbar: some View {
-        HStack(spacing: 8) {
-            TextField("Path or .dmg to scan", text: $controller.targetPath)
-                .textFieldStyle(.roundedBorder)
-                .frame(minWidth: 180, idealWidth: 360, maxWidth: 520)
-
-            Button {
-                browseForTarget()
-            } label: {
-                Image(systemName: "folder")
-            }
-            .help("Browse… (⌘O)")
-            .keyboardShortcut("o", modifiers: .command)
-
-            Picker("", selection: $controller.mode) {
-                Text("Auto").tag(ScanMode.auto)
-                Text("Raw").tag(ScanMode.raw)
-                Text("Fallback").tag(ScanMode.fallback)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 200)
-            .help("Scanner mode")
-
-            Menu {
-                Toggle("Cross mounts", isOn: $controller.crossMounts)
-            } label: {
-                Image(systemName: "slider.horizontal.3")
-            }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
-            .help("Scan options")
-
-            Spacer(minLength: 12)
-
+        Group {
             if controller.isScanning {
-                ProgressView()
-                    .controlSize(.small)
-                    .progressViewStyle(.circular)
-                Button {
-                    controller.cancelScan()
-                } label: {
-                    Text("Cancel")
-                }
-                .keyboardShortcut(".", modifiers: .command)
+                scanningToolbar
+            } else if controller.hasLoadedScan {
+                loadedToolbar
             } else {
-                Button {
-                    controller.startScan()
-                } label: {
-                    Text("Scan")
-                        .fontWeight(.semibold)
-                        // Give the button a comfortable hit target so it
-                        // never collapses into a few-pixel sliver near
-                        // the right edge.
-                        .frame(minWidth: 56)
-                }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.return, modifiers: .command)
-                .disabled(controller.targetPath.isEmpty)
+                idleToolbar
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+        .background(VizPalette.panel)
     }
+
+    /// Idle: no scan yet. Prominent target picker + Scan.
+    private var idleToolbar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "folder")
+                .foregroundStyle(VizPalette.muted)
+            TextField("Pick a folder or detached .dmg", text: $controller.targetPath)
+                .textFieldStyle(.plain)
+                .foregroundStyle(VizPalette.text)
+                .font(.system(size: 13))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(VizPalette.bg)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(VizPalette.border, lineWidth: 1)
+                )
+                .frame(minWidth: 220, idealWidth: 420)
+
+            Button {
+                browseForTarget()
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(VizPalette.muted)
+            .help("Browse… (⌘O)")
+            .keyboardShortcut("o", modifiers: .command)
+
+            modePicker
+
+            optionsMenu
+
+            Spacer(minLength: 12)
+
+            Button {
+                controller.startScan()
+            } label: {
+                Label("Scan", systemImage: "play.fill")
+                    .labelStyle(.titleAndIcon)
+                    .frame(minWidth: 72)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(VizPalette.accent)
+            .keyboardShortcut(.return, modifiers: .command)
+            .disabled(controller.targetPath.isEmpty)
+        }
+    }
+
+    /// Scanning: the path field is no longer interactive. Show the
+    /// live count + elapsed time prominently with a Cancel button.
+    private var scanningToolbar: some View {
+        HStack(spacing: 12) {
+            ProgressView()
+                .controlSize(.small)
+                .progressViewStyle(.circular)
+                .tint(VizPalette.accent)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Scanning")
+                    .font(.system(size: 11))
+                    .foregroundStyle(VizPalette.muted)
+                Text(controller.targetPath.isEmpty ? "—" : controller.targetPath)
+                    .font(.system(size: 12).monospaced())
+                    .foregroundStyle(VizPalette.text)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .frame(maxWidth: 380, alignment: .leading)
+
+            Spacer(minLength: 12)
+
+            Text(controller.liveCountersText)
+                .font(.system(size: 12).monospaced())
+                .foregroundStyle(VizPalette.text)
+                .lineLimit(1)
+
+            Button(role: .cancel) {
+                controller.cancelScan()
+            } label: {
+                Text("Cancel").frame(minWidth: 64)
+            }
+            .keyboardShortcut(".", modifiers: .command)
+        }
+    }
+
+    /// Post-scan: the path field is gone. We show a compact summary
+    /// of what was scanned plus two buttons: Rescan (re-runs the
+    /// same target/mode) and New… (resets to idle so the user can
+    /// pick something else). The status bar carries the totals.
+    private var loadedToolbar: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "checkmark.seal.fill")
+                .foregroundStyle(VizPalette.accent)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Scanned")
+                    .font(.system(size: 11))
+                    .foregroundStyle(VizPalette.muted)
+                Text(controller.targetPath.isEmpty ? "—" : controller.targetPath)
+                    .font(.system(size: 12).monospaced())
+                    .foregroundStyle(VizPalette.text)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(controller.targetPath)
+            }
+            .frame(maxWidth: 360, alignment: .leading)
+
+            Divider().frame(height: 22).background(VizPalette.border)
+
+            Text(controller.loadedSummaryText)
+                .font(.system(size: 12).monospaced())
+                .foregroundStyle(VizPalette.muted)
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            Spacer(minLength: 12)
+
+            Button {
+                controller.startScan()
+            } label: {
+                Label("Rescan", systemImage: "arrow.clockwise")
+                    .labelStyle(.titleAndIcon)
+                    .frame(minWidth: 84)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(VizPalette.accent)
+            .keyboardShortcut("r", modifiers: .command)
+            .help("Rescan the same target (⌘R)")
+
+            Button {
+                controller.clearLoadedScan()
+            } label: {
+                Label("New…", systemImage: "plus")
+                    .labelStyle(.titleAndIcon)
+                    .frame(minWidth: 70)
+            }
+            .buttonStyle(.bordered)
+            .help("Pick a different target")
+        }
+    }
+
+    private var modePicker: some View {
+        Picker("", selection: $controller.mode) {
+            Text("Auto").tag(ScanMode.auto)
+            Text("Raw").tag(ScanMode.raw)
+            Text("Fallback").tag(ScanMode.fallback)
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .frame(width: 200)
+        .help("Scanner mode")
+    }
+
+    private var optionsMenu: some View {
+        Menu {
+            Toggle("Cross mounts", isOn: $controller.crossMounts)
+        } label: {
+            Image(systemName: "slider.horizontal.3")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("Scan options")
+    }
+
+    // MARK: - Status bar
 
     private var statusBar: some View {
         HStack(spacing: 10) {
-            statusPill(controller.modeLabel, tint: .blue)
-            Text(controller.statusText)
+            statusPill(controller.modeLabel, tint: VizPalette.accent)
+            Text(controller.statusBarPrimaryText)
                 .font(.system(size: 12).monospaced())
-                .foregroundStyle(.secondary)
+                .foregroundStyle(VizPalette.muted)
                 .lineLimit(1)
                 .truncationMode(.tail)
             if !controller.totalsText.isEmpty {
-                // Logical / allocated totals from the viz's
-                // ingest_succeeded message (SR-019 / EX-22). "allocated:
-                // unclaimed" means at least one sparse or decmpfs row
-                // collapsed the aggregate per the fail-closed contract.
                 Text(controller.totalsText)
                     .font(.system(size: 12).monospaced())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(VizPalette.muted)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .help(
@@ -123,19 +249,28 @@ struct ContentView: View {
             }
             Spacer(minLength: 8)
             if controller.skippedCount > 0 {
-                statusPill("\(controller.skippedCount) skipped", tint: .orange)
+                statusPill("\(controller.skippedCount) skipped", tint: VizPalette.warning)
             }
             if !controller.selectedPath.isEmpty {
                 Text(controller.selectedPath)
                     .font(.system(size: 12).monospaced())
+                    .foregroundStyle(VizPalette.text)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .frame(maxWidth: 280)
+                    // The previous build capped this at 280 pt, which
+                    // truncated long absolute paths so aggressively
+                    // (e.g. `/Users/.../somefile.txt` -> 30-char fragment)
+                    // that the user couldn't tell what they had
+                    // clicked. Lifting the cap to 480 pt and keeping
+                    // truncation in the middle keeps both ends
+                    // visible on real-world paths.
+                    .frame(maxWidth: 480, alignment: .trailing)
+                    .help(controller.selectedPath)
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 5)
-        .background(Color(NSColor.controlBackgroundColor))
+        .background(VizPalette.panel)
     }
 
     @ViewBuilder
@@ -146,20 +281,64 @@ struct ContentView: View {
             .padding(.vertical, 1)
             .overlay(
                 RoundedRectangle(cornerRadius: 4)
-                    .stroke(tint.opacity(0.5), lineWidth: 1)
+                    .stroke(tint.opacity(0.55), lineWidth: 1)
             )
             .foregroundStyle(tint)
     }
 
     private func browseForTarget() {
+        // The previous build called `panel.runModal()`, which is
+        // synchronous and spins the main thread's run loop in modal
+        // mode. NSOpenPanel does a noticeable amount of work the
+        // first time it shows (NSDocumentController hookup, sidebar
+        // enumeration, NSURLBookmarkResolution for the recent-items
+        // list); under runModal() all of that runs *before* the
+        // panel paints, so the click on the folder button stalls
+        // visibly. Sheets bind to the window's run loop instead and
+        // present immediately, deferring the slow work to after the
+        // panel is on screen.
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
+        // An empty `allowedContentTypes` means "no filter", which is
+        // what we want (a folder OR a .dmg). Setting it would force
+        // NSOpenPanel into the "filtered" rendering path, which
+        // adds a layout pass per directory.
         panel.allowedContentTypes = []
+        panel.canCreateDirectories = false
+        panel.treatsFilePackagesAsDirectories = false
+        panel.prompt = "Scan"
         panel.message = "Pick a directory to scan, or an APFS .dmg image."
-        if panel.runModal() == .OK, let url = panel.url {
-            controller.targetPath = url.path
+        // Pre-seed the panel's starting directory so it doesn't have
+        // to roll its own default (which on a cold cache walks
+        // ~/Library/Recent and friends). If we have a previously
+        // typed target use that, otherwise fall back to $HOME.
+        let trimmed = controller.targetPath.trimmingCharacters(in: .whitespaces)
+        if !trimmed.isEmpty {
+            let url = URL(fileURLWithPath: trimmed)
+            var isDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) {
+                panel.directoryURL = isDir.boolValue ? url : url.deletingLastPathComponent()
+            } else {
+                panel.directoryURL = URL(fileURLWithPath: NSHomeDirectory())
+            }
+        } else {
+            panel.directoryURL = URL(fileURLWithPath: NSHomeDirectory())
+        }
+
+        let window = NSApp.keyWindow ?? NSApp.mainWindow ?? NSApp.windows.first
+        let completion: (NSApplication.ModalResponse) -> Void = { response in
+            if response == .OK, let url = panel.url {
+                controller.targetPath = url.path
+            }
+        }
+        if let window {
+            panel.beginSheetModal(for: window, completionHandler: completion)
+        } else {
+            // Fallback for the rare case where no window is up yet:
+            // `begin` is still async, just unattached to any window.
+            panel.begin(completionHandler: completion)
         }
     }
 }
