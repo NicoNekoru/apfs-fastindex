@@ -316,6 +316,22 @@ Long-range product roadmap:
   candidates (`highest_xid=20`) but returned no `selected_checkpoint` after
   `APFS object validation failed: checksum mismatch at block 1031`. EX-15
   closed this blocker.
+- `EX-22` SR-019 allocated-size precedence; built the same-run
+  fixture from EX-19 (ordinary, sparse, clone, hard link, symlink,
+  `ditto --hfsCompression`), captured per-inode
+  `(j_dstream_alloced_size, j_dstream_size, sparse_bytes,
+  st_blocks * 512)` plus the FS-tree family histogram, and applied
+  SR-019 precedence. Verdict
+  `partial_validated_sr_019_alloced_size`: 4/5 emit-rows match
+  `st_blocks * 512` (ordinary 4096↔4096; clone 4096↔4096;
+  symlink 0↔0; compressed correctly fail_closed with the oracle
+  `4096` listed as `not_claimed`); sparse.bin diverges by exactly
+  `INO_EXT_TYPE_SPARSE_BYTES` (`alloced_size = 1056768` vs
+  oracle `24576`; difference `1032192 = sparse_bytes`). This is
+  the empirical confirmation of SR-019's recorded
+  linux-apfs-rw-vs-apfsck disagreement on macOS-produced images.
+  The Rust slice ships sparse explicitly fail-closed; an EX-22b
+  sparse-corpus probe is the gate for promoting sparse rows.
 - `EX-21` fallback path skeleton; landed a POSIX-traversal-backed
   fallback in `src/apfs_fastindex/fallback_traversal.py` that emits the
   same `NamespaceEntry` + `DirectoryAggregate` shape as the Rust raw
