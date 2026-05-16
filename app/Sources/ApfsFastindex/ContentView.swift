@@ -105,6 +105,22 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.tail)
+            if !controller.totalsText.isEmpty {
+                // Logical / allocated totals from the viz's
+                // ingest_succeeded message (SR-019 / EX-22). "allocated:
+                // unclaimed" means at least one sparse or decmpfs row
+                // collapsed the aggregate per the fail-closed contract.
+                Text(controller.totalsText)
+                    .font(.system(size: 12).monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(
+                        controller.allocatedColumnAvailable
+                            ? "Logical = sum of st_size; allocated = sum of st_blocks*512 (SR-019). \"unclaimed\" means at least one sparse or decmpfs row collapsed the aggregate per the SR-019 / EX-22 fail-closed contract."
+                            : "Logical = sum of st_size. This scan pre-dates R2-A so the allocated_size column is not available."
+                    )
+            }
             Spacer(minLength: 8)
             if controller.skippedCount > 0 {
                 statusPill("\(controller.skippedCount) skipped", tint: .orange)
