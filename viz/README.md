@@ -53,8 +53,19 @@ ignored by the viz.
   a thin border + a name/size label band at the top. Clicking the
   directory band zooms into that subtree. The breadcrumb at the top
   navigates back; **Reset zoom** returns to the root.
-- Hover any rectangle for full path, kind, and size. Symlinks also show
-  their target.
+- Hover any rectangle for full path, kind, and **both size metrics**
+  (logical and allocated, when the scan carries the SR-019 column).
+  Symlinks also show their target.
+- The header has a **Logical / Allocated metric toggle** that rebalances
+  the treemap between the two columns. Allocated is sized by
+  `st_blocks * 512` for files (the EX-22 oracle), zero for symlinks and
+  directories, and **muted** for sparse / decmpfs rows whose
+  `allocated_size` is intentionally not claimed by SR-019. The
+  Allocated toggle stays disabled on pre-R2-A scans that don't carry
+  the column.
+- The status bar shows both totals at the root; "allocated:
+  unclaimed" surfaces when any sparse or decmpfs row in the loaded
+  subtree triggers the SR-019 None-collapse contract.
 - The header shows the scanner's `correctness_claim` so you can tell at
   a glance which semantic mode produced the data (raw APFS vs POSIX
   fallback).
@@ -72,10 +83,13 @@ version remains the demo surface.
 
 ## Known limits (v0)
 
-- Logical size only. The scanner does not (yet) report physical /
-  shared / exclusive bytes; clones do not "double count" on this
-  treemap, which matches WizTree-on-Windows behavior but differs from
-  Finder.
+- Logical and allocated bytes only. The Allocated metric is
+  per-stream `j_dstream_t.alloced_size` (raw mode) or
+  `st_blocks * 512` (fallback mode), neither of which is
+  clone-aware: two clones of the same content each count their
+  shared extents in full, so the sum over a clone family
+  over-counts on disk. Exclusive / shared / snapshot-retained
+  bytes remain out of v1 — see `spec.md` and SR-019.
 - Encrypted, live-boot, snapshot-assisted, and boot-root merged scans
   are not supported by the scanner itself — see the project root
   `spec.md` for the support matrix.
