@@ -73,6 +73,7 @@ Current source reviews:
 - `SR-018` name normalization and case behavior
 - `SR-019` allocated-size source precedence (R2-A entry)
 - `SR-020` snapshot API and mount lifecycle (R2-B entry)
+- `SR-021` APFS syscall cost map and parallelism ceiling (R2-C perf entry)
 
 ### `EX-*` Experiment Notes
 
