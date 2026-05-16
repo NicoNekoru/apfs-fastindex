@@ -169,7 +169,12 @@ pub fn fallback_scan_path_with_options<P: AsRef<Path>>(
     }];
 
     let scan_start = Instant::now();
-    let mut next_progress_tick = scan_start + Duration::from_secs(1);
+    // 250 ms cadence: the GUI shell renders this as a live counter; at
+    // 1 Hz the count visibly stutters and the UI feels broken. 250 ms
+    // is fast enough to look smooth on a real scan and slow enough that
+    // we add at most ~4 progress events per second to the stderr bridge.
+    let progress_interval = Duration::from_millis(250);
+    let mut next_progress_tick = scan_start + progress_interval;
 
     while let Some(frame) = stack.pop() {
         if let Some(cb) = options.progress.as_deref_mut() {
@@ -181,7 +186,7 @@ pub fn fallback_scan_path_with_options<P: AsRef<Path>>(
                     elapsed: now.duration_since(scan_start),
                     terminal: false,
                 });
-                next_progress_tick = now + Duration::from_secs(1);
+                next_progress_tick = now + progress_interval;
             }
         }
         let children = match sorted_children(&frame.absolute, &frame.relative) {
