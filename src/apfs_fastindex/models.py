@@ -51,6 +51,13 @@ class NamespaceEntry:
     file_id: int
     logical_size: int = 0
     symlink_target: str | None = None
+    # Per-inode allocated bytes under SR-019 + EX-22 precedence; `None`
+    # for fail-closed cases (sparse regular, decmpfs-compressed
+    # regular, anything outside the rule). See
+    # docs/research/sources/SR-019 and
+    # docs/research/experiments/EX-22 for the rule and the
+    # case-class verdict table.
+    allocated_size: int | None = None
 
 
 @dataclass(frozen=True)
@@ -58,6 +65,10 @@ class DirectoryAggregate:
     path: str
     unique_inode_logical_total: int
     contributing_file_ids: tuple[int, ...]
+    # Per-directory unique-inode allocated-bytes total. `None` if any
+    # contributing inode has `allocated_size is None`; a partial
+    # total cannot be authoritative.
+    unique_inode_allocated_total: int | None = None
 
 
 @dataclass(frozen=True)
