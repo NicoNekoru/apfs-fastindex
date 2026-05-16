@@ -62,6 +62,19 @@ gate, then promote only resolved slices into this directory.
   case-insensitive and case-sensitive APFS volumes; volume
   case/normalization flags propagate correctly. Lookup-by-name still
   unclaimed.
+- `../research/experiments/EX-22-sr-019-alloced-size-precedence/README.md`:
+  research log running SR-019's per-file allocated-size precedence
+  against the EX-19 same-run fixture. Verdict
+  `partial_validated_sr_019_alloced_size`: ordinary, clone, symlink,
+  and `dir` rows match `st_blocks * 512` exactly; the decmpfs row
+  fails closed by design; the sparse row diverges by exactly
+  `INO_EXT_TYPE_SPARSE_BYTES`. The Rust slice ships with the
+  amended precedence (sparse → `None`, decmpfs → `None`,
+  regular+dstream+no-SPARSE_BYTES → `Some(alloced_size)`,
+  symlink/dir → `Some(0)`) and lists both sparse and decmpfs in
+  `not_claimed`. The `alloced_size - sparse_bytes` algebraic
+  identity is recorded as a Hypothesis for an EX-22b sparse-corpus
+  probe before any sparse rows are promoted to `Some(_)`.
 - `../research/experiments/EX-21-fallback-path-skeleton/README.md`:
   research log proving that the POSIX-traversal fallback emits the same
   `NamespaceEntry`/`DirectoryAggregate` shape as Rust raw mode on the
@@ -101,7 +114,22 @@ All four MWP gates have landed:
    The Rust CLI `--summary` mode prints the one-line correctness_claim
    plus the `not_claimed` register.
 
-R1 (Narrow Rust MWP) is complete. EX-21 also lands the fallback-path
+R1 (Narrow Rust MWP) is complete. **R2-A (allocated_size column)
+also landed.** The Rust scanner now emits
+`allocated_size: Option<u64>` on `NamespaceEntry` and
+`unique_inode_allocated_total: Option<u64>` on `DirectoryAggregate`
+under the EX-22-amended SR-019 precedence
+(regular+dstream+no-sparse → `Some(alloced_size)`; sparse / decmpfs
+→ `None`; symlink/dir → `Some(0)`; `--summary` lists both
+fail-closed cases in `not_claimed`). The fallback path emits
+`Some(st_blocks * 512)` for files (the EX-22 oracle directly) via
+`ATTR_FILE_ALLOCSIZE` in the bulk backend and
+`Metadata::blocks() * 512` in the std-read_dir fallback. Test count
+delta: 55 → 68 (three aggregate-rule tests for the None-collapse
+policy + extended fallback / bulk assertions). The
+`rust_mwp_smoke` smoke now also checks the SR-019 column against
+the proof fixture's known sparse-file row and aggregate
+None-collapse pattern. EX-21 also lands the fallback-path
 skeleton in both Python (`src/apfs_fastindex/fallback_traversal.py`)
 and Rust (`crates/apfs-fastindex/src/fallback.rs`); both emit the same
 `NamespaceEntry` + `DirectoryAggregate` shape via POSIX traversal when
