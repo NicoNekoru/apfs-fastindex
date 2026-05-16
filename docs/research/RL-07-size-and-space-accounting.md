@@ -3,7 +3,7 @@
 Status: Open
 Priority: P0
 Owner: TBD
-Last Updated: 2026-05-14 (EX-19)
+Last Updated: 2026-05-16 (SR-019)
 
 ## Core Question
 - What size metrics will the product report, and how can those metrics be computed correctly on APFS?
@@ -123,6 +123,21 @@ Last Updated: 2026-05-14 (EX-19)
   sparse inodes. Ordinary uncompressed logical size for v1 is now safe to
   source from `INO_EXT_TYPE_DSTREAM.size` decoded by the SR-015 cursor rule.
   Compression precedence remains SR-017/EX-19 territory.
+- [2026-05-16] Spec/Observation: `SR-019` closes the R2-A source-of-truth
+  question. `j_dstream_t.alloced_size` is the only candidate that any reader
+  publishes to callers (linux-apfs-rw uses it as `inode->i_blocks`; TSK
+  exposes it as `_size_on_disk`; libfsapfs/dissect.apfs/apfs-fuse/go-apfs
+  decode it but drop it). Apple gives the field no closed-form definition,
+  and linux-apfs-rw vs apfsck *disagree* on what should produce it
+  (kernel writes `round_up(ds_size, blocksize)`; apfsck enforces
+  `Σ extent.len == alloced_size`). The sum-of-`j_file_extent_val_t`
+  candidate is recorded only as diagnostic context; the extent-reference
+  tree is the future exclusive-/shared-/snapshot-retained metric input,
+  not an R2-A candidate. v1 precedence picked: regular+dstream →
+  `Some(j_dstream_t.alloced_size)`; regular+decmpfs → fail closed (`None`,
+  `not_claimed`); symlink → 0; directory → 0; everything else → fail
+  closed. EX-22 must validate this against macOS `st_blocks * 512` per
+  case class.
 - [2026-05-14] Scope: **R2-A opens here.** "Physical / allocated size per
   file" is promoted from a deferred future mode to an explicit R2
   research lane (see spec.md §9 and §12 step 7). Source-of-truth
@@ -176,18 +191,22 @@ Last Updated: 2026-05-14 (EX-19)
   clone, hard link, symlink, and compressed cases. The Rust MWP namespace
   emitter may now implement SR-017 per-inode logical size, gated only by
   EX-20 (SR-018 name/case) and the v1 aggregate policy from SR-009.
-- **R2-A direction**: physical-size investigation proceeds as a fresh
-  `SR-019` source review followed by an `EX-22` fixture probe. SR-019
-  should converge `dissect.apfs`, `apfs-fuse`, `libfsapfs`, and TSK on
-  how each maps `(j_dstream_t.alloced_size, j_file_extent_val.flags &
-  J_FILE_EXTENT_LEN_MASK, extent-reference tree)` to a per-file
-  physical-bytes metric and how clones / sparse / compressed cases are
-  resolved. EX-22 then runs a same-run fixture with ordinary, sparse,
-  cloned, hard-linked, symlink, and compressed files, captures every
-  candidate, and asserts the chosen precedence reproduces
-  `st_blocks * 512` for every entry. R2-A row emission in Rust waits on
-  EX-22 passing. Exclusive/shared/snapshot-retained accounting remains
-  out of R2-A scope.
+- **R2-A direction (post-SR-019)**: SR-019 has now picked the single
+  candidate (`j_dstream_t.alloced_size`) and the four-step precedence
+  rule (regular+dstream → `Some(alloced_size)`; regular+decmpfs → fail
+  closed; symlink → 0; directory → 0; else fail closed). The
+  outstanding question is no longer "which field," but "for which case
+  classes does that field equal macOS `st_blocks * 512`." `EX-22` runs
+  the EX-19 same-run fixture (ordinary, sparse, clone, hard link,
+  symlink, `ditto --hfsCompression`), captures per inode
+  `(alloced_size, sum_of_file_extent_lengths_diagnostic, st_blocks * 512)`,
+  and verdicts each case class independently. Pass condition: case
+  classes (1) and (3) (regular+dstream and symlink) match the oracle;
+  the decmpfs case lands in `not_claimed` rather than producing a
+  mismatch. R2-A Rust slice emission waits on EX-22's case-class
+  verdict table. Exclusive/shared/snapshot-retained accounting stays
+  out of R2-A scope; the extent-reference tree is the future input
+  for those, not an R2-A emission candidate.
 
 ## Exit Criteria
 - Defined product-facing size semantics.
