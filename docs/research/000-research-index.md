@@ -346,6 +346,34 @@ Long-range product roadmap:
   (`fs_snapshot_create` needs root + `com.apple.developer.vfs.snapshot`),
   so this is the predicted negative-progress outcome on a clean
   dev workstation.
+- `EX-24` syscall microbench (where does the per-entry kernel
+  cost live); single-threaded /Applications, drec_only vs
+  current_walker vs fts(3). Headline finding (mechanical
+  verdict was `oracle_inconclusive` because fts's firmlink
+  traversal asymmetry gave it a different entry count): drec_only
+  (312,622 ent/s) and current_walker (310,249 ent/s) are within
+  1% on every dimension — **falsifies the SR-021 hypothesis that
+  the vnode-rage path is a load-bearing perf lever** on modern
+  Apple silicon. fts is 1.7× slower than current_walker;
+  Tempel-2019's "fts ≥ getattrlistbulk on APFS" result does not
+  replicate on macOS 14+, so the conditional EX-26 follow-up is
+  cancelled. Phase-2 deferred-attribute refactor is deprioritised
+  per the data. Bonus: microbench pure-kernel throughput (312k
+  ent/s) is 1.56× the production scanner (200k ent/s on the same
+  target) → the 110k gap is user-space post-processing tax,
+  recorded as a future direction in RL-12.
+- `EX-25` parallel directory walker (T ∈ {1, 2, 4, 8, 14} on
+  /Applications, same host). Verdict:
+  **`validated_parallel_scaling`** at T=4 (2.47× of T=1; entries
+  identical to single-thread). Beyond T=4 the APFS container lock
+  fires exactly as Szorc-2018 + Apple-DTS-2025 predicted: T=8
+  costs 4× T=1's sys-CPU for only 1.94× throughput; T=14 costs
+  9.3× T=1 sys for 1.38× throughput. The Rust slice ships
+  `--threads N` on `apfs-fastindex-scan` with default
+  `min(hw.physicalcpu, 4)`. End-to-end /Applications throughput:
+  200k → 313k ent/s = +56% over the r2c-fallback-perf tip
+  (+82% cumulative since the pre-perf baseline; 1.82× total).
+  Test count 69 → 70 (parallel_walker_matches_serial_shape).
 - `EX-21` fallback path skeleton; landed a POSIX-traversal-backed
   fallback in `src/apfs_fastindex/fallback_traversal.py` that emits the
   same `NamespaceEntry` + `DirectoryAggregate` shape as the Rust raw
