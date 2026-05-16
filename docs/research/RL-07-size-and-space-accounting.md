@@ -3,7 +3,7 @@
 Status: Open
 Priority: P0
 Owner: TBD
-Last Updated: 2026-05-16 (SR-019)
+Last Updated: 2026-05-16 (EX-22)
 
 ## Core Question
 - What size metrics will the product report, and how can those metrics be computed correctly on APFS?
@@ -123,6 +123,27 @@ Last Updated: 2026-05-16 (SR-019)
   sparse inodes. Ordinary uncompressed logical size for v1 is now safe to
   source from `INO_EXT_TYPE_DSTREAM.size` decoded by the SR-015 cursor rule.
   Compression precedence remains SR-017/EX-19 territory.
+- [2026-05-16] Observation: `EX-22` ran SR-019's precedence against
+  a same-run APFS fixture (ordinary, sparse, clone, hard link,
+  symlink, `ditto --hfsCompression`) and returned a
+  `partial_validated_sr_019_alloced_size` verdict. Per-inode
+  results: ordinary.txt (4096 vs 4096 ✓), clone.txt (4096 vs 4096
+  ✓), link.txt (0 vs 0 ✓), compressed.txt (fail_closed, oracle
+  4096 unclaimed by design), sparse.bin **4096-block divergence**
+  (picked `alloced_size = 1056768`, oracle `st_blocks * 512 =
+  24576`). The empirical confirmation of SR-019's recorded
+  kernel-vs-fsck disagreement: macOS's writer follows the
+  linux-apfs-rw rule `alloced_size = round_up(ds_size,
+  blocksize)`, not apfsck's `Σ extent.len`. The Rust slice's
+  precedence must therefore split step 1: `regular + dstream +
+  no SPARSE_BYTES xfield` is safe to emit; `regular + dstream +
+  has SPARSE_BYTES xfield` must fail-closed in v1.
+  Hypothesis-only finding worth follow-up: on macOS,
+  `alloced_size - sparse_bytes = 1056768 - 1032192 = 24576 =
+  st_blocks * 512` exactly. Apple's own definition of
+  `INO_EXT_TYPE_SPARSE_BYTES` makes this algebraic, not
+  coincidental, but one data point is not a rule. EX-22b
+  (multi-shape sparse corpus) is the right vehicle.
 - [2026-05-16] Spec/Observation: `SR-019` closes the R2-A source-of-truth
   question. `j_dstream_t.alloced_size` is the only candidate that any reader
   publishes to callers (linux-apfs-rw uses it as `inode->i_blocks`; TSK
@@ -191,22 +212,32 @@ Last Updated: 2026-05-16 (SR-019)
   clone, hard link, symlink, and compressed cases. The Rust MWP namespace
   emitter may now implement SR-017 per-inode logical size, gated only by
   EX-20 (SR-018 name/case) and the v1 aggregate policy from SR-009.
-- **R2-A direction (post-SR-019)**: SR-019 has now picked the single
-  candidate (`j_dstream_t.alloced_size`) and the four-step precedence
-  rule (regular+dstream → `Some(alloced_size)`; regular+decmpfs → fail
-  closed; symlink → 0; directory → 0; else fail closed). The
-  outstanding question is no longer "which field," but "for which case
-  classes does that field equal macOS `st_blocks * 512`." `EX-22` runs
-  the EX-19 same-run fixture (ordinary, sparse, clone, hard link,
-  symlink, `ditto --hfsCompression`), captures per inode
-  `(alloced_size, sum_of_file_extent_lengths_diagnostic, st_blocks * 512)`,
-  and verdicts each case class independently. Pass condition: case
-  classes (1) and (3) (regular+dstream and symlink) match the oracle;
-  the decmpfs case lands in `not_claimed` rather than producing a
-  mismatch. R2-A Rust slice emission waits on EX-22's case-class
-  verdict table. Exclusive/shared/snapshot-retained accounting stays
-  out of R2-A scope; the extent-reference tree is the future input
-  for those, not an R2-A emission candidate.
+- **R2-A direction (post-EX-22)**: EX-22 amended SR-019's step 1.
+  The Rust slice emits `allocated_size: Option<u64>` under the
+  following precedence:
+  1. `regular + dstream + no INO_EXT_TYPE_SPARSE_BYTES xfield` →
+     `Some(j_dstream_t.alloced_size)`.
+  2. `regular + dstream + has INO_EXT_TYPE_SPARSE_BYTES xfield` →
+     `None` (fail closed; macOS's writer overstates allocation).
+  3. `regular + com.apple.decmpfs xattr` → `None` (fail closed).
+  4. `symlink` → `Some(0)`.
+  5. `directory` → `Some(0)`.
+  6. anything else → `None`.
+
+  Aggregate policy mirrors SR-009: each inode contributes its
+  emitted `allocated_size` to its containing directory exactly
+  once, and any `None` contributor collapses the directory's
+  `unique_inode_allocated_total` to `None` so a partial total
+  cannot be misread as authoritative.
+
+  Follow-up lane: **EX-22b sparse corpus.** Test whether
+  `alloced_size - sparse_bytes` reproduces `st_blocks * 512` on
+  leading-hole, trailing-hole, multi-hole, large-hole, and
+  zero-hole-but-SPARSE_BYTES-set shapes. Positive verdict promotes
+  sparse rows from `None` to `Some(_)` and amends SR-019 with the
+  algebraic identity. Exclusive/shared/snapshot-retained
+  accounting stays out of R2-A scope; the extent-reference tree
+  is the future input for those, not an R2-A emission candidate.
 
 ## Exit Criteria
 - Defined product-facing size semantics.
@@ -215,7 +246,13 @@ Last Updated: 2026-05-16 (SR-019)
 - R2-A exit: per-file physical-size precedence table validated by EX-22
   against `st_blocks * 512` on a same-run fixture covering the SR-017
   shape set (ordinary / sparse / clone / hard link / symlink /
-  compressed).
+  compressed). **Status (2026-05-16): EX-22 returned
+  `partial_validated_sr_019_alloced_size`** — 4/5 emit-rows match,
+  the decmpfs row is fail-closed by design, and the sparse row
+  diverges by exactly `INO_EXT_TYPE_SPARSE_BYTES`. R2-A's Rust
+  slice ships with sparse explicitly fail-closed; an EX-22b
+  sparse corpus is the gate that would promote sparse rows from
+  `None` to `Some(_)`.
 
 ## Related Logs
 - RL-03 FS Tree Topology and Required Records
