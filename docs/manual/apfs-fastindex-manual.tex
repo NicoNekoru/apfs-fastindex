@@ -5,22 +5,36 @@
 \usepackage{geometry}
 \usepackage{hyperref}
 \usepackage{longtable}
+\usepackage{booktabs}
 \usepackage{url}
 \usepackage{xurl}
+\usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta,shapes.geometric,fit,backgrounds,calc}
+\usepackage[newfloat]{minted}
+\setminted{
+  fontsize=\small,
+  frame=lines,
+  framesep=2mm,
+  baselinestretch=1.1,
+  breaklines=true,
+  breakanywhere=true,
+}
+\usemintedstyle{tango}
 
 \geometry{margin=1in}
 \emergencystretch=3em
 \hypersetup{
-  pdftitle={APFS FastIndex Manual},
-  pdfauthor={apfs-fastindex research notes},
+  pdftitle={Reading APFS},
+  pdfauthor={apfs-fastindex project},
   colorlinks=true,
   linkcolor=blue,
   urlcolor=blue
 }
 
-\title{APFS FastIndex Manual\\A Living Reproduction Textbook}
+\title{Reading APFS\\Notes Toward a Fast Index of an Apple File System Volume}
 \author{apfs-fastindex project}
-\date{Living draft, 2026-05-14}
+\date{2026-05-15}
 
 \begin{document}
 
@@ -31,26 +45,33 @@
 \input{chapters/00-preface}
 
 \mainmatter
-\part{Problem And Method}
-\input{chapters/01-problem-and-scope}
-\input{chapters/02-research-method}
+\part{The Problem}
+\input{chapters/01-problem}
+\input{chapters/02-method}
 
-\part{Raw V1 Pipeline}
-\input{chapters/03-v1-raw-pipeline}
-\input{chapters/04-validation-and-oracles}
+\part{The Container and the Object Map}
+\input{chapters/03-container}
+\input{chapters/04-omap}
 
-\part{Runtime And Product Boundaries}
-\input{chapters/05-runtime-support}
-\input{chapters/06-accounting-and-product-semantics}
+\part{The File-System Tree}
+\input{chapters/05-fs-tree}
+\input{chapters/06-bodies}
+\input{chapters/07-fail-closed}
 
-\part{Incremental Research}
-\input{chapters/07-identity-reuse-cache}
+\part{Names and Sizes}
+\input{chapters/08-size}
+\input{chapters/09-names}
 
-\part{Reproduction}
-\input{chapters/08-proof-skeleton}
-\input{chapters/09-experiment-catalog}
+\part{Boundaries}
+\input{chapters/10-identity}
+\input{chapters/11-support}
+
+\part{Engineering}
+\input{chapters/12-measurement}
+\input{chapters/13-open}
 
 \backmatter
-\input{chapters/10-glossary}
+\input{chapters/14-glossary}
+\input{chapters/15-experiment-register}
 
 \end{document}

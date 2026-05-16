@@ -1,0 +1,263 @@
+\chapter{Logical Size and Its Precedence}
+
+APFS records the size of a file in several places, and the places do
+not always agree. A parser that picks the wrong source on the wrong
+file silently produces wrong rows and wrong directory totals. This
+chapter fixes one rule and shows the cases for which it is the
+correct rule.
+
+\section{The Canonical Metric}
+
+The v1 size metric is \emph{logical size}: the user-visible byte
+length, the number that POSIX \texttt{st\_size} reports, the number
+the shell shows in \texttt{ls -l}. It is not the bytes on disk; it is
+not the bytes the file would occupy after decompression on a
+different filesystem; it is not the bytes uniquely owned by this
+inode. Each of those is a separate metric (chapter~13), and v1 does
+not promise them.
+
+The choice is deliberate. Logical size has a stable oracle (\texttt{st\_size}),
+applies uniformly to ordinary files, sparse files, clones, hard
+links, symlinks, and compressed files, and is the size every
+user-facing tool already agrees on.
+
+\section{The Precedence Rule}
+
+\textbf{Observation.} Five steps, applied per inode, produce
+\texttt{st\_size} for every case the v1 corpus covers:
+
+\begin{enumerate}
+  \item If the inode's \texttt{internal\_flags} carry
+    \texttt{INODE\_HAS\_UNCOMPRESSED\_SIZE}: pick
+    \texttt{inode.uncompressed\_size}.
+  \item Else if the inode carries a \texttt{j\_dstream\_t} (via
+    \texttt{INO\_EXT\_TYPE\_DSTREAM} or a paired
+    \texttt{j\_dstream\_id\_val\_t} record): pick
+    \texttt{j\_dstream\_t.size}.
+  \item Else if a \texttt{com.apple.decmpfs} xattr is present and
+    step 1 did not fire: pick the decmpfs header's
+    \texttt{uncompressed\_size} field.
+  \item For symlinks (\texttt{S\_IFLNK}): pick the byte length of the
+    \texttt{com.apple.fs.symlink} xattr payload.
+  \item Otherwise: zero.
+\end{enumerate}
+
+The order matters. Steps 1 and 3 both reach into compression
+metadata, but they reach for different fields and have different
+trust. The next section shows why.
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[
+  every node/.style={font=\footnotesize},
+  decision/.style={diamond, draw, aspect=2.4, inner sep=1pt,
+                   align=center, fill=blue!8},
+  result/.style={draw, rounded corners=2pt, fill=green!18,
+                 minimum width=3.4cm, minimum height=0.8cm, align=center},
+  fallback/.style={draw, rounded corners=2pt, fill=gray!15,
+                   minimum width=3.0cm, minimum height=0.8cm, align=center},
+  flow/.style={-Stealth},
+  no/.style={font=\scriptsize, near start, above},
+  yes/.style={font=\scriptsize, near start, right},
+]
+  \node[decision] (d1) {INODE\_HAS\_\\UNCOMPRESSED\_SIZE?};
+  \node[result, right=1.6cm of d1] (r1) {\texttt{inode.uncompressed\_size}};
+
+  \node[decision, below=1.1cm of d1] (d2) {\texttt{j\_dstream\_t}\\present?};
+  \node[result, right=1.6cm of d2] (r2) {\texttt{j\_dstream\_t.size}};
+
+  \node[decision, below=1.1cm of d2] (d3) {decmpfs xattr\\present?};
+  \node[result, right=1.6cm of d3] (r3) {decmpfs header\\\texttt{uncompressed\_size}};
+
+  \node[decision, below=1.1cm of d3] (d4) {symlink\\(S\_IFLNK)?};
+  \node[result, right=1.6cm of d4] (r4) {symlink target\\byte length};
+
+  \node[fallback, below=1.1cm of d4] (r5) {zero};
+
+  \draw[flow] (d1.east) -- (r1.west) node[yes] {yes};
+  \draw[flow] (d2.east) -- (r2.west) node[yes] {yes};
+  \draw[flow] (d3.east) -- (r3.west) node[yes] {yes};
+  \draw[flow] (d4.east) -- (r4.west) node[yes] {yes};
+
+  \draw[flow] (d1.south) -- (d2.north) node[midway, right, font=\scriptsize] {no};
+  \draw[flow] (d2.south) -- (d3.north) node[midway, right, font=\scriptsize] {no};
+  \draw[flow] (d3.south) -- (d4.north) node[midway, right, font=\scriptsize] {no};
+  \draw[flow] (d4.south) -- (r5.north) node[midway, right, font=\scriptsize] {no};
+\end{tikzpicture}
+\caption{Per-inode logical-size precedence. The order is non-negotiable;
+  the compressed case (next section) is the load-bearing reason step~1
+  must beat step~3.}
+\end{figure}
+
+In pseudocode the same rule reads as one short function:
+
+\begin{minted}{python}
+def logical_size(inode, xattrs):
+    if inode.internal_flags & INODE_HAS_UNCOMPRESSED_SIZE:
+        return inode.uncompressed_size
+    if inode.dstream is not None:
+        return inode.dstream.size
+    decmpfs = xattrs.get("com.apple.decmpfs")
+    if decmpfs is not None:
+        return decmpfs.header.uncompressed_size
+    if S_ISLNK(inode.mode):
+        return len(xattrs["com.apple.fs.symlink"].payload)
+    return 0
+\end{minted}
+
+\section{The Load-Bearing Case: Compression}
+
+\textbf{Observation.} On the EX-19 fixture the compressed file
+(\texttt{compressed.txt}, created via
+\texttt{ditto --hfsCompression}) presents:
+
+\begin{itemize}
+  \item \texttt{INODE\_HAS\_UNCOMPRESSED\_SIZE} set,
+    \texttt{inode.uncompressed\_size = 53248}.
+  \item No \texttt{j\_dstream\_t}. APFS stores small compressed data
+    inline in the decmpfs xattr and does not allocate a separate
+    dstream for it.
+  \item \texttt{com.apple.decmpfs} xattr present, with header
+    \texttt{uncompressed\_size = 437} and
+    \texttt{compression\_type = 0}.
+  \item Mounted POSIX \texttt{st\_size = 53248}.
+\end{itemize}
+
+The decmpfs header's \texttt{uncompressed\_size} is a placeholder for
+this layout. Step 1 must beat step 3, or the parser emits 437 instead
+of 53248. The fixture is small but the principle is general: when
+APFS sets the inode flag, the inode flag is the source of truth;
+the decmpfs header is metadata the running system maintains for its
+own decompression path and is not reliably the file's size.
+
+\section{The Hint That Is Not A Size}
+
+\textbf{Observation.}
+\texttt{INO\_EXT\_TYPE\_SPARSE\_BYTES} is an
+\emph{allocation hint}, not a logical size. It records the bytes the
+sparse-allocation layer has not committed to disk.
+
+On the proof fixture's sparse file:
+
+\begin{itemize}
+  \item \texttt{j\_dstream\_t.size = 1052897} (which equals
+    \texttt{st\_size}).
+  \item \texttt{INO\_EXT\_TYPE\_SPARSE\_BYTES = 1032192}.
+  \item \texttt{st\_size = 1052897}.
+\end{itemize}
+
+The sparse bytes number describes the difference between the file's
+logical extent and its allocated bytes. It is useful for an allocated-
+size metric (chapter~13) but is not the answer to "how large is this
+file"; that number is the dstream size, which the precedence rule
+correctly picks at step 2.
+
+A reader that treats \texttt{SPARSE\_BYTES} as anything else is
+adding sparse holes to the logical size of every sparse file --- a
+sizeable error on real-world data.
+
+\section{Hard Links Do Not Need A Separate Column}
+
+The precedence rule operates per inode. A hard link is a directory
+entry that names the same inode as another directory entry; both
+entries' rows in the namespace carry the same \texttt{file\_id}
+(which is the inode's object ID) and the same logical size.
+
+On the proof fixture, \texttt{ordinary.txt} and \texttt{hard.txt}
+share inode 16; both rows report \texttt{logical\_size = 29}. The
+hard-link unification machinery (SIBLING\_LINK and SIBLING\_MAP
+records) does not change which precedence rule applies, only which
+inode each directory entry resolves to.
+
+\section{Symlinks Have Their Own Step}
+
+A symlink's logical size is the byte length of its target string, not
+the size of the file the link points at. POSIX defines it this way;
+APFS records the target in an extended attribute named
+\texttt{com.apple.fs.symlink}; the precedence rule reads the xattr
+payload byte length at step 4.
+
+On the proof fixture, \texttt{link.txt} points at \texttt{moved.txt}
+(a 9-byte name) and \texttt{st\_size = 9}; the SR-017 step-4 pick
+matches.
+
+\section{The Per-Inode Table}
+
+\textbf{Observation.} On the EX-19 same-run fixture covering ordinary,
+sparse, clone, hard-linked, symlink, and compressed cases, the
+precedence rule reproduces \texttt{st\_size} for every unique inode:
+
+\begin{center}
+\begin{tabular}{lrlrr}
+\toprule
+path & inode & step picked & value & st\_size \\
+\midrule
+ordinary.txt   & 16 & \texttt{j\_dstream\_size}         & 29      & 29 \\
+sparse.bin     & 19 & \texttt{j\_dstream\_size}         & 1052897 & 1052897 \\
+clone.txt      & 20 & \texttt{j\_dstream\_size}         & 29      & 29 \\
+link.txt       & 23 & \texttt{symlink\_target\_len}     & 12      & 12 \\
+compressed.txt & 24 & \texttt{inode\_uncompressed\_size} & 53248   & 53248 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Zero mismatches. The compressed case picks step 1; everything else
+picks step 2 except the symlink (step 4). The hard link does not
+appear as a separate row because the rule is per inode and
+\texttt{hard.txt} shares inode 16 with \texttt{ordinary.txt}.
+
+\section{Directory Aggregates}
+
+The v1 directory total is the \emph{unique-inode logical sum within
+the aggregate root}.
+
+A regular file's logical size contributes to a directory total once,
+regardless of how many hard-linked paths within that directory tree
+reference the same inode. A symlink contributes its target byte
+length to its own row but contributes nothing to any directory total
+(the target may live elsewhere or not exist at all, and even when it
+exists its size is already counted at the target's row).
+
+\textbf{Why this policy.} The naive policy --- sum the logical size of
+every path under a directory --- catastrophically overcounts on real
+directories with hard-linked content: mail spools, package caches,
+Git object stores, snapshot archives. The user looking at a 12 GB
+directory deserves to know that 11 GB of it is a single 11 GB file
+that also appears elsewhere on disk, not that the directory legitimately
+holds 12 GB of unique content. WizTree-on-NTFS rarely encounters
+hard-link density that exposes this, but on APFS the case is common.
+
+\textbf{Consequence.} Sibling directory totals are not strictly
+additive into their parent when the same file identity appears in
+more than one subtree. This is correct, not buggy, but the user
+interface must label aggregate semantics so the user understands
+what the number means.
+
+The aggregate rule is implemented in one place
+(\texttt{aggregate.py}, ported to the Rust crate's \texttt{namespace}
+module) using \texttt{setdefault(file\_id, logical\_size)} keyed by
+inode, exactly so the policy is enforced by construction rather than
+by careful summing.
+
+\section{What V1 Does Not Promise}
+
+Four metrics live outside the v1 contract. Each has its own probe
+plan and its own oracle, and each is treated in chapter~13.
+
+\begin{description}
+  \item[Allocated size.] \texttt{j\_dstream\_t.alloced\_size}, the
+    file-extent records, and the extent-reference tree are the
+    candidate sources. Oracle: \texttt{st\_blocks * 512} on cases
+    that have been validated case by case.
+  \item[Exclusive size.] Bytes owned only by this inode versus shared
+    with clones or snapshots. Requires extent ownership analysis.
+  \item[Shared size.] Bytes shared with at least one other inode or
+    snapshot.
+  \item[Snapshot-retained bytes.] Bytes that exist on disk solely
+    because a snapshot still references them.
+\end{description}
+
+A future version of this manual will have its own chapter on each.
+Until those chapters exist, the parser does not emit those columns.
+\texttt{logical\_size} is what it knows; \texttt{logical\_size} is
+what it returns.

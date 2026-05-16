@@ -1,0 +1,204 @@
+\chapter{The Container}
+
+Block zero is the locator. It is not the authoritative container
+superblock. Treating block zero as the source of truth is the first
+mistake an APFS reader can make; the second is reading the highest
+checkpoint without validating it; the third is reading the latest
+checkpoint while the volume is changing. This chapter is concerned
+with avoiding all three.
+
+\section{Block Zero As Locator}
+
+APFS is copy-on-write at the container level. Each transaction writes a
+new container superblock (\texttt{nx\_superblock\_t}, henceforth NXSB)
+into the checkpoint descriptor area. Block zero is the stable known
+location at which a reader can find the descriptor area. It is updated
+lazily; the authoritative live NXSB is one of the copies in the
+descriptor ring.
+
+The pieces of block zero a reader needs:
+
+\begin{itemize}
+  \item \texttt{block\_size} at offset \texttt{0x24}: validated to be a
+    power of two within \texttt{[4096, 65536]}.
+  \item \texttt{nx\_xp\_desc\_blocks} at offset \texttt{0x68}: the
+    length of the descriptor area in blocks.
+  \item \texttt{nx\_xp\_desc\_base} at offset \texttt{0x70}: the first
+    block of the descriptor area. The high bit signals a
+    \emph{non-contiguous} layout, which v1 does not support and which
+    triggers a typed hard stop. A non-contiguous descriptor area
+    would require a separate checkpoint-mapping-tree implementation.
+\end{itemize}
+
+Block zero is itself an APFS object and must validate as one: NXSB
+magic at offset \texttt{0x20}, object type \texttt{NX\_SUPERBLOCK},
+object id equal to the constant NX-superblock OID (1), and a valid
+Fletcher-64 checksum. A block zero that does not satisfy these is not
+an APFS container.
+
+\textbf{Observation.} The \texttt{block\_size} and descriptor base in
+block zero must agree with the selected NXSB's view of the same
+fields. A discrepancy means block zero is stale relative to a
+descriptor write that did not (yet) propagate. The parser rejects
+the source rather than guessing which view is correct.
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[
+  every node/.style={font=\small},
+  block/.style={draw, minimum width=1.05cm, minimum height=0.8cm,
+                align=center, font=\footnotesize},
+  locator/.style={block, fill=gray!12},
+  nxsb/.style={block, fill=blue!10},
+  nxsbsel/.style={block, fill=blue!30, very thick},
+  map/.style={block, fill=orange!18},
+  emptyc/.style={block, fill=white, dashed},
+  arrow/.style={-Stealth, thick},
+]
+  \node[locator, minimum width=1.6cm, minimum height=1.5cm] (b0)
+    {block 0\\\scriptsize locator};
+
+  \node[nxsb, right=1.8cm of b0, yshift=0.2cm] (n1) {NXSB\\\scriptsize xid 18};
+  \node[nxsb, right=0.05cm of n1] (n2) {NXSB\\\scriptsize xid 19};
+  \node[map,  right=0.05cm of n2] (m1) {map};
+  \node[nxsb, right=0.05cm of m1] (n3) {NXSB\\\scriptsize xid 20};
+  \node[nxsbsel, right=0.05cm of n3] (n4) {NXSB\\\scriptsize xid \textbf{21}};
+  \node[map,  right=0.05cm of n4] (m2) {map\\\scriptsize last};
+  \node[emptyc, right=0.05cm of m2] (e1) {};
+  \node[emptyc, right=0.05cm of e1] (e2) {};
+
+  \node[fit=(n1)(e2), draw=none, label={[font=\footnotesize, yshift=-0.05cm]
+        above:checkpoint descriptor area}] (ring) {};
+
+  \draw[arrow] (b0.east) -- ++(0.4,0) |- (ring.west)
+    node[midway, above, font=\scriptsize] {desc base};
+
+  \draw[arrow, dashed]
+    (n4.south) ++(0,-0.1) -- ++(0,-0.7)
+    node[below, font=\scriptsize, align=center]
+      {selected NXSB:\\highest checksum-valid xid};
+\end{tikzpicture}
+\caption{Block zero locates the descriptor ring; the selected NXSB is
+  the highest checksum-valid candidate in the ring. Several earlier
+  NXSBs may remain valid; \texttt{map} blocks carry checkpoint-map
+  contents; trailing slots may be unwritten between commits.}
+\end{figure}
+
+\section{Selecting The Checkpoint}
+
+The descriptor area is a contiguous run of \texttt{nx\_xp\_desc\_blocks}
+blocks. Some are checkpoint maps (chapter~\ref{ssec:checkpoint-map});
+some are NXSB candidates. The selection rule:
+
+\begin{enumerate}
+  \item Iterate every block in the descriptor range.
+  \item For each, check the NXSB magic at offset \texttt{0x20}.
+  \item If the magic matches, validate object type
+    (\texttt{NX\_SUPERBLOCK}) and Fletcher-64 checksum.
+  \item Record the candidate.
+  \item After the scan, pick the candidate with the highest XID.
+\end{enumerate}
+
+The highest valid XID is the selected NXSB. Its XID becomes the
+\emph{scan XID}, and every subsequent object resolution for the run is
+performed at this XID.
+
+Blocks that carry NXSB magic but fail object-type or checksum
+validation are recorded as skipped descriptors with the reason. They
+are not silently ignored; a future support broadening must justify
+why they were skipped.
+
+\textbf{Observation.} Three or four NXSB candidates is typical for a
+recently written container. The first execution of EX-15 against the
+EX-14 fixture saw four candidates with XIDs 18--21; all four passed
+strict validation. Multiple candidates is not a sign of corruption.
+Zero candidates is.
+
+\subsection{Why The Highest Valid XID}
+
+The candidates are not chronologically ordered in the descriptor area;
+they are written into a ring. The XID is the only monotonic identity
+for transaction order. The highest checksum-valid XID is the most
+recent transaction the writer completed. A higher XID with an invalid
+checksum is a transaction the writer started but did not finish; v1
+treats those as failed and ignores them, with the result that
+selection is always self-consistent.
+
+The rule has a corollary: a parser that picks a lower XID when the
+highest is valid has chosen a stale state for no reason and will
+disagree with anything else that picks the latest.
+
+\subsection{Live State Is Not Pinned}
+
+\textbf{Observation.} On a mounted APFS volume that other processes
+are using, the highest valid XID moves under the reader. Two reads
+of "latest" may return two different transactions. Mixing objects
+from different transactions produces an incoherent namespace.
+EX-01's churn probe demonstrated this on a mounted lab image.
+
+The v1 fix is structural rather than algorithmic: raw mode only runs
+on sources where state can be pinned. Detaching an image fixes the
+visible state. So does an explicit caller commitment that a device's
+checkpoint will not advance. Live mounted volumes are
+readable-but-not-supported; chapter~11 develops the vocabulary.
+
+\section{The Checkpoint Map Ring}
+\label{ssec:checkpoint-map}
+
+A selected NXSB references a chain of checkpoint maps
+(\texttt{checkpoint\_map\_phys\_t}) in the descriptor area. The map
+chain carries the ephemeral object identifier table for the selected
+checkpoint: the OIDs and physical addresses of objects that live in
+memory between transactions and are written into the checkpoint data
+area at commit. The reader needs the map to resolve those ephemerals.
+
+The walk rule:
+
+\begin{enumerate}
+  \item Start at \texttt{nx\_xp\_desc\_index} in the selected NXSB.
+  \item Read the block; validate as an APFS object with type
+    \texttt{OBJECT\_TYPE\_CHECKPOINT\_MAP}.
+  \item Record the (\texttt{oid}, \texttt{paddr}) mappings.
+  \item Advance through subsequent map blocks in the descriptor area.
+  \item Stop when a block carries the \texttt{CHECKPOINT\_MAP\_LAST}
+    flag.
+\end{enumerate}
+
+A chain that runs out of length before the last flag is malformed.
+v1 fails closed.
+
+\textbf{Empirical correction.} The Apple reference describes
+ephemeral objects in a way that reads naturally as "the checkpoint
+map block itself is ephemeral." It is not. Validation against a
+real container demonstrates that \texttt{OBJECT\_TYPE\_CHECKPOINT\_MAP}
+blocks carry the \texttt{OBJ\_PHYSICAL} storage flag, not
+\texttt{OBJ\_EPHEMERAL}. The validator must expect
+\texttt{Physical} storage for these blocks. This correction was
+landed during EX-11 as a one-line constant change with a synthetic
+malformed-checkpoint-map regression test.
+
+\section{Roots Reachable From The Selected Checkpoint}
+
+The selected NXSB names five things the v1 reader needs:
+
+\begin{enumerate}
+  \item \texttt{nx\_omap\_oid}: the OID of the container OMAP.
+  \item \texttt{nx\_fs\_oid[]}: an array of volume superblock OIDs.
+  \item Feature, incompatible-feature, and read-only-compatible
+    feature masks.
+  \item Reaper and space-manager OIDs (not used by v1; their presence
+    is required, their content is not).
+  \item Container UUID (used for source identity in caches and
+    diagnostics).
+\end{enumerate}
+
+The incompatible-feature mask is the gate for format drift
+(chapter~11). Any bit the reader does not recognise stops the run.
+Better to refuse a container with a new feature bit than to
+silently emit a row that depends on the bit's meaning.
+
+The container OMAP and the volume superblocks both require object
+resolution, and that is the next chapter's subject. The point to fix
+here is that block zero, the descriptor area, and the checkpoint map
+together establish a single coherent transaction context. Everything
+that follows runs inside that context. The context is not negotiable.

@@ -1,0 +1,246 @@
+\chapter{Record Bodies and the Xfield Cursor}
+\label{ssec:xfield-spec-vs-impl}
+
+An FS-tree leaf record has a fixed-size header and a variable-length
+tail of extended fields. The fixed header is easy. The variable tail
+is subtle: Apple's reference admits an ambiguous reading, the
+converged code is unanimous in a single direction, and the right rule
+must be applied uniformly across every record family that uses
+xfields.
+
+\section{The Cursor Rule}
+
+\textbf{Observation.} The xfield tail follows one cursor rule, derived
+from \texttt{linux-apfs-rw}, \texttt{apfs-fuse}, \texttt{dissect.apfs},
+\texttt{go-apfs}, \texttt{libfsapfs}, and the Sleuth Kit:
+
+\begin{enumerate}
+  \item The tail begins with \texttt{xf\_blob\_t}: 4 bytes containing
+    \texttt{xf\_num\_exts} and \texttt{xf\_used\_data}.
+  \item Immediately after is the metadata table:
+    \texttt{xf\_num\_exts} entries of \texttt{x\_field\_t}, each 4
+    bytes (\texttt{x\_type}, \texttt{x\_flags}, \texttt{x\_size}).
+  \item The value area begins immediately after the metadata table.
+    There is no extra alignment of the value-area start.
+  \item Reading in metadata-table order, each value consumes
+    \texttt{round\_up(x\_size, 8)} bytes. The cursor advances by the
+    padded length, not by \texttt{x\_size}.
+  \item \texttt{xf\_used\_data} equals
+    \texttt{sum(round\_up(x\_size, 8))} for the record's xfields.
+\end{enumerate}
+
+That is the rule. It is one rule across all xfield-bearing record
+families, and a record whose \texttt{xf\_used\_data} disagrees with
+the padded sum is malformed.
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[
+  every node/.style={font=\footnotesize},
+  byte/.style={draw, minimum width=0.7cm, minimum height=0.75cm,
+               align=center, inner sep=1pt},
+  blob/.style={byte, fill=gray!15},
+  meta/.style={byte, fill=blue!15},
+  val/.style={byte, fill=green!18},
+  pad/.style={byte, fill=red!15, font=\scriptsize\itshape},
+  brace/.style={decorate, decoration={brace, amplitude=4pt,
+                                       raise=1pt, mirror}},
+]
+  % blob header
+  \node[blob] (b0) {};
+  \node[blob, right=0pt of b0] (b1) {};
+  \node[blob, right=0pt of b1] (b2) {};
+  \node[blob, right=0pt of b2] (b3) {};
+
+  % metadata table -- 3 entries
+  \node[meta, right=0.06cm of b3] (m0) {};
+  \foreach \i [evaluate=\i as \prev using {int(\i-1)}] in {1,...,11} {
+    \node[meta, right=0pt of m\prev] (m\i) {};
+  }
+
+  % value 1: x_size=11, padded to 16
+  \node[val, right=0.06cm of m11] (v0) {};
+  \foreach \i [evaluate=\i as \prev using {int(\i-1)}] in {1,...,10} {
+    \node[val, right=0pt of v\prev] (v\i) {};
+  }
+  \foreach \i [evaluate=\i as \prev using {int(\i-1)}] in {11,...,15} {
+    \node[pad, right=0pt of v\prev] (v\i) {p};
+  }
+
+  % value 2: x_size=40 (we show a compressed view)
+  \node[val, right=0.06cm of v15, minimum width=2.1cm] (val2) {value 2 (40\,B)};
+
+  % value 3: x_size=8 (padded to 8 -- no pad needed)
+  \node[val, right=0.06cm of val2, minimum width=0.95cm] (val3) {8};
+
+  % labels
+  \node[above=0.05cm of b1.east, anchor=south, font=\scriptsize]
+    {\texttt{xf\_blob\_t}};
+  \node[above=0.05cm of m5.east, anchor=south, font=\scriptsize]
+    {metadata: 3 $\times$ 4 B};
+  \node[above=0.05cm of v3.east, anchor=south, font=\scriptsize]
+    {value 1 (11\,B + 5\,B padding)};
+
+  % cursor marker
+  \draw[-Stealth, thick] ($(m11.south east) + (0, -0.55)$)
+    -- ($(m11.south east) + (0, -0.05)$)
+    node[below=0.55cm, font=\scriptsize, align=center]
+      {cursor starts here\\(no extra alignment)};
+\end{tikzpicture}
+\caption{The xfield tail for the sparse inode at OID 23
+  (\texttt{xf\_num\_exts=3}, sizes 11/40/8). The value cursor starts
+  immediately after the metadata table; each value advances by
+  \texttt{round\_up(x\_size, 8)} bytes. Total padded value-area length
+  is $16+40+8 = 64$, matching \texttt{xf\_used\_data}.}
+\end{figure}
+
+The rule fits in a few lines of code:
+
+\begin{minted}{rust}
+let mut cursor = metadata_end;
+let mut padded_total = 0usize;
+for entry in metadata.iter() {
+    let value = &blob[cursor .. cursor + entry.x_size as usize];
+    let padded = (entry.x_size as usize + 7) & !7;
+    cursor += padded;
+    padded_total += padded;
+}
+assert_eq!(padded_total, blob_header.xf_used_data as usize);
+\end{minted}
+
+\section{Why The Reference Reads Otherwise}
+
+Apple's reference describes the xfield layout in terms that admit a
+"the value area is independently eight-byte aligned" reading. Under
+that reading, the cursor would jump to the next eight-byte boundary
+after the metadata table before reading the first value. The
+difference is small and frequently invisible: when
+\texttt{xf\_num\_exts * 4} is already a multiple of eight, both
+readings agree.
+
+The converged code is uniform that no such re-alignment happens. The
+value cursor starts at the metadata-table end, full stop. Each
+value's padding to the next eight-byte multiple is performed
+\emph{after} the value, not before the first.
+
+The project initially modelled four candidate layouts in EX-13,
+scoring each against the proof fixture and selecting per-record.
+That probe successfully recovered the correct values but did not
+explain why. SR-015 reviewed the converged sources and showed that
+the four candidates were a probe artefact: a single rule explains
+every record the candidates fit. EX-16 re-ran the decode under the
+single rule and confirmed it.
+
+\section{Evidence From The Proof Fixture}
+
+\textbf{Observation.} On the proof fixture, 14 records carry
+xfield tails. Under the single cursor rule, every one of them
+satisfies \texttt{xf\_used\_data == sum(round\_up(x\_size, 8))}, and
+every one of them reconstructs the namespace and per-file logical
+size identically to the mounted POSIX oracle.
+
+The records and their xfield shapes:
+
+\begin{center}
+\begin{tabular}{rlrlrr}
+\toprule
+oid & family & num\_exts & x\_size set & xf\_used\_data & padded sum \\
+\midrule
+2  & inode   & 1 & 5                 & 8  & 8 \\
+3  & inode   & 1 & 12                & 16 & 16 \\
+16 & inode   & 1 & 4                 & 8  & 8 \\
+17 & inode   & 1 & 4                 & 8  & 8 \\
+17 & dir\_rec & 1 & 8                & 8  & 8 \\
+17 & dir\_rec & 1 & 8                & 8  & 8 \\
+18 & inode   & 1 & 11                & 16 & 16 \\
+19 & inode   & 2 & 15, 40            & 56 & 56 \\
+20 & inode   & 2 & 10, 40            & 56 & 56 \\
+23 & inode   & 3 & 11, 40, 8         & 64 & 64 \\
+24 & inode   & 2 & 40, 10            & 56 & 56 \\
+26 & inode   & 1 & 9                 & 16 & 16 \\
+27 & inode   & 2 & 17, 40            & 64 & 64 \\
+28 & inode   & 2 & 17, 40            & 64 & 64 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The sparse inode at OID 23 is the load-bearing row. It carries three
+xfields (\texttt{NAME=11}, \texttt{DSTREAM=40},
+\texttt{SPARSE\_BYTES=8}) with padded lengths summing to 64; the
+\texttt{NAME} value has a non-multiple-of-eight \texttt{x\_size} (11),
+which forces the cursor to use padded advancement.  Earlier
+candidate-scoring had needed per-record reasoning for this row;
+under the single rule it decodes cleanly.
+
+No record has unused trailing bytes inside its xfield blob. The
+structural assertion holds without exception.
+
+\section{The Required Xfield Types}
+
+The xfield universe is large; v1 needs four types and tolerates
+others.
+
+\begin{description}
+  \item[\texttt{INO\_EXT\_TYPE\_NAME}.] The inode name. The name is
+    also reachable through DIR\_REC keys, and v1 prefers DIR\_REC
+    names for namespace construction (they carry the directory
+    placement). The inode-name xfield is a consistency check.
+  \item[\texttt{INO\_EXT\_TYPE\_DSTREAM}.] A \texttt{j\_dstream\_t}
+    embedded in the inode, carrying logical size, allocated size,
+    default crypto id, and a default-extent reference.
+  \item[\texttt{INO\_EXT\_TYPE\_SPARSE\_BYTES}.] A count of bytes the
+    sparse-allocation layer has not committed to disk. This is not a
+    logical size; chapter~8 develops the distinction.
+  \item[\texttt{DREC\_EXT\_TYPE\_SIBLING\_ID}.] A directory record's
+    sibling-group identifier for hard links. SIBLING\_MAP closes
+    the mapping from sibling ID to inode.
+\end{description}
+
+Other types (\texttt{INO\_EXT\_TYPE\_FS\_UUID},
+\texttt{INO\_EXT\_TYPE\_PURGEABLE\_FLAGS}, and so on) appear in the
+wild but are not consumed by v1 product rows. The cursor rule still
+reads past them correctly because the rule treats every value as
+opaque bytes of length \texttt{x\_size} padded to a multiple of
+eight; only the values the parser actually inspects need a known
+type.
+
+\section{Field-Level Cross-Tool Equality}
+
+The xfield rule, the fixed-header decoders, and the fail-closed gates
+of the next chapter together specify the body decoder completely.
+The project verified the specification by running two independent
+decoders against the same raw container and comparing every field.
+
+\textbf{Observation.} On the proof fixture, the Rust body decoder
+emits 53 records. An independent Python decoder, built from the
+same SR-015 rule and the same fail-closed boundary, emits 53
+records. The two record lists key identically on
+\texttt{(node\_paddr, entry\_index)}. Per-record field comparison
+finds zero divergent fields across \texttt{key}, \texttt{value}, every
+\texttt{xfields[*]}, \texttt{xfield\_used\_data},
+\texttt{xfield\_padded\_total},
+\texttt{xfield\_unused\_trailing\_bytes}, \texttt{validation\_notes},
+\texttt{key\_len}, \texttt{value\_len}, \texttt{object\_id},
+\texttt{raw\_type}, and \texttt{family}.
+
+Cross-tool field equality is the strongest oracle the body decoder
+will see until the project has a same-run \texttt{go-apfs} body dump
+to add. The Python decoder and the Rust decoder are independent
+implementations of the same source-review rules; their agreement
+makes the rules themselves testable.
+
+\section{When To Use This Chapter}
+
+A reader implementing an APFS body decoder should:
+
+\begin{enumerate}
+  \item read the fixed header for the record type from Apple's
+    reference,
+  \item apply the cursor rule above to the xfield tail,
+  \item validate against every fail-closed condition in chapter~7,
+  \item compare against an independent reference implementation, not
+    against intuition.
+\end{enumerate}
+
+Steps 3 and 4 are not optional. The next chapter is what they look
+like in practice.

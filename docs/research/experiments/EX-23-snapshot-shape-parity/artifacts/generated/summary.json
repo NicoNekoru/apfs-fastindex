@@ -1,0 +1,6 @@
+{
+  "inventory_path": "artifacts/generated/ex23-snapshot-inventory.json",
+  "status": "executed",
+  "verdict": "blocked_no_snapshots_at_all",
+  "verdict_detail": "No user-visible APFS snapshots found on any reachable APFS volume (sealed-system OS-update snapshots are excluded per SR-020). EX-23 is correctly blocked on a clean dev workstation; rerun after taking a Time Machine local snapshot (e.g. `tmutil localsnapshot`)."
+}

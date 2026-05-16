@@ -1,0 +1,170 @@
+\chapter{The Object Map}
+
+APFS resolves logical object identifiers to physical block addresses
+through a B-tree called an object map, or OMAP. There is one OMAP per
+container (resolving volume superblocks and ephemerals) and one per
+volume (resolving the FS-tree root and its descendants). The OMAP is
+the single mechanism by which a copy-on-write filesystem can have
+stable object identity over time.
+
+The chapter is short, but its claim is foundational: the OMAP is a
+\emph{two-key} lookup, and the second key is non-negotiable.
+
+\section{Lookup By (OID, Max-XID), Not By OID Alone}
+
+\textbf{Spec.} An OMAP key is \texttt{(oid, xid)}. An OMAP value names
+a physical address, a size, and a flag word. The OMAP can hold
+multiple entries for a single OID, each at a different XID,
+corresponding to different versions of the object over time.
+
+\textbf{Spec.} An OMAP lookup specifies an \texttt{oid} and a
+\emph{max XID}. The B-tree returns the entry with the highest stored
+XID that is \emph{less than or equal to} the requested max XID. The
+semantics are lower-bound rather than exact match: the lookup is
+asking "give me the version of \texttt{oid} that was current at or
+before this scan."
+
+The implication for the caller is structural. The resolver input is
+not a bare OID. It is a triple:
+
+\begin{enumerate}
+  \item the \emph{OMAP context} --- which OMAP owns the OID,
+  \item the OID itself,
+  \item the scan XID.
+\end{enumerate}
+
+A caller that hands the resolver only an OID is asking the wrong
+question. The OID by itself does not determine which version of the
+object is meant; the scan XID does.
+
+The scan XID is the same XID for the entire run: the one selected from
+the descriptor area in chapter~3. Mixing scan XIDs across object
+resolutions within one run reintroduces the incoherence that pinning
+the checkpoint was supposed to prevent.
+
+\section{Hard Stops At OMAP Open}
+
+When the parser opens an OMAP --- reads the
+\texttt{omap\_phys\_t} root object and validates it --- the
+\texttt{omap\_phys.flags} field gates whether the OMAP can be used at
+all.
+
+\begin{description}
+  \item[\texttt{OMAP\_PHYS\_ENCRYPTING}.]
+  \item[\texttt{OMAP\_PHYS\_DECRYPTING}.]
+  \item[\texttt{OMAP\_PHYS\_KEYROLLING}.]
+  \item[\texttt{OMAP\_PHYS\_CRYPTO\_GENERATION\_FLAG}.]
+\end{description}
+
+Any of these set means an encryption operation is in flight on the
+container or the volume. Raw mode cannot be supported in such a
+state: the bytes the reader sees do not yet match the bytes the
+running system will commit. The parser fails closed; the caller
+falls back to a supported API.
+
+\textbf{Observation.} Any \emph{unknown} bit in \texttt{omap\_phys.flags}
+is also a hard stop. APFS reserves bits over time; an unknown bit
+means the running OS knows something the parser does not, and the
+parser must not infer behaviour. This is the format-drift discipline
+of chapter~11 applied at the smallest object that hosts it.
+
+\section{Hard Stops At OMAP Lookup}
+
+Each value entry returned by an OMAP lookup carries its own flag
+word. The flags decide whether the value is usable.
+
+\begin{description}
+  \item[\texttt{OMAP\_VAL\_DELETED}.] Negative result, not an error.
+    The OID had a mapping at some earlier XID but is no longer
+    visible at the scan XID. The caller interprets this as
+    "the object is not present" and proceeds accordingly. The
+    parser does not hard-stop.
+  \item[\texttt{OMAP\_VAL\_ENCRYPTED}.] The value is per-object
+    encrypted. Raw mode cannot decrypt; hard stop.
+  \item[\texttt{OMAP\_VAL\_NOHEADER}.] The target block does not
+    carry an \texttt{obj\_phys\_t} header at all. A structural
+    assumption the rest of the parser depends on has been broken;
+    hard stop.
+  \item[\texttt{OMAP\_VAL\_CRYPTO\_GENERATION}.] Encryption-generation
+    mismatch between the OMAP entry and the volume; hard stop.
+  \item[unknown bits.] Format drift; hard stop.
+\end{description}
+
+The discipline is tighter at lookup time than at open time only
+because lookup is also where the parser sees per-entry encryption
+behaviour. The principle is the same: known flag means known
+behaviour; unknown flag means the parser does not understand the
+running system and refuses to guess.
+
+\section{An Empirical Correction: The B-Tree TOC Layout}
+
+The OMAP is a B-tree, and B-tree leaf nodes in APFS carry a key/value
+table-of-contents that the reader must traverse to find values. The
+TOC format is uniformly described across the Apple reference and the
+converged code, but a single offset interpretation gates whether the
+reader actually decodes the values correctly. The project landed this
+correction during EX-12.
+
+\textbf{Observation.} The TOC \texttt{v\_off} field measures the
+distance from the \emph{end} of the value area to the \emph{start}
+of the value. The value then runs \emph{forward} from that start
+position for \texttt{fixed\_value\_size} bytes (or \texttt{v\_len}
+for variable-length values).
+
+The naive reading is "the value extends backward from \texttt{v\_off}
+toward the start of the node." Under that reading, OMAP values
+decode with a bizarre flag word --- specifically
+\texttt{flags=0x10ffff} on the proof fixture --- and the rest of the
+parser breaks downstream.
+
+The corrected reading produces clean OMAP values
+(\texttt{flags=0x0}, \texttt{size=4096}, \texttt{paddr=...}) and
+matches every converged reader. The fix is one constant change in
+B-tree value extraction; the regression is one synthetic OMAP test.
+The cost of the bug is high (the parser is silently wrong about every
+lookup) and the test that catches it is cheap, so the project keeps
+the synthetic OMAP test in the regression suite.
+
+\section{Cross-Tool Validation Of The Lookup Contract}
+
+EX-12 paired the project's parser with \texttt{go-apfs identitydump}
+against the same \texttt{/dev/rdiskN}. The probe:
+
+\begin{enumerate}
+  \item built a fresh proof fixture,
+  \item ran the project's parser, recording every resolved
+    \texttt{(oid, paddr, xid)} sample published by the OMAP,
+  \item replayed object-header validation rules in Python at each
+    published \texttt{paddr},
+  \item ran \texttt{go-apfs identitydump} against the same raw
+    container,
+  \item compared the two tools' agreement on the FS-tree root
+    \texttt{oid}.
+\end{enumerate}
+
+The two agreed on the FS-tree root OID. They did not agree on which
+scan XID to select: the project's parser picked the higher XID
+visible in the descriptor ring, \texttt{go-apfs} appeared to pick one
+lower. That divergence is recorded as a caveat
+(\texttt{go\_apfs\_active\_state\_observation}) and not silenced; it
+does not affect the value of the cross-tool oracle, because both
+tools' OMAP lookups internally use a consistent scan XID and produce
+internally consistent root resolutions.
+
+The lesson generalises. Two tools that disagree on selection but agree
+on the OID they reach through that selection are still useful as
+oracles for each other, as long as the parser records the selection
+difference. A cross-tool oracle that silences a known disagreement is
+worse than no oracle at all.
+
+\section{What The OMAP Does Not Do}
+
+The OMAP does not resolve objects \emph{within} the FS tree. That is
+the source of the next chapter's finding, and the trap that cost the
+project a fixture.
+
+FS-tree internal-node entries also carry OIDs, and those OIDs also
+require OMAP resolution at the scan XID --- specifically, through the
+\emph{volume} OMAP, not the container OMAP. The OMAP machinery from
+this chapter is exactly what is needed; what changes is the caller.
+The next chapter develops the rule and its empirical evidence.

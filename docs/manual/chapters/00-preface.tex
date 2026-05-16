@@ -1,40 +1,88 @@
 \chapter*{Preface}
 \addcontentsline{toc}{chapter}{Preface}
 
-This manual is a living guide to the \texttt{apfs-fastindex} research project.
-Its purpose is to help a future engineer reproduce the work, understand why the
-scope is narrow, and adapt the method to other projects that need filesystem
-metadata faster than ordinary high-level traversal APIs can provide.
+This manual is a record of what the \texttt{apfs-fastindex} project has
+learned about the Apple File System on disk and about the specific
+problem of enumerating a single volume quickly and correctly. It is not
+a guide to the repository. The repository is a working environment;
+this manual is the textbook the working environment built up.
 
-The source of truth remains the repository artifact trail:
+The reader the manual is written for is a careful engineer who wants to
+read APFS metadata directly. We assume familiarity with copy-on-write
+filesystems and with B-trees, but not with APFS specifically. Every
+claim that is not common knowledge is sourced or labelled.
+
+\section*{Claim Discipline}
+
+Three labels appear throughout the text.
+
+\begin{description}
+  \item[Spec.] Backed by Apple's public reference\footnote{\emph{Apple
+    File System Reference}, retrieved 2026-05-13,
+    \url{https://developer.apple.com/support/downloads/Apple-File-System-Reference.pdf}.}
+    or by another public, durable specification.
+  \item[Observation.] Backed by a controlled experiment in this project
+    or by behavior that converges across multiple independent
+    open-source readers
+    (\texttt{linux-apfs-rw}, \texttt{apfs-fuse}, \texttt{dissect.apfs},
+    \texttt{go-apfs}, \texttt{libfsapfs}, the Sleuth Kit's APFS
+    module).
+  \item[Hypothesis.] Plausible, useful for design, not yet proven.
+    Anything labelled Hypothesis does not justify a product claim.
+\end{description}
+
+Where Spec and Observation disagree, Observation wins. Apple's reference
+is one citation among many; converged code is often more decisive about
+what bytes actually mean. Where the disagreement matters, the text says
+so and names the smallest probe that would settle it.
+
+\section*{Oracle Plurality}
+
+There is no single oracle for an APFS indexer. Each feature has its
+own:
 
 \begin{itemize}
-  \item research synthesis lives in \path{docs/research/RL-*.md}
-  \item external evidence reviews live in \path{docs/research/sources/SR-*.md}
-  \item controlled probes live in \path{docs/research/experiments/EX-*}
-  \item implementation-facing boundaries live in \path{docs/implementation/}
-  \item the current product intent lives in \path{spec.md}
+  \item Namespace: POSIX traversal of the same volume at the same
+    selected state.
+  \item Logical size: \texttt{st\_size} per inode (or symlink-target
+    byte length for symlinks).
+  \item FS-record body: cross-tool field equality between independent
+    decoders against the same raw container.
+  \item Allocated size: \texttt{st\_blocks * 512}, for cases that have
+    been explicitly validated.
+  \item Incremental correctness: a fresh full reparse of the same
+    selected state.
+  \item Boot-root semantics: the user-visible macOS namespace, and only
+    when the product mode explicitly targets it.
 \end{itemize}
 
-This document should not promote hypotheses into design commitments. When it
-summarizes a claim, it should preserve the project's claim discipline:
-\emph{Spec} for public documentation, \emph{Observation} for experiment or
-converging implementation evidence, and \emph{Hypothesis} for plausible but
-unproven design direction.
+Every result in this manual names the oracle that verified it.
 
-The current manual is intentionally skeletal. It records the narrative structure
-and the canonical cross-links so later research can fill chapters without
-turning the repository into a second, inconsistent source of truth.
+\section*{Fail Closed By Default}
 
-Since the previous revision the project has added a native Rust read-only path
-(\path{crates/apfs-fastindex}) covering source gating, descriptor scanning,
-checkpoint-map validation, container/volume OMAP resolution, volume-superblock
-decoding under the v1 feature allowlist, and an FS-tree record-family dump.
-A second cascade of source reviews (\texttt{SR-005} through \texttt{SR-018})
-has tightened checkpoint validation, OMAP lookup semantics, FS-record body
-layout, xfield cursor rules, fail-closed boundaries, logical-size source
-precedence, and name normalization. Five new experiments
-(\texttt{EX-10} through \texttt{EX-14}) record the empirical state of the
-native path; \texttt{EX-14} is the current open blocker for promoting Rust
-output past the FS-record family inventory. This revision updates each chapter
-to track those changes without prematurely claiming work that has not landed.
+The parser refuses to guess. Outside the tested allowlist, it stops
+with a typed error and the caller is responsible for choosing a
+fallback. Plausible but unproven is treated as "do not emit." The
+discipline is not paranoia: it is the cheapest way to keep silently
+wrong rows out of aggregates and out of the user interface.
+
+\section*{What Is And Is Not Here}
+
+The manual presents findings about APFS as a textbook would: each
+chapter takes one face of the system, states what is known, gives the
+evidence, and notes what remains open. Where the project's
+implementation makes a non-obvious choice, the choice is explained from
+first principles rather than from code organisation.
+
+What is not here: a tour of the repository, a list of files, a list of
+commits, a list of experiments treated as work units rather than as
+evidence. Those live in the repository itself; the manual cites them
+only where citation supports a claim.
+
+\section*{A Note On The Voice}
+
+We have tried to write as though the reader will need to defend each
+claim to a sceptic. That style is at odds with the way reverse
+engineering is usually written up, but the project has been disciplined
+about evidence, and the manual should reflect that. A sentence that
+cannot be defended should not have been written.

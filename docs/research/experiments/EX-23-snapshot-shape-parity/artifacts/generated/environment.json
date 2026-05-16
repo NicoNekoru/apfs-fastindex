@@ -1,0 +1,12 @@
+{
+  "cargo": "/Users/kai/.cargo/bin/cargo",
+  "cwd": "/Users/kai/Projects/apfs-fastindex",
+  "diskutil": "/usr/sbin/diskutil",
+  "mount": "/sbin/mount",
+  "platform": "macOS-26.3.1-arm64-arm-64bit-Mach-O",
+  "python": "3.13.9",
+  "sw_vers": "ProductName:\t\tmacOS\nProductVersion:\t\t26.3.1\nProductVersionExtra:\t(a)\nBuildVersion:\t\t25D771280a\n",
+  "timestamp": "2026-05-16T10:54:17.103643+00:00",
+  "tmutil": "/usr/bin/tmutil",
+  "uid": 501
+}
