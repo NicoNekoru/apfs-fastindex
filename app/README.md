@@ -11,12 +11,20 @@ the trajectory.
 - Toolbar with: target path field, Browse… button, mode picker
   (auto / raw / fallback), cross-mounts toggle, Scan / Cancel.
 - `WKWebView` loading the bundled `viz/index.html` (the same depth-N
-  treemap the standalone HTML demo uses).
+  treemap the standalone HTML demo uses), now with a **Logical /
+  Allocated metric toggle** (SR-019 / EX-22). Treemap rectangles
+  resize between logical bytes (`st_size`) and allocated bytes
+  (`st_blocks*512`); rows whose `allocated_size` is null (SR-019
+  fail-closed: sparse, decmpfs) render muted under the Allocated
+  metric and propagate "unclaimed" up to their parent directory's
+  total per the None-collapse contract.
 - `ScanController` runs `apfs-fastindex-scan --slim --progress` as a
   subprocess, streams stderr progress to the toolbar / status bar, and
   pipes the stdout JSON into the viz via the `__apfs_ingest__` shim.
-- Bottom status bar: mode pill, live scanning state, skipped count
-  (orange pill, clickable in the next phase), currently-selected path.
+- Bottom status bar: mode pill, live scanning state, **logical /
+  allocated totals** ("allocated: unclaimed" when SR-019 None-collapse
+  fires anywhere in the subtree), skipped count (orange pill,
+  clickable in the next phase), currently-selected path.
 
 ## What's not in this build yet
 
@@ -98,6 +106,14 @@ JS → Swift (via `window.webkit.messageHandlers.app.postMessage`):
   Phase 2 will show an `NSMenu` here.
 - `{ "type": "reveal_in_finder", "path": "..." }` — Phase 2.
 - `{ "type": "move_to_trash", "paths": [...] }` — Phase 2.
+- `{ "type": "ingest_succeeded", "rootPath": "...", "totalEntries": N,
+  "logicalTotal": N, "allocatedTotal": N | null,
+  "allocatedAvailable": bool }` — fired once the viz has parsed and
+  rendered the scan. `allocatedTotal === null` means SR-019 / EX-22
+  None-collapse fired in the subtree (sparse / decmpfs); the status
+  bar renders it as "allocated: unclaimed".
+  `allocatedAvailable === false` means the scan pre-dates R2-A and
+  the column is missing entirely.
 
 The Swift side parses these into a typed `BridgeMessage` enum
 (`BridgeProtocol.swift`) before handing them to the controller.

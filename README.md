@@ -14,8 +14,13 @@ This is a project to reverse engineer APFS structures directly in order to get t
 
 ## Try the v0 demo
 
-R1 — Narrow Rust MWP — is shippable. Two modes, one CLI, one
-browser-side treemap:
+R1 — Narrow Rust MWP — is shippable. R2-A landed on top of it: every
+`NamespaceEntry` now carries an `allocated_size: Option<u64>` column
+under SR-019 + EX-22 precedence, and every `DirectoryAggregate`
+carries `unique_inode_allocated_total: Option<u64>` (None whenever a
+sparse or decmpfs row in the subtree triggers the fail-closed
+contract). Two modes, one CLI, one browser-side treemap with a
+**Logical / Allocated metric toggle**:
 
 ```sh
 # Build the release scanner.
@@ -32,9 +37,18 @@ cargo build --release --bin apfs-fastindex-scan
 open viz/index.html
 ```
 
+The treemap header has a Logical / Allocated toggle. Logical sizes
+by `st_size` (always available; SR-017). Allocated sizes by
+`st_blocks * 512` for files; symlinks and directories are zero;
+sparse and decmpfs rows render muted because their `allocated_size`
+is intentionally not claimed (SR-019 / EX-22). The status bar shows
+both totals; "allocated: unclaimed" surfaces when the None-collapse
+fires anywhere in the loaded subtree.
+
 `apfs-fastindex-scan --summary <path>` prints a one-line correctness
 claim and the `not_claimed` register so you can read the semantic mode
-at a glance.
+at a glance. The register names sparse and decmpfs allocated-size
+fail-closed cases explicitly.
 
 Quick measurement reference: see
 [`docs/implementation/measurement-baseline.md`](docs/implementation/measurement-baseline.md).
