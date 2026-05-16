@@ -316,6 +316,18 @@ Long-range product roadmap:
   candidates (`highest_xid=20`) but returned no `selected_checkpoint` after
   `APFS object validation failed: checksum mismatch at block 1031`. EX-15
   closed this blocker.
+- `EX-23` snapshot shape parity (best-effort, never-sudo);
+  enumerated 9 mounted APFS volumes on the host, found the only
+  present snapshot (sealed-system OS-update on `/`) is excluded
+  by SR-020, and exited verdict `blocked_no_snapshots_at_all`
+  with the reproducer for a privileged rerun. R2-B's shape-parity
+  claim stays in `not_claimed` until a user-visible snapshot is
+  mountable for the diff; the probe is re-runnable and will
+  detect any future user-created TM local snapshot
+  automatically. SR-020 already documented the entitlement gate
+  (`fs_snapshot_create` needs root + `com.apple.developer.vfs.snapshot`),
+  so this is the predicted negative-progress outcome on a clean
+  dev workstation.
 - `EX-21` fallback path skeleton; landed a POSIX-traversal-backed
   fallback in `src/apfs_fastindex/fallback_traversal.py` that emits the
   same `NamespaceEntry` + `DirectoryAggregate` shape as the Rust raw
