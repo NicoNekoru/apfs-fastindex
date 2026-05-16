@@ -444,7 +444,11 @@ def main() -> int:
     mountpoint.mkdir()
     mounted_detach: str | None = None
     nomount_detach: str | None = None
-    summary = {"status": "executed", "verdict": "pending", "verdict_detail": ""}
+    summary: dict[str, Any] = {
+        "status": "executed",
+        "verdict": "pending",
+        "verdict_detail": "",
+    }
     try:
         run_checked(
             [
