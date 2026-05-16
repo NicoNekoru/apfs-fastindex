@@ -1,0 +1,49 @@
+{
+  "runs": [
+    {
+      "config": "current_walker",
+      "entries": 163651,
+      "entries_per_second": 310249,
+      "sys_seconds": 0.515284,
+      "target": "/Applications",
+      "user_seconds": 0.011984,
+      "wall_seconds": 0.527482
+    },
+    {
+      "config": "current_walker",
+      "entries": 163651,
+      "entries_per_second": 312550,
+      "sys_seconds": 0.512005,
+      "target": "/Applications",
+      "user_seconds": 0.011494,
+      "wall_seconds": 0.5236
+    },
+    {
+      "config": "current_walker",
+      "entries": 163651,
+      "entries_per_second": 311855,
+      "sys_seconds": 0.512196,
+      "target": "/Applications",
+      "user_seconds": 0.012011,
+      "wall_seconds": 0.524766
+    },
+    {
+      "config": "current_walker",
+      "entries": 163651,
+      "entries_per_second": 308756,
+      "sys_seconds": 0.517283,
+      "target": "/Applications",
+      "user_seconds": 0.012058,
+      "wall_seconds": 0.530034
+    },
+    {
+      "config": "current_walker",
+      "entries": 163651,
+      "entries_per_second": 303653,
+      "sys_seconds": 0.525741,
+      "target": "/Applications",
+      "user_seconds": 0.012246,
+      "wall_seconds": 0.53894
+    }
+  ]
+}

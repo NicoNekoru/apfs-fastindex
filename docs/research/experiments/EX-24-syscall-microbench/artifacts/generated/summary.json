@@ -1,0 +1,42 @@
+{
+  "runs_per_config": 5,
+  "status": "executed",
+  "summaries": {
+    "current_walker": {
+      "config": "current_walker",
+      "entries": 163651,
+      "entries_per_second_median": 310249,
+      "run_count": 5,
+      "sys_median": 0.515284,
+      "user_median": 0.012011,
+      "wall_max": 0.53894,
+      "wall_median": 0.527482,
+      "wall_min": 0.5236
+    },
+    "drec_only": {
+      "config": "drec_only",
+      "entries": 163651,
+      "entries_per_second_median": 312622,
+      "run_count": 5,
+      "sys_median": 0.511255,
+      "user_median": 0.011888,
+      "wall_max": 2.12884,
+      "wall_median": 0.523479,
+      "wall_min": 0.517611
+    },
+    "fts": {
+      "config": "fts",
+      "entries": 187532,
+      "entries_per_second_median": 181772,
+      "run_count": 5,
+      "sys_median": 0.98979,
+      "user_median": 0.040787,
+      "wall_max": 1.066756,
+      "wall_median": 1.03169,
+      "wall_min": 1.007825
+    }
+  },
+  "target": "/Applications",
+  "verdict": "oracle_inconclusive",
+  "verdict_detail": "entry counts diverge: drec=163651, current=163651, fts=187532 (>1% drift)"
+}
