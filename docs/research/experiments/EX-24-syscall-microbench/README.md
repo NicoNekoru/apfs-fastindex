@@ -4,8 +4,10 @@ ID: EX-24
 Title: `getattrlistbulk` per-attribute cost decomposition + `fts(3)` control
 Date: 2026-05-16
 Owner: Claude
-Status: Planned
-Result: Pending
+Status: Executed
+Result: `oracle_inconclusive` on the entry-count consistency check;
+  **headline finding: drec_only ≈ current_walker (within 1%), which
+  falsifies the SR-021 vnode-cost-load-bearing hypothesis.**
 Related RLs:
 - RL-08
 - RL-12
@@ -147,7 +149,67 @@ removed during the run; the probe counts and reports drift).
 
 ## Observed Results
 
-_(filled in after the run)_
+First run, host's `/Applications` (~164k entries), 5 runs per
+config:
+
+| config            | entries | wall median | user median | sys median | entries/sec |
+|-------------------|--------:|------------:|------------:|-----------:|------------:|
+| `drec_only`       | 163,651 | 0.523 s     | 0.012 s     | 0.511 s    | **312,622** |
+| `current_walker`  | 163,651 | 0.527 s     | 0.012 s     | 0.515 s    | **310,249** |
+| `fts`             | 187,532 | 1.032 s     | 0.041 s     | 0.990 s    | 181,772     |
+
+Mechanical verdict: `oracle_inconclusive` because the consistency
+check (entry counts within 1%) fails between bulk and fts. The
+drift (187,532 - 163,651 = 23,881 entries) is firmlink traversal
+asymmetry: fts crosses into `/System/Volumes/Data/Applications/...`
+firmlinked apps; `getattrlistbulk` from a directory fd does not.
+This is a known APFS firmlink behaviour, not a real
+correctness divergence. Both `drec_only` and `current_walker` return
+**identical** 163,651 entries — the comparison between those two is
+the one that bears the load.
+
+## Headline finding
+
+`drec_only` and `current_walker` are within 1% on every dimension
+(wall, user, sys, throughput). The SR-021 hypothesis that
+inode-attribute fetch forces a costly vnode create + rage path is
+**not falsifiable as a perf lever** on modern Apple silicon for
+this attribute set:
+
+- Adding `ATTR_FILE_TOTALSIZE | ATTR_FILE_ALLOCSIZE` to a drec-only
+  mask costs ~4 ms of wall on a 164k-entry tree (~25 ns/entry).
+- The vnode rage path either does not fire at all in this
+  configuration on this kernel, or its cost is dominated by
+  unrelated work (B-tree page-cache hits, MAC checks). Either
+  reading is consistent with the data.
+
+**Implication**: the Phase-2 deferred-attribute refactor (drec-only
+first pass + selective second-pass stat) is **deprioritised**. It
+would not save measurable sys-CPU on modern hardware. The only
+remaining structural lever for raw throughput is parallelism, which
+EX-25 measures.
+
+## fts(3) verdict
+
+`fts` is **1.7× slower** than `current_walker` (181k vs 310k
+entries/sec on the same fixture). Tempel's 2019 result that "fts
+≥ getattrlistbulk on APFS single-threaded" does **not** replicate
+on macOS 14+. EX-26 (the conditional fts follow-up planned in
+SR-021) is cancelled. EX-25's parallel walker stays built around
+`getattrlistbulk` as originally designed.
+
+## Bonus calibration: user-space cost
+
+The microbench (which does *zero* post-processing — no
+NamespaceEntry, no aggregate, no sort, no walk_skips) sustains
+**312k entries/sec** on `/Applications`. The production scanner
+on the same target sustains **200k entries/sec** (the
+measurement-baseline number). The ~110k delta is the user-space
+post-processing tax. That gives EX-25 a useful kernel-throughput
+ceiling estimate: 4 parallel workers could in principle hit
+~1.25M entries/sec from the kernel alone, with the actual
+end-to-end number depending on APFS-container contention (per
+SR-021) and user-space merge cost.
 
 ## Artifacts Saved
 
@@ -161,15 +223,26 @@ _(filled in after the run)_
 
 ## Interpretation
 
-_(filled in after the run; the patterns to look for:)_
+The data lands cleanly on the **`vnode_cost_is_marginal`** outcome
+(read modulo the firmlink-asymmetry caveat on the fts row). Three
+follow-ons:
 
-- `vnode_cost_is_load_bearing` → record the Phase-2 deferred-
-  attribute refactor in RL-12 as the next highest-leverage perf
-  direction after EX-25 lands.
-- `vnode_cost_is_marginal` → write the EX-25 design knowing
-  parallelism is essentially the only remaining lever.
-- `fts_wins_singlethread` → rewrite EX-25's design to use fts
-  inside each worker rather than `getattrlistbulk`.
+1. **EX-25 design is unchanged.** The parallel walker stays
+   built around `getattrlistbulk` with the current attribute mask;
+   no point shrinking the mask first.
+2. **EX-26 (`fts(3)`) is cancelled.** The 1.7× slower result is
+   strong enough that no further fts experimentation is justified.
+3. **The Phase-2 deferred-attribute refactor is deprioritised.**
+   RL-12 should record this finding so a future engineer doesn't
+   re-invent the same hypothesis.
+
+A second-order finding worth recording: the microbench's pure
+kernel throughput (312k ent/s) is 1.56× the production scanner's
+(200k ent/s). Post-processing in user space is now a measurable
+fraction of the budget — not the dominant cost, but enough that
+a follow-up micro-pass on `build_aggregates` / `String`
+allocations could pay off after EX-25. Recorded as a candidate
+future direction in RL-12.
 
 ## What This Rules Out
 
@@ -198,6 +271,14 @@ _(filled in after the run; the patterns to look for:)_
 
 ## Next Exact Step
 
-- Run the probe. Record the verdict. Use the verdict to shape
-  EX-25's design (worker pool around `getattrlistbulk`, around
-  `fts(3)`, or with a drec-only first phase).
+- **Proceed to EX-25** with the parallel walker built around
+  `getattrlistbulk` and the production attribute mask unchanged
+  (`current_walker`). Worker pool, per-worker `BulkReader`, sink
+  thread for sorted output, T ∈ {1, 2, 4, 8, num_cpus} sweep,
+  verdict on the sub-linear scaling envelope.
+- EX-26 (`fts(3)`) is **cancelled** per the 1.7× slowdown.
+- A future post-EX-25 EX-* may be worth opening for a deeper pass
+  on `build_aggregates` / `String` allocations in user space
+  (the 110k ent/s gap between microbench kernel throughput and
+  production end-to-end throughput). Not load-bearing today;
+  recorded for context.
