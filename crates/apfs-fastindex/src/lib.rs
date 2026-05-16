@@ -85,6 +85,22 @@ pub struct NamespaceEntry {
     pub file_id: u64,
     pub logical_size: u64,
     pub symlink_target: Option<String>,
+    /// Per-inode allocated bytes under SR-019 + EX-22 precedence:
+    ///
+    /// - regular + dstream + no `INO_EXT_TYPE_SPARSE_BYTES` xfield →
+    ///   `Some(j_dstream_t.alloced_size)`
+    /// - symlink, directory → `Some(0)`
+    /// - regular + dstream + `INO_EXT_TYPE_SPARSE_BYTES` present →
+    ///   `None` (sparse divergence; see EX-22)
+    /// - regular + `com.apple.decmpfs` xattr → `None`
+    /// - any other case → `None`
+    ///
+    /// The fallback backend's truth is the kernel's stat output, so it
+    /// emits `Some(st_blocks * 512)` for regular files (the public
+    /// oracle directly) and `Some(0)` for symlinks and directories so
+    /// the shape parity with raw mode holds.
+    #[serde(default)]
+    pub allocated_size: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -92,6 +108,11 @@ pub struct DirectoryAggregate {
     pub path: String,
     pub unique_inode_logical_total: u64,
     pub contributing_file_ids: Vec<u64>,
+    /// Per-directory unique-inode allocated-bytes total. `None` if any
+    /// contributing file inode has `allocated_size == None`; a partial
+    /// total cannot be authoritative.
+    #[serde(default)]
+    pub unique_inode_allocated_total: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -472,7 +493,7 @@ pub fn checkpoint_scan_source<P: AsRef<Path>>(
     };
 
     let correctness_claim = if namespace_emitted {
-        "Rust path emits one APFS volume's NamespaceEntry + DirectoryAggregate rows under SR-017 logical-size precedence and SR-018 stored-name preservation, gated on EX-18 body-field parity, EX-19 size precedence, and EX-20 name preservation"
+        "Rust path emits one APFS volume's NamespaceEntry + DirectoryAggregate rows under SR-017 logical-size precedence, SR-018 stored-name preservation, and SR-019+EX-22 allocated-size precedence (regular+dstream+no-sparse-bytes -> alloced_size; sparse / decmpfs -> fail closed; symlink/dir -> 0), gated on EX-18 body-field parity, EX-19 size precedence, EX-20 name preservation, and EX-22 case-class verdict"
             .to_string()
     } else if selected.is_some() {
         "Rust path validates the source gate, candidate scan, container superblock, checkpoint map, container OMAP, decoded volume superblocks, and a read-only FS-tree record-body dump (no namespace rows)"
@@ -484,7 +505,9 @@ pub fn checkpoint_scan_source<P: AsRef<Path>>(
 
     let mut not_claimed = vec![
         "live mounted raw-scan correctness".to_string(),
-        "physical/shared/exclusive accounting".to_string(),
+        "per-file allocated_size for sparse regular files (INO_EXT_TYPE_SPARSE_BYTES present; EX-22 saw alloced_size overstate st_blocks*512 by exactly sparse_bytes)".to_string(),
+        "per-file allocated_size for decmpfs-compressed regular files (no oracle-validated rule yet)".to_string(),
+        "exclusive / shared / snapshot-retained byte accounting".to_string(),
         "incremental cache reuse".to_string(),
         "encryption decryption or keybag handling".to_string(),
         "snapshot, sealed-volume, or volume-group merged semantics".to_string(),
@@ -494,7 +517,7 @@ pub fn checkpoint_scan_source<P: AsRef<Path>>(
     if !namespace_emitted {
         not_claimed.insert(
             0,
-            "namespace entry emission and oracle-validated logical-size output from Rust"
+            "namespace entry emission and oracle-validated logical-size / allocated-size output from Rust"
                 .to_string(),
         );
     }
