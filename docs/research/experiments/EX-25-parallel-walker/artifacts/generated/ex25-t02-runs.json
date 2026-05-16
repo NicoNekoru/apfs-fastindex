@@ -1,0 +1,59 @@
+{
+  "runs": [
+    {
+      "entries": 163651,
+      "entries_per_second": 544599,
+      "sys_per_thread": 0.292248,
+      "sys_seconds": 0.584496,
+      "target": "/Applications",
+      "threads": 2,
+      "user_per_thread": 0.007779,
+      "user_seconds": 0.015558,
+      "wall_seconds": 0.300498
+    },
+    {
+      "entries": 163651,
+      "entries_per_second": 509037,
+      "sys_per_thread": 0.312645,
+      "sys_seconds": 0.62529,
+      "target": "/Applications",
+      "threads": 2,
+      "user_per_thread": 0.008336,
+      "user_seconds": 0.016671,
+      "wall_seconds": 0.321491
+    },
+    {
+      "entries": 163651,
+      "entries_per_second": 517437,
+      "sys_per_thread": 0.307816,
+      "sys_seconds": 0.615632,
+      "target": "/Applications",
+      "threads": 2,
+      "user_per_thread": 0.008037,
+      "user_seconds": 0.016075,
+      "wall_seconds": 0.316272
+    },
+    {
+      "entries": 163651,
+      "entries_per_second": 498298,
+      "sys_per_thread": 0.319257,
+      "sys_seconds": 0.638515,
+      "target": "/Applications",
+      "threads": 2,
+      "user_per_thread": 0.008698,
+      "user_seconds": 0.017396,
+      "wall_seconds": 0.32842
+    },
+    {
+      "entries": 163651,
+      "entries_per_second": 519954,
+      "sys_per_thread": 0.306185,
+      "sys_seconds": 0.61237,
+      "target": "/Applications",
+      "threads": 2,
+      "user_per_thread": 0.008081,
+      "user_seconds": 0.016162,
+      "wall_seconds": 0.314741
+    }
+  ]
+}

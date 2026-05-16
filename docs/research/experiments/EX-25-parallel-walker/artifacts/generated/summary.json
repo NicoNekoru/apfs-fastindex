@@ -1,0 +1,78 @@
+{
+  "logical_cpu": 14,
+  "physical_cpu": 14,
+  "runs_per_t": 5,
+  "status": "executed",
+  "summaries": [
+    {
+      "entries": 163651,
+      "entries_per_second_median": 314380,
+      "run_count": 5,
+      "sys_median": 0.507519,
+      "sys_per_thread_median": 0.507519,
+      "threads": 1,
+      "user_median": 0.012745,
+      "wall_max": 0.542335,
+      "wall_median": 0.520551,
+      "wall_min": 0.506188
+    },
+    {
+      "entries": 163651,
+      "entries_per_second_median": 517437,
+      "run_count": 5,
+      "sys_median": 0.615632,
+      "sys_per_thread_median": 0.307816,
+      "threads": 2,
+      "user_median": 0.016162,
+      "wall_max": 0.32842,
+      "wall_median": 0.316272,
+      "wall_min": 0.300498
+    },
+    {
+      "entries": 163651,
+      "entries_per_second_median": 776196,
+      "run_count": 5,
+      "sys_median": 0.818965,
+      "sys_per_thread_median": 0.204741,
+      "threads": 4,
+      "user_median": 0.020202,
+      "wall_max": 0.213107,
+      "wall_median": 0.210837,
+      "wall_min": 0.199936
+    },
+    {
+      "entries": 163651,
+      "entries_per_second_median": 609748,
+      "run_count": 5,
+      "sys_median": 2.076371,
+      "sys_per_thread_median": 0.259546,
+      "threads": 8,
+      "user_median": 0.032612,
+      "wall_max": 0.272358,
+      "wall_median": 0.268391,
+      "wall_min": 0.264569
+    },
+    {
+      "entries": 163651,
+      "entries_per_second_median": 432866,
+      "run_count": 5,
+      "sys_median": 4.717022,
+      "sys_per_thread_median": 0.33693,
+      "threads": 14,
+      "user_median": 0.042389,
+      "wall_max": 0.396177,
+      "wall_median": 0.378064,
+      "wall_min": 0.369567
+    }
+  ],
+  "t_sweep": [
+    1,
+    2,
+    4,
+    8,
+    14
+  ],
+  "target": "/Applications",
+  "verdict": "validated_parallel_scaling",
+  "verdict_detail": "speedups: T=1:1.00x, T=2:1.65x, T=4:2.47x, T=8:1.94x, T=14:1.38x | sys/T ratios: T=1:1.00x, T=2:0.61x, T=4:0.40x, T=8:0.51x, T=14:0.66x"
+}
