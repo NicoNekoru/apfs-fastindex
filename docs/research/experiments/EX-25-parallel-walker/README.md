@@ -5,8 +5,8 @@ Title: T ∈ {1, 2, 4, 8, num_cpus} scaling of `getattrlistbulk` across
   worker threads on a single APFS container
 Date: 2026-05-16
 Owner: Claude
-Status: Planned
-Result: Pending
+Status: Executed
+Result: `validated_parallel_scaling` (T=4 optimum, 2.47× over T=1)
 Related RLs:
 - RL-08
 - RL-12
@@ -133,7 +133,65 @@ in worker assignment).
 
 ## Observed Results
 
-_(filled in after the run)_
+First run, host's `/Applications` (~164k entries),
+`hw.logicalcpu = 14`, 5 runs per T, 200 ms sleep between runs:
+
+| T  | wall median | user median | sys median | sys/T median | entries/sec | speedup vs T=1 |
+|----|-------------|-------------|------------|--------------|-------------|----------------|
+| 1  | 0.521 s     | 0.013 s     | 0.508 s    | 0.508 s      | 314,380     | 1.00×          |
+| 2  | 0.316 s     | 0.016 s     | 0.616 s    | 0.308 s      | 517,437     | 1.65×          |
+| **4** | **0.211 s** | 0.020 s | 0.819 s    | **0.205 s**  | **776,196** | **2.47×**      |
+| 8  | 0.268 s     | 0.033 s     | 2.076 s    | 0.260 s      | 609,748     | 1.94×          |
+| 14 | 0.378 s     | 0.042 s     | 4.717 s    | 0.337 s      | 432,866     | 1.38×          |
+
+Consistency check: all 5 thread counts returned exactly 163,651
+entries — no work-queue race or double-counting.
+
+Verdict: **`validated_parallel_scaling`**. T=4 is optimal at
+**2.47× of T=1** (within the SR-021-predicted 2.5-3.2× envelope,
+slightly under because the production-mask attribute set forces
+slightly more kernel work than the SR-021 prior-art numbers
+assumed). The mechanical verdict ladder evaluates:
+
+- T=4 entries/sec / T=1 entries/sec = 776,196 / 314,380 = **2.47** ≥ 2.0 ✓
+- T=4 sys-per-thread / T=1 sys = 0.205 / 0.508 = **0.40** ≤ 1.2 ✓
+
+Both gates pass.
+
+## The contention shape
+
+The SR-021 / Szorc-2018 / Apple-DTS triangle of evidence
+predicted that beyond a certain T the APFS container lock would
+fire and parallelism would *regress*. **EX-25 reproduces that
+shape exactly on this host:**
+
+- **T=8** (twice the optimum): wall regresses from 0.211 s →
+  0.268 s. Total sys-CPU jumps from 0.819 s → **2.076 s** — the
+  kernel is paying 4× T=1's sys (0.508 s) to deliver only 1.94×
+  the throughput. Per-thread sys is still small (0.260 s) but
+  the aggregate is super-linear.
+- **T=14** (all logical CPUs): wall regresses further to
+  0.378 s. Total sys-CPU = **4.717 s = 9.3× T=1** for 1.38×
+  the throughput. This is exactly the Szorc-2018
+  "18-procs-worse-than-12" shape, just at a different
+  inflection point because Apple silicon is a more capable
+  substrate than the 2018 box he tested.
+
+The contention regime is real and starts at T = 2 × optimum on
+this kernel. The Rust slice must default conservatively to keep
+clear of it.
+
+## Bonus calibration
+
+The parallel microbench's peak throughput is **776k ent/s**
+(T=4). EX-24's single-threaded microbench was 312k ent/s
+(matched here at T=1 = 314k ent/s, confirming the EX-24 setup
+was representative). That gives the production scanner a
+realistic gain envelope: today's 200k ent/s end-to-end on
+`/Applications` should rise to **400-500k ent/s** once the
+parallel walker lands, after subtracting the ~110k ent/s
+user-space post-processing tax (NamespaceEntry alloc, aggregate,
+sort) that the microbench skips.
 
 ## Artifacts Saved
 
@@ -145,20 +203,33 @@ _(filled in after the run)_
 
 ## Interpretation
 
-_(filled in after the run; the patterns to look for:)_
+EX-25 lands on `validated_parallel_scaling`. The next-step
+recipe is unambiguous:
 
-- `validated_parallel_scaling` → land the parallel walker in
-  `fallback.rs` behind a `--threads N` flag with default
-  `min(physical_cores, 4)`. Update measurement-baseline.md with
-  the new per-T numbers.
-- `partial_scaling_then_plateau` → land at default T=2, with
-  `--threads` still available.
-- `single_thread_optimal` → do not change the production walker;
-  record the result as a negative finding in RL-12 and let the
-  evidence stand.
-- `pathological_contention` → same as single_thread_optimal,
-  with an extra RL-12 warning that explicit user-requested
-  `--threads N` could harm rather than help on this kernel.
+1. **Land a parallel walker** in `crates/apfs-fastindex/src/
+   fallback.rs` behind a `--threads N` flag.
+2. **Default thread count = `min(hw.physicalcpu, 4)`.** The 4
+   ceiling protects against the contention regime that fires
+   at T = 2 × optimum on this kernel (and likely on others —
+   Szorc-2018's number was at a similar ratio). The
+   `hw.physicalcpu` clamp protects smaller hosts (older
+   MacBooks with 2-4 physical cores).
+3. **Allow user override**: `--threads N` (with N as low as 1
+   for single-threaded debugging and as high as `hw.logicalcpu`
+   for users who know what they're doing).
+4. **Preserve sorted output**: per-worker collection +
+   final merge-sort. The microbench skips this; the production
+   walker pays a small extra cost but the merge of 4 per-worker
+   sorted Vecs at the end is much cheaper than 4× sequential
+   sort.
+5. **Update measurement-baseline.md** after the Rust slice lands
+   with the new end-to-end numbers (`/Applications`, repo,
+   eventually `/`).
+
+The Szorc shape we re-derived empirically (T=8 regresses, T=14
+catastrophically loses) is itself an artifact worth preserving
+— it confirms SR-021's evidence on this host and gives future
+maintainers a clear reason for the conservative default.
 
 ## What This Rules Out
 
@@ -188,11 +259,11 @@ _(filled in after the run; the patterns to look for:)_
 
 ## Next Exact Step
 
-- Run the probe.
-- On `validated_parallel_scaling` or `partial_scaling_then_plateau`,
-  implement the parallel walker in the Rust crate
-  (`crates/apfs-fastindex/src/fallback.rs`) behind a `--threads N`
-  flag, with the EX-25-picked default, and measure end-to-end with
-  the production scanner against the standing baseline.
-- On `single_thread_optimal` or `pathological_contention`, do not
-  ship parallelism; record the negative result and close the lane.
+Implement the parallel walker in
+`crates/apfs-fastindex/src/fallback.rs` behind a `--threads N`
+CLI flag with default `min(hw.physicalcpu, 4)`. Measure
+end-to-end with the production scanner against the standing
+baseline (`/Applications` + repo) and write the new numbers into
+`docs/implementation/measurement-baseline.md` under a new
+"r2c-syscall-perf-research" section. Update RL-12 with the
+chosen default and the contention-regime warning.
