@@ -61,6 +61,8 @@ use std::fs;
 use std::io;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -77,14 +79,32 @@ const SKIP_TOP_LEVEL_NAMES: &[&str] = &[".fseventsd", ".Spotlight-V100", ".Trash
 
 /// Caller-facing knobs for the fallback walker. Defaults are
 /// `cross_mounts: false` so an `apfs-fastindex-scan /` won't accidentally
-/// descend into every mounted volume.
+/// descend into every mounted volume, and `threads: 1` so library
+/// callers preserve historical single-threaded semantics until they opt
+/// into parallelism.
 #[derive(Default)]
 pub struct FallbackOptions<'a> {
     pub cross_mounts: bool,
     /// Optional progress sink. When set, the walker calls it roughly
-    /// every second with a snapshot of `(scanned, skipped, elapsed)`.
+    /// every 250 ms with a snapshot of `(scanned, skipped, elapsed)`.
     /// The CLI uses this to stream JSON-per-line progress to stderr.
+    ///
+    /// **Only invoked from the serial walker (`threads <= 1`).** When
+    /// the parallel walker (`threads > 1`) is in use, progress
+    /// reporting is silenced because the existing
+    /// `&mut dyn FnMut(...)` shape is not `Send` and we deliberately
+    /// kept the callback interface backward-compatible rather than
+    /// add a `Send` bound. See EX-25 and `RL-12` for the trade-off.
     pub progress: Option<&'a mut dyn FnMut(ProgressEvent)>,
+    /// Number of worker threads for the parallel walker. `0` and `1`
+    /// both select the serial implementation (preserves the original
+    /// single-threaded behaviour and the FnMut progress contract).
+    /// EX-25 measured a 2.47× speedup at T=4 on Apple silicon; the
+    /// CLI default is `min(hw.physicalcpu, 4)`. Higher values
+    /// regress (T=8 cost 4× T=1 sys-CPU for 1.94× throughput; T=14
+    /// cost 9.3× T=1 sys-CPU for 1.38× throughput — see EX-25 for
+    /// the contention shape).
+    pub threads: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -148,7 +168,7 @@ pub fn fallback_scan_path<P: AsRef<Path>>(root: P) -> Result<FallbackScanOutput,
 
 pub fn fallback_scan_path_with_options<P: AsRef<Path>>(
     root: P,
-    mut options: FallbackOptions<'_>,
+    options: FallbackOptions<'_>,
 ) -> Result<FallbackScanOutput, FallbackError> {
     let root_path = root.as_ref();
     let resolved = fs::canonicalize(root_path)?;
@@ -160,188 +180,29 @@ pub fn fallback_scan_path_with_options<P: AsRef<Path>>(
         return Err(FallbackError::NonUtf8RootComponent(resolved));
     }
     let root_dev = root_meta.dev();
-
-    let mut entries: Vec<NamespaceEntry> = Vec::new();
-    let mut walk_skips: Vec<WalkSkip> = Vec::new();
-    let mut stack: Vec<WalkFrame> = vec![WalkFrame {
-        absolute: resolved.clone(),
-        relative: PathBuf::new(),
-    }];
-    // One BulkReader owns the 64 KiB getattrlistbulk buffer for the
-    // whole walk; the per-directory output Vec is also reused via
-    // `bulk_children`. On a 200k-directory whole-machine scan this
-    // saves ~13 GiB of allocation churn.
-    let mut bulk_reader = BulkReader::new();
-    let mut bulk_children: Vec<BulkEntry> = Vec::new();
+    let cross_mounts = options.cross_mounts;
+    let threads = options.threads.max(1);
 
     let scan_start = Instant::now();
-    // 250 ms cadence: the GUI shell renders this as a live counter; at
-    // 1 Hz the count visibly stutters and the UI feels broken. 250 ms
-    // is fast enough to look smooth on a real scan and slow enough that
-    // we add at most ~4 progress events per second to the stderr bridge.
-    let progress_interval = Duration::from_millis(250);
-    let mut next_progress_tick = scan_start + progress_interval;
-
-    while let Some(frame) = stack.pop() {
-        if let Some(cb) = options.progress.as_deref_mut() {
-            let now = Instant::now();
-            if now >= next_progress_tick {
-                cb(ProgressEvent {
-                    scanned: entries.len() as u64,
-                    skipped: walk_skips.len() as u64,
-                    elapsed: now.duration_since(scan_start),
-                    terminal: false,
-                });
-                next_progress_tick = now + progress_interval;
-            }
-        }
-        let children = match sorted_children(
-            &frame.absolute,
-            &frame.relative,
-            &mut bulk_reader,
-            &mut bulk_children,
-        ) {
-            Ok(children) => children,
-            Err(skip) => {
-                walk_skips.push(skip);
-                continue;
-            }
-        };
-
-        for child in &children {
-            if frame.relative.as_os_str().is_empty()
-                && SKIP_TOP_LEVEL_NAMES.contains(&child.name.as_str())
-            {
-                continue;
-            }
-            let absolute = frame.absolute.join(&child.name);
-            let relative = if frame.relative.as_os_str().is_empty() {
-                PathBuf::from(&child.name)
-            } else {
-                frame.relative.join(&child.name)
-            };
-            let relative_str = match relative.to_str() {
-                Some(s) => s.to_string(),
-                None => {
-                    walk_skips.push(WalkSkip {
-                        path: absolute.to_string_lossy().into_owned(),
-                        reason: "non_utf8_name".to_string(),
-                    });
-                    continue;
-                }
-            };
-
-            // Prefer the bulk-supplied metadata when present; otherwise
-            // pay for one `symlink_metadata` syscall here.
-            let (kind, file_id, file_logical_size, file_allocated_bytes, dev_id) =
-                if let Some(bulk) = &child.bulk {
-                    (
-                        bulk.kind,
-                        bulk.file_id,
-                        bulk.logical_size,
-                        bulk.allocated_bytes,
-                        bulk.dev_id as u64,
-                    )
-                } else {
-                    let meta = match fs::symlink_metadata(&absolute) {
-                        Ok(meta) => meta,
-                        Err(err) => {
-                            walk_skips.push(WalkSkip {
-                                path: relative_str.clone(),
-                                reason: io_skip_reason(&err),
-                            });
-                            continue;
-                        }
-                    };
-                    let kind = entry_kind_from_meta(&meta);
-                    let size = if matches!(kind, EntryKind::File) {
-                        meta.size()
-                    } else {
-                        0
-                    };
-                    // st_blocks is reported in 512-byte units regardless of
-                    // the underlying block size; this is BSD stat semantics
-                    // and what EX-22's oracle uses.
-                    let allocated = if matches!(kind, EntryKind::File) {
-                        meta.blocks().saturating_mul(512)
-                    } else {
-                        0
-                    };
-                    (kind, meta.ino(), size, allocated, meta.dev())
-                };
-
-            // Symlink target still requires a separate `readlink`. Bulk
-            // mode skips it because it isn't an attribute getattrlistbulk
-            // exposes.
-            let (logical_size, symlink_target) = match kind {
-                EntryKind::Symlink => match fs::read_link(&absolute) {
-                    Ok(target_path) => {
-                        let target = target_path.to_string_lossy().into_owned();
-                        (target.len() as u64, Some(target))
-                    }
-                    Err(err) => {
-                        walk_skips.push(WalkSkip {
-                            path: relative_str.clone(),
-                            reason: io_skip_reason(&err),
-                        });
-                        (0, None)
-                    }
-                },
-                EntryKind::File => (file_logical_size, None),
-                _ => (0, None),
-            };
-            // EX-22 amended SR-019 emission rule for the fallback path:
-            // regular files emit `Some(st_blocks * 512)` (the kernel's
-            // public allocation count and the EX-22 oracle); symlinks
-            // and directories emit `Some(0)` so the shape parity with
-            // raw-mode emission holds (raw-mode does not promise
-            // per-symlink or per-directory allocation bytes); `other`
-            // emits `None` for symmetry with raw.
-            let allocated_size = match kind {
-                EntryKind::File => Some(file_allocated_bytes),
-                EntryKind::Symlink | EntryKind::Dir => Some(0),
-                EntryKind::Other => None,
-            };
-            let is_dir = matches!(kind, EntryKind::Dir);
-            // Cross-mount directories are reported in entries AND in
-            // walk_skips (no recursion). Both branches consume an
-            // owned `relative_str`; on the common no-mount-boundary
-            // path the only owner is the NamespaceEntry push and no
-            // clone happens. Cloning unconditionally cost 5M+ String
-            // clones on a /-scan.
-            let cross_mount_skip = is_dir && !options.cross_mounts && dev_id != root_dev;
-            if cross_mount_skip {
-                walk_skips.push(WalkSkip {
-                    path: relative_str.clone(),
-                    reason: "mount_boundary".to_string(),
-                });
-            }
-            entries.push(NamespaceEntry {
-                path: relative_str,
-                entry_kind: kind,
-                file_id,
-                logical_size,
-                symlink_target,
-                allocated_size,
-            });
-            if is_dir && !cross_mount_skip {
-                stack.push(WalkFrame { absolute, relative });
-            }
-        }
-    }
-
-    if let Some(cb) = options.progress.as_deref_mut() {
-        cb(ProgressEvent {
-            scanned: entries.len() as u64,
-            skipped: walk_skips.len() as u64,
-            elapsed: scan_start.elapsed(),
-            terminal: true,
-        });
-    }
+    let (mut entries, mut walk_skips) = if threads <= 1 {
+        scan_serial(
+            &resolved,
+            root_dev,
+            cross_mounts,
+            options.progress,
+            scan_start,
+        )
+    } else {
+        scan_parallel(&resolved, root_dev, cross_mounts, threads, scan_start)
+    };
 
     // Paths are unique inside a walk (no two entries can share a full
     // path) so stability is not required. `sort_unstable_by` is ~20%
     // faster on the 5M-entry case and produces an equivalent order.
+    // Parallel mode produces entries in arbitrary thread-interleaved
+    // order, so the post-walk sort is doing real work for it; serial
+    // mode produces approximately-DFS order and the sort completes
+    // quickly via the existing already-mostly-sorted optimisation.
     entries.sort_unstable_by(|a, b| a.path.cmp(&b.path));
     walk_skips.sort_unstable_by(|a, b| a.path.cmp(&b.path));
     let aggregates = build_aggregates(&entries);
@@ -375,37 +236,392 @@ pub fn fallback_scan_path_with_options<P: AsRef<Path>>(
         walk_skips,
     };
 
-    let claim = if options.cross_mounts {
-        "Rust path emits one mounted directory's NamespaceEntry + DirectoryAggregate rows via \
-         POSIX traversal; logical size is st_size for files and symlink target length for \
-         symlinks; allocated size is st_blocks*512 for files and zero for symlinks/directories \
-         (EX-22 oracle); per-entry permission/access errors are skipped and recorded in \
-         walk_skips; mount boundaries are crossed (--cross-mounts)"
+    let mount_clause = if cross_mounts {
+        "mount boundaries are crossed (--cross-mounts)"
     } else {
-        "Rust path emits one mounted directory's NamespaceEntry + DirectoryAggregate rows via \
-         POSIX traversal; logical size is st_size for files and symlink target length for \
-         symlinks; allocated size is st_blocks*512 for files and zero for symlinks/directories \
-         (EX-22 oracle); per-entry permission/access errors are skipped and recorded in \
-         walk_skips; mount boundaries are not crossed (default)"
+        "mount boundaries are not crossed (default)"
     };
+    let thread_clause = if threads <= 1 {
+        "single-threaded walk".to_string()
+    } else {
+        format!("{}-thread parallel walk (EX-25 validated)", threads)
+    };
+    let claim = format!(
+        "Rust path emits one mounted directory's NamespaceEntry + DirectoryAggregate rows via \
+         POSIX traversal ({thread_clause}); logical size is st_size for files and symlink target \
+         length for symlinks; allocated size is st_blocks*512 for files and zero for \
+         symlinks/directories (EX-22 oracle); per-entry permission/access errors are skipped and \
+         recorded in walk_skips; {mount_clause}"
+    );
+
+    let mut not_claimed = vec![
+        "raw APFS-specific size sources (dstream / decmpfs precedence)".to_string(),
+        "live mounted raw-scan correctness".to_string(),
+        "exclusive / shared / snapshot-retained byte accounting".to_string(),
+        "incremental cache reuse".to_string(),
+        "encryption decryption or keybag handling".to_string(),
+        "snapshot, sealed-volume, or volume-group merged semantics".to_string(),
+        "APFS lookup-by-name (hash + normalization + case fold)".to_string(),
+        "boot-root or Finder-visible merged namespace".to_string(),
+        "subtrees recorded in walk_skips (the walker reports them but does not read \
+             through them)"
+            .to_string(),
+    ];
+    if threads > 1 {
+        not_claimed.push(
+            "live --progress event delivery in parallel mode (silenced because the \
+             callback contract is not Send; pass --threads 1 to re-enable it)"
+                .to_string(),
+        );
+    }
 
     Ok(FallbackScanOutput {
         parser_output,
-        correctness_claim: claim.to_string(),
-        not_claimed: vec![
-            "raw APFS-specific size sources (dstream / decmpfs precedence)".to_string(),
-            "live mounted raw-scan correctness".to_string(),
-            "exclusive / shared / snapshot-retained byte accounting".to_string(),
-            "incremental cache reuse".to_string(),
-            "encryption decryption or keybag handling".to_string(),
-            "snapshot, sealed-volume, or volume-group merged semantics".to_string(),
-            "APFS lookup-by-name (hash + normalization + case fold)".to_string(),
-            "boot-root or Finder-visible merged namespace".to_string(),
-            "subtrees recorded in walk_skips (the walker reports them but does not read \
-             through them)"
-                .to_string(),
-        ],
+        correctness_claim: claim,
+        not_claimed,
     })
+}
+
+/// Single-threaded depth-first walk. Preserves the original walker
+/// shape (and therefore the `&mut dyn FnMut(ProgressEvent)` progress
+/// callback contract — the callback fires from this thread only).
+fn scan_serial(
+    resolved: &Path,
+    root_dev: u64,
+    cross_mounts: bool,
+    progress: Option<&mut dyn FnMut(ProgressEvent)>,
+    scan_start: Instant,
+) -> (Vec<NamespaceEntry>, Vec<WalkSkip>) {
+    let mut progress = progress;
+    let mut entries: Vec<NamespaceEntry> = Vec::new();
+    let mut walk_skips: Vec<WalkSkip> = Vec::new();
+    let mut stack: Vec<WalkFrame> = vec![WalkFrame {
+        absolute: resolved.to_path_buf(),
+        relative: PathBuf::new(),
+    }];
+    let mut bulk_reader = BulkReader::new();
+    let mut bulk_children: Vec<BulkEntry> = Vec::new();
+    let mut new_frames: Vec<WalkFrame> = Vec::new();
+
+    let progress_interval = Duration::from_millis(250);
+    let mut next_progress_tick = scan_start + progress_interval;
+
+    while let Some(frame) = stack.pop() {
+        if let Some(cb) = progress.as_mut() {
+            let now = Instant::now();
+            if now >= next_progress_tick {
+                cb(ProgressEvent {
+                    scanned: entries.len() as u64,
+                    skipped: walk_skips.len() as u64,
+                    elapsed: now.duration_since(scan_start),
+                    terminal: false,
+                });
+                next_progress_tick = now + progress_interval;
+            }
+        }
+        new_frames.clear();
+        walk_one_directory(
+            &frame,
+            root_dev,
+            cross_mounts,
+            &mut bulk_reader,
+            &mut bulk_children,
+            &mut entries,
+            &mut walk_skips,
+            &mut new_frames,
+        );
+        // Append the new frames in reverse so the next pop is the
+        // first child — preserves the original DFS visit order.
+        for child in new_frames.drain(..).rev() {
+            stack.push(child);
+        }
+    }
+
+    if let Some(cb) = progress.as_mut() {
+        cb(ProgressEvent {
+            scanned: entries.len() as u64,
+            skipped: walk_skips.len() as u64,
+            elapsed: scan_start.elapsed(),
+            terminal: true,
+        });
+    }
+
+    (entries, walk_skips)
+}
+
+/// Worker-pool walk. Each of `threads` workers owns its own
+/// `BulkReader` and pulls directories off a shared work queue. Per-
+/// worker `entries` + `walk_skips` Vecs are merged on the main
+/// thread after all workers join.
+///
+/// EX-25 validated 2.47× speedup at T=4 on a 14-logical-CPU Apple
+/// silicon host; beyond T=4 the APFS container lock fires
+/// (sys-CPU grows super-linearly with T). The CLI clamps T to
+/// `min(hw.physicalcpu, 4)` by default.
+///
+/// Progress callbacks are not invoked from this path — see the
+/// FallbackOptions::progress doc comment for the reasoning.
+fn scan_parallel(
+    resolved: &Path,
+    root_dev: u64,
+    cross_mounts: bool,
+    threads: usize,
+    _scan_start: Instant,
+) -> (Vec<NamespaceEntry>, Vec<WalkSkip>) {
+    let queue = Arc::new(WorkQueue::new(vec![WalkFrame {
+        absolute: resolved.to_path_buf(),
+        relative: PathBuf::new(),
+    }]));
+
+    let mut handles: Vec<std::thread::JoinHandle<(Vec<NamespaceEntry>, Vec<WalkSkip>)>> =
+        Vec::with_capacity(threads);
+    for _ in 0..threads {
+        let q = Arc::clone(&queue);
+        handles.push(std::thread::spawn(move || {
+            let mut bulk_reader = BulkReader::new();
+            let mut bulk_children: Vec<BulkEntry> = Vec::new();
+            let mut local_entries: Vec<NamespaceEntry> = Vec::new();
+            let mut local_skips: Vec<WalkSkip> = Vec::new();
+            let mut new_frames: Vec<WalkFrame> = Vec::new();
+            while let Some(frame) = q.pop() {
+                new_frames.clear();
+                walk_one_directory(
+                    &frame,
+                    root_dev,
+                    cross_mounts,
+                    &mut bulk_reader,
+                    &mut bulk_children,
+                    &mut local_entries,
+                    &mut local_skips,
+                    &mut new_frames,
+                );
+                let drained: Vec<WalkFrame> = std::mem::take(&mut new_frames);
+                q.push_many(drained);
+                q.complete();
+            }
+            (local_entries, local_skips)
+        }));
+    }
+
+    let mut entries: Vec<NamespaceEntry> = Vec::new();
+    let mut walk_skips: Vec<WalkSkip> = Vec::new();
+    for h in handles {
+        let (e, s) = h.join().expect("fallback worker thread panicked");
+        entries.extend(e);
+        walk_skips.extend(s);
+    }
+    (entries, walk_skips)
+}
+
+/// Shared FIFO work queue + outstanding-work counter for the parallel
+/// walker. `pop` returns `None` only when the queue is empty AND every
+/// previously-popped frame has been marked `complete()`.
+struct WorkQueue {
+    queue: Mutex<Vec<WalkFrame>>,
+    outstanding: Mutex<u64>,
+    cond: Condvar,
+    done: AtomicBool,
+}
+
+impl WorkQueue {
+    fn new(initial: Vec<WalkFrame>) -> Self {
+        let initial_len = initial.len() as u64;
+        Self {
+            queue: Mutex::new(initial),
+            outstanding: Mutex::new(initial_len),
+            cond: Condvar::new(),
+            done: AtomicBool::new(false),
+        }
+    }
+
+    fn push_many(&self, items: Vec<WalkFrame>) {
+        if items.is_empty() {
+            return;
+        }
+        {
+            let mut outstanding = self.outstanding.lock().unwrap();
+            *outstanding += items.len() as u64;
+        }
+        {
+            let mut queue = self.queue.lock().unwrap();
+            queue.extend(items);
+        }
+        self.cond.notify_all();
+    }
+
+    fn pop(&self) -> Option<WalkFrame> {
+        loop {
+            let mut queue = self.queue.lock().unwrap();
+            if let Some(frame) = queue.pop() {
+                return Some(frame);
+            }
+            if self.done.load(Ordering::Acquire) {
+                return None;
+            }
+            // Queue empty but work may still be outstanding.
+            // Re-check outstanding under its own lock; if zero, flip
+            // done and wake everyone.
+            drop(queue);
+            {
+                let outstanding = self.outstanding.lock().unwrap();
+                if *outstanding == 0 {
+                    self.done.store(true, Ordering::Release);
+                    self.cond.notify_all();
+                    return None;
+                }
+            }
+            // Wait for new work or for the done flag.
+            let queue = self.queue.lock().unwrap();
+            let _ = self
+                .cond
+                .wait_timeout(queue, Duration::from_millis(50))
+                .unwrap();
+        }
+    }
+
+    fn complete(&self) {
+        let mut outstanding = self.outstanding.lock().unwrap();
+        *outstanding = outstanding.saturating_sub(1);
+        if *outstanding == 0 {
+            drop(outstanding);
+            self.cond.notify_all();
+        }
+    }
+}
+
+/// Process one directory: enumerate its children via the bulk-or-fallback
+/// `sorted_children` path, push `NamespaceEntry` rows for each child into
+/// `out_entries`, record `WalkSkip` rows in `out_skips`, and push new
+/// `WalkFrame`s for sub-directories into `out_new_frames`. The caller
+/// decides where the new frames go (a local stack for serial, the shared
+/// work queue for parallel) — that's the only difference between the two
+/// schedulers.
+///
+/// Same EX-22 / SR-019 emission contract as the original inline loop.
+/// All `String`/`PathBuf` allocations live on the same heap regardless
+/// of thread; the per-worker `bulk_reader`/`bulk_children` scratch is
+/// reused across calls to amortise the 64 KiB buffer.
+#[allow(clippy::too_many_arguments)]
+fn walk_one_directory(
+    frame: &WalkFrame,
+    root_dev: u64,
+    cross_mounts: bool,
+    bulk_reader: &mut BulkReader,
+    bulk_children: &mut Vec<BulkEntry>,
+    out_entries: &mut Vec<NamespaceEntry>,
+    out_skips: &mut Vec<WalkSkip>,
+    out_new_frames: &mut Vec<WalkFrame>,
+) {
+    let children =
+        match sorted_children(&frame.absolute, &frame.relative, bulk_reader, bulk_children) {
+            Ok(children) => children,
+            Err(skip) => {
+                out_skips.push(skip);
+                return;
+            }
+        };
+
+    for child in &children {
+        if frame.relative.as_os_str().is_empty()
+            && SKIP_TOP_LEVEL_NAMES.contains(&child.name.as_str())
+        {
+            continue;
+        }
+        let absolute = frame.absolute.join(&child.name);
+        let relative = if frame.relative.as_os_str().is_empty() {
+            PathBuf::from(&child.name)
+        } else {
+            frame.relative.join(&child.name)
+        };
+        let relative_str = match relative.to_str() {
+            Some(s) => s.to_string(),
+            None => {
+                out_skips.push(WalkSkip {
+                    path: absolute.to_string_lossy().into_owned(),
+                    reason: "non_utf8_name".to_string(),
+                });
+                continue;
+            }
+        };
+
+        let (kind, file_id, file_logical_size, file_allocated_bytes, dev_id) =
+            if let Some(bulk) = &child.bulk {
+                (
+                    bulk.kind,
+                    bulk.file_id,
+                    bulk.logical_size,
+                    bulk.allocated_bytes,
+                    bulk.dev_id as u64,
+                )
+            } else {
+                let meta = match fs::symlink_metadata(&absolute) {
+                    Ok(meta) => meta,
+                    Err(err) => {
+                        out_skips.push(WalkSkip {
+                            path: relative_str.clone(),
+                            reason: io_skip_reason(&err),
+                        });
+                        continue;
+                    }
+                };
+                let kind = entry_kind_from_meta(&meta);
+                let size = if matches!(kind, EntryKind::File) {
+                    meta.size()
+                } else {
+                    0
+                };
+                let allocated = if matches!(kind, EntryKind::File) {
+                    meta.blocks().saturating_mul(512)
+                } else {
+                    0
+                };
+                (kind, meta.ino(), size, allocated, meta.dev())
+            };
+
+        let (logical_size, symlink_target) = match kind {
+            EntryKind::Symlink => match fs::read_link(&absolute) {
+                Ok(target_path) => {
+                    let target = target_path.to_string_lossy().into_owned();
+                    (target.len() as u64, Some(target))
+                }
+                Err(err) => {
+                    out_skips.push(WalkSkip {
+                        path: relative_str.clone(),
+                        reason: io_skip_reason(&err),
+                    });
+                    (0, None)
+                }
+            },
+            EntryKind::File => (file_logical_size, None),
+            _ => (0, None),
+        };
+
+        let allocated_size = match kind {
+            EntryKind::File => Some(file_allocated_bytes),
+            EntryKind::Symlink | EntryKind::Dir => Some(0),
+            EntryKind::Other => None,
+        };
+
+        let is_dir = matches!(kind, EntryKind::Dir);
+        let cross_mount_skip = is_dir && !cross_mounts && dev_id != root_dev;
+        if cross_mount_skip {
+            out_skips.push(WalkSkip {
+                path: relative_str.clone(),
+                reason: "mount_boundary".to_string(),
+            });
+        }
+        out_entries.push(NamespaceEntry {
+            path: relative_str,
+            entry_kind: kind,
+            file_id,
+            logical_size,
+            symlink_target,
+            allocated_size,
+        });
+        if is_dir && !cross_mount_skip {
+            out_new_frames.push(WalkFrame { absolute, relative });
+        }
+    }
 }
 
 struct WalkFrame {
@@ -710,6 +926,79 @@ mod tests {
             "fallback unique_inode_allocated_total should populate; got None"
         );
         assert!(parser_output.walk_skips.is_empty());
+    }
+
+    /// EX-25: the parallel walker must produce byte-for-byte identical
+    /// `NamespaceEntry` + `DirectoryAggregate` rows as the serial
+    /// walker on any tree the serial walker can handle, regardless of
+    /// thread count. The post-walk sort + the per-inode aggregate
+    /// policy guarantee deterministic ordering even though the workers
+    /// process directories in non-deterministic interleaving.
+    #[test]
+    fn parallel_walker_matches_serial_shape() {
+        let tmp = TempDir::new();
+        let root = tmp.path();
+        // A small tree with multiple subdirectories so the work queue
+        // actually has parallel-distributable work. 3 directories ×
+        // 4 files each + 1 nested deeper = 13 entries, enough to
+        // verify the merge.
+        for top in ["alpha", "beta", "gamma"] {
+            std::fs::create_dir_all(root.join(top)).unwrap();
+            for name in ["one.txt", "two.bin", "three.md", "four.dat"] {
+                let mut f = File::create(root.join(top).join(name)).unwrap();
+                f.write_all(b"x").unwrap();
+            }
+        }
+        std::fs::create_dir_all(root.join("alpha/nested")).unwrap();
+        File::create(root.join("alpha/nested/deep.log")).unwrap();
+
+        let serial = fallback_scan_path(root).expect("serial walks");
+        let parallel = fallback_scan_path_with_options(
+            root,
+            FallbackOptions {
+                cross_mounts: false,
+                progress: None,
+                threads: 4,
+            },
+        )
+        .expect("parallel walks");
+
+        let serial_paths: Vec<&str> = serial
+            .parser_output
+            .entries
+            .iter()
+            .map(|e| e.path.as_str())
+            .collect();
+        let parallel_paths: Vec<&str> = parallel
+            .parser_output
+            .entries
+            .iter()
+            .map(|e| e.path.as_str())
+            .collect();
+        assert_eq!(
+            serial_paths, parallel_paths,
+            "serial vs parallel produced different entry path sets"
+        );
+        assert_eq!(
+            serial.parser_output.entries, parallel.parser_output.entries,
+            "serial vs parallel produced different entries"
+        );
+        assert_eq!(
+            serial.parser_output.aggregates, parallel.parser_output.aggregates,
+            "serial vs parallel produced different aggregates"
+        );
+        assert_eq!(
+            serial.parser_output.walk_skips, parallel.parser_output.walk_skips,
+            "serial vs parallel produced different walk_skips"
+        );
+        // The correctness_claim should mention the thread count in
+        // the parallel case so consumers (the SwiftUI app, the viz)
+        // can tell which mode produced the scan.
+        assert!(
+            parallel.correctness_claim.contains("4-thread"),
+            "parallel correctness_claim should mention 4-thread; got: {}",
+            parallel.correctness_claim
+        );
     }
 
     #[test]
