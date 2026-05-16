@@ -36,6 +36,13 @@ pub(crate) struct BulkEntry {
     pub kind: EntryKind,
     pub file_id: u64,
     pub logical_size: u64,
+    /// Allocated bytes for the entry, i.e. `st_blocks * 512` semantics.
+    /// Populated from `ATTR_FILE_ALLOCSIZE` (per-fork allocated bytes).
+    /// EX-22 uses `st_blocks * 512` as the per-file allocated-bytes
+    /// oracle on macOS; `ATTR_FILE_ALLOCSIZE` reports the same number
+    /// in bytes (the kernel publishes it directly rather than as
+    /// 512-byte units).
+    pub allocated_bytes: u64,
     pub dev_id: u32,
 }
 
@@ -68,7 +75,12 @@ pub(crate) fn read_directory_bulk(dir: &Path) -> io::Result<Vec<BulkEntry>> {
         | libc::ATTR_CMN_OBJTYPE
         | libc::ATTR_CMN_FILEID
         | ATTR_CMN_ERROR;
-    alist.fileattr = libc::ATTR_FILE_TOTALSIZE;
+    // ATTR_FILE_TOTALSIZE returns the logical size (matches `st_size`
+    // for regular files); ATTR_FILE_ALLOCSIZE returns the allocated
+    // size in bytes (matches `st_blocks * 512`). Both are file-only
+    // attributes that come back zero for directories and symlinks;
+    // the parser handles that below.
+    alist.fileattr = libc::ATTR_FILE_TOTALSIZE | libc::ATTR_FILE_ALLOCSIZE;
 
     // 64 KiB buffer; in practice 16-32 entries per batch.
     let mut buf = vec![0u8; 65_536];
@@ -131,6 +143,7 @@ fn parse_entry(entry: &[u8]) -> io::Result<Option<BulkEntry>> {
     const ATTR_CMN_FILEID: u32 = 0x0200_0000;
     const ATTR_CMN_ERROR: u32 = 0x2000_0000;
     const ATTR_FILE_TOTALSIZE: u32 = 0x0000_0002;
+    const ATTR_FILE_ALLOCSIZE: u32 = 0x0000_0004;
 
     // Skip the leading u32 entry length and read the 20-byte returned
     // attribute_set_t. attribute_set_t is five u32s: commonattr, volattr,
@@ -214,6 +227,12 @@ fn parse_entry(entry: &[u8]) -> io::Result<Option<BulkEntry>> {
     if returned_file & ATTR_FILE_TOTALSIZE != 0 {
         cursor = (cursor + 7) & !7;
         logical_size = read_u64_le(entry, cursor)?;
+        cursor += 8;
+    }
+    let mut allocated_bytes: u64 = 0;
+    if returned_file & ATTR_FILE_ALLOCSIZE != 0 {
+        cursor = (cursor + 7) & !7;
+        allocated_bytes = read_u64_le(entry, cursor)?;
     }
 
     if had_error {
@@ -225,10 +244,13 @@ fn parse_entry(entry: &[u8]) -> io::Result<Option<BulkEntry>> {
     };
     let kind = entry_kind_from_obj_type(obj_type);
     if !matches!(kind, EntryKind::File) {
-        // ATTR_FILE_TOTALSIZE only applies to regular files. Zero for
-        // others; the caller treats symlink size as the target byte
-        // length and gets that via readlink anyway.
+        // ATTR_FILE_TOTALSIZE / ATTR_FILE_ALLOCSIZE only apply to
+        // regular files. Zero for others; the caller treats symlink
+        // size as the target byte length and gets that via readlink
+        // anyway. The fallback walker maps both symlink and dir
+        // allocated_size to Some(0) for shape parity with raw mode.
         logical_size = 0;
+        allocated_bytes = 0;
     }
 
     Ok(Some(BulkEntry {
@@ -236,6 +258,7 @@ fn parse_entry(entry: &[u8]) -> io::Result<Option<BulkEntry>> {
         kind,
         file_id,
         logical_size,
+        allocated_bytes,
         dev_id,
     }))
 }
@@ -336,13 +359,34 @@ mod tests {
         let file1 = bulk.iter().find(|e| e.name == "file-1.txt").unwrap();
         assert!(matches!(file1.kind, EntryKind::File));
         assert_eq!(file1.logical_size, 5);
+        // EX-22 oracle: ATTR_FILE_ALLOCSIZE returns the per-file
+        // allocated bytes (== st_blocks * 512). For any non-empty
+        // file the kernel will have allocated at least one block, so
+        // the value should be > 0 and >= logical_size for these tiny
+        // non-sparse files.
+        assert!(
+            file1.allocated_bytes >= file1.logical_size,
+            "expected allocated_bytes >= logical_size for non-sparse file-1.txt; \
+             got allocated={} logical={}",
+            file1.allocated_bytes,
+            file1.logical_size,
+        );
 
         let file2 = bulk.iter().find(|e| e.name == "file-2.bin").unwrap();
         assert!(matches!(file2.kind, EntryKind::File));
         assert_eq!(file2.logical_size, 1024);
+        assert!(file2.allocated_bytes >= file2.logical_size);
 
         let link = bulk.iter().find(|e| e.name == "link.txt").unwrap();
         assert!(matches!(link.kind, EntryKind::Symlink));
+        // Non-file kinds get zero allocated_bytes from the bulk
+        // parser; the fallback walker then maps that to Some(0) for
+        // shape parity with raw mode.
+        assert_eq!(link.allocated_bytes, 0);
+
+        let dir_a = bulk.iter().find(|e| e.name == "dir-a").unwrap();
+        assert!(matches!(dir_a.kind, EntryKind::Dir));
+        assert_eq!(dir_a.allocated_bytes, 0);
 
         for entry in &bulk {
             // POSIX inodes are non-zero on real filesystems; this is a

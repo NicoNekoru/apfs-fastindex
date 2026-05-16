@@ -71,6 +71,7 @@ Current source reviews:
 - `SR-016` record-body fail-closed boundary
 - `SR-017` logical-size source precedence
 - `SR-018` name normalization and case behavior
+- `SR-019` allocated-size source precedence (R2-A entry)
 - `SR-020` snapshot API and mount lifecycle (R2-B entry)
 
 ### `EX-*` Experiment Notes
@@ -316,6 +317,22 @@ Long-range product roadmap:
   candidates (`highest_xid=20`) but returned no `selected_checkpoint` after
   `APFS object validation failed: checksum mismatch at block 1031`. EX-15
   closed this blocker.
+- `EX-22` SR-019 allocated-size precedence; built the same-run
+  fixture from EX-19 (ordinary, sparse, clone, hard link, symlink,
+  `ditto --hfsCompression`), captured per-inode
+  `(j_dstream_alloced_size, j_dstream_size, sparse_bytes,
+  st_blocks * 512)` plus the FS-tree family histogram, and applied
+  SR-019 precedence. Verdict
+  `partial_validated_sr_019_alloced_size`: 4/5 emit-rows match
+  `st_blocks * 512` (ordinary 4096↔4096; clone 4096↔4096;
+  symlink 0↔0; compressed correctly fail_closed with the oracle
+  `4096` listed as `not_claimed`); sparse.bin diverges by exactly
+  `INO_EXT_TYPE_SPARSE_BYTES` (`alloced_size = 1056768` vs
+  oracle `24576`; difference `1032192 = sparse_bytes`). This is
+  the empirical confirmation of SR-019's recorded
+  linux-apfs-rw-vs-apfsck disagreement on macOS-produced images.
+  The Rust slice ships sparse explicitly fail-closed; an EX-22b
+  sparse-corpus probe is the gate for promoting sparse rows.
 - `EX-23` snapshot shape parity (best-effort, never-sudo);
   enumerated 9 mounted APFS volumes on the host, found the only
   present snapshot (sealed-system OS-update on `/`) is excluded
@@ -404,6 +421,18 @@ Long-range product roadmap:
   closed before row emission, logical size has a scoped precedence table, and
   stored UTF-8 names must be preserved without claiming full APFS lookup
   semantics.
+- `SR-019` opens R2-A: mines Apple's PDF (commit 2020-06-22) plus
+  linux-apfs-rw / apfsprogs / libfsapfs / TSK / dissect.apfs /
+  apfs-fuse / go-apfs to pin per-file allocated-bytes precedence on
+  `j_dstream_t.alloced_size`. Surfaces the kernel-vs-fsck disagreement
+  (linux-apfs-rw writes `alloced_size = round_up(ds_size, blocksize)`;
+  apfsck enforces `Σ extent.len == alloced_size`) and the
+  decoded-but-dropped pattern (libfsapfs/apfs-fuse/go-apfs all decode
+  the field, none surfaces it). v1 emission: regular+dstream →
+  `Some(alloced_size)`; regular+decmpfs → fail closed (`None`,
+  `not_claimed`); symlink → `0`; dir → `0`; else fail closed.
+  Extent-reference tree stays out of scope for R2-A (it is the
+  exclusive/shared/snapshot-retained prerequisite).
 - `SR-020` opens R2-B: mines xnu, manpages, Apple support docs, and
   community writeups for the user-space APFS snapshot surface on
   macOS 13-14. Bottom line: read-only enumeration is unprivileged

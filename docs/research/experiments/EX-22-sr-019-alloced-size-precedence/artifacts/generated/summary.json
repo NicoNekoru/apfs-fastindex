@@ -1,0 +1,8 @@
+{
+  "fail_closed_count": 1,
+  "mismatch_count": 1,
+  "row_count": 5,
+  "status": "executed",
+  "verdict": "partial_validated",
+  "verdict_detail": "1 mismatches against st_blocks*512; see ex22-precedence-table.json for the case-class breakdown."
+}

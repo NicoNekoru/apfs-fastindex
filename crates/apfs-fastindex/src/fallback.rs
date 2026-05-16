@@ -49,6 +49,12 @@
 //!   length of the symlink target for symlinks (SR-017 step 5); zero
 //!   for directories and other types.
 //! - `symlink_target`: `readlink` for symlinks; `None` otherwise.
+//! - `allocated_size`: `Some(stat::st_blocks * 512)` for regular
+//!   files (the fallback's truth *is* the public oracle, so this
+//!   column never fails closed here); `Some(0)` for symlinks and
+//!   directories so the shape parity with raw mode holds (raw mode
+//!   does not promise per-directory or per-symlink allocation bytes
+//!   in v1 — see EX-22).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -211,32 +217,42 @@ pub fn fallback_scan_path_with_options<P: AsRef<Path>>(
 
             // Prefer the bulk-supplied metadata when present; otherwise
             // pay for one `symlink_metadata` syscall here.
-            let (kind, file_id, file_logical_size, dev_id) = if let Some(bulk) = &child.bulk {
-                (
-                    bulk.kind.clone(),
-                    bulk.file_id,
-                    bulk.logical_size,
-                    bulk.dev_id as u64,
-                )
-            } else {
-                let meta = match fs::symlink_metadata(&absolute) {
-                    Ok(meta) => meta,
-                    Err(err) => {
-                        walk_skips.push(WalkSkip {
-                            path: relative_str.clone(),
-                            reason: io_skip_reason(&err),
-                        });
-                        continue;
-                    }
-                };
-                let kind = entry_kind_from_meta(&meta);
-                let size = if matches!(kind, EntryKind::File) {
-                    meta.size()
+            let (kind, file_id, file_logical_size, file_allocated_bytes, dev_id) =
+                if let Some(bulk) = &child.bulk {
+                    (
+                        bulk.kind.clone(),
+                        bulk.file_id,
+                        bulk.logical_size,
+                        bulk.allocated_bytes,
+                        bulk.dev_id as u64,
+                    )
                 } else {
-                    0
+                    let meta = match fs::symlink_metadata(&absolute) {
+                        Ok(meta) => meta,
+                        Err(err) => {
+                            walk_skips.push(WalkSkip {
+                                path: relative_str.clone(),
+                                reason: io_skip_reason(&err),
+                            });
+                            continue;
+                        }
+                    };
+                    let kind = entry_kind_from_meta(&meta);
+                    let size = if matches!(kind, EntryKind::File) {
+                        meta.size()
+                    } else {
+                        0
+                    };
+                    // st_blocks is reported in 512-byte units regardless of
+                    // the underlying block size; this is BSD stat semantics
+                    // and what EX-22's oracle uses.
+                    let allocated = if matches!(kind, EntryKind::File) {
+                        meta.blocks().saturating_mul(512)
+                    } else {
+                        0
+                    };
+                    (kind, meta.ino(), size, allocated, meta.dev())
                 };
-                (kind, meta.ino(), size, meta.dev())
-            };
 
             // Symlink target still requires a separate `readlink`. Bulk
             // mode skips it because it isn't an attribute getattrlistbulk
@@ -258,6 +274,18 @@ pub fn fallback_scan_path_with_options<P: AsRef<Path>>(
                 EntryKind::File => (file_logical_size, None),
                 _ => (0, None),
             };
+            // EX-22 amended SR-019 emission rule for the fallback path:
+            // regular files emit `Some(st_blocks * 512)` (the kernel's
+            // public allocation count and the EX-22 oracle); symlinks
+            // and directories emit `Some(0)` so the shape parity with
+            // raw-mode emission holds (raw-mode does not promise
+            // per-symlink or per-directory allocation bytes); `other`
+            // emits `None` for symmetry with raw.
+            let allocated_size = match kind {
+                EntryKind::File => Some(file_allocated_bytes),
+                EntryKind::Symlink | EntryKind::Dir => Some(0),
+                EntryKind::Other => None,
+            };
             let is_dir = matches!(kind, EntryKind::Dir);
             entries.push(NamespaceEntry {
                 path: relative_str.clone(),
@@ -265,6 +293,7 @@ pub fn fallback_scan_path_with_options<P: AsRef<Path>>(
                 file_id,
                 logical_size,
                 symlink_target,
+                allocated_size,
             });
             if is_dir {
                 if !options.cross_mounts && dev_id != root_dev {
@@ -324,13 +353,15 @@ pub fn fallback_scan_path_with_options<P: AsRef<Path>>(
     let claim = if options.cross_mounts {
         "Rust path emits one mounted directory's NamespaceEntry + DirectoryAggregate rows via \
          POSIX traversal; logical size is st_size for files and symlink target length for \
-         symlinks; per-entry permission/access errors are skipped and recorded in walk_skips; \
-         mount boundaries are crossed (--cross-mounts)"
+         symlinks; allocated size is st_blocks*512 for files and zero for symlinks/directories \
+         (EX-22 oracle); per-entry permission/access errors are skipped and recorded in \
+         walk_skips; mount boundaries are crossed (--cross-mounts)"
     } else {
         "Rust path emits one mounted directory's NamespaceEntry + DirectoryAggregate rows via \
          POSIX traversal; logical size is st_size for files and symlink target length for \
-         symlinks; per-entry permission/access errors are skipped and recorded in walk_skips; \
-         mount boundaries are not crossed (default)"
+         symlinks; allocated size is st_blocks*512 for files and zero for symlinks/directories \
+         (EX-22 oracle); per-entry permission/access errors are skipped and recorded in \
+         walk_skips; mount boundaries are not crossed (default)"
     };
 
     Ok(FallbackScanOutput {
@@ -339,7 +370,7 @@ pub fn fallback_scan_path_with_options<P: AsRef<Path>>(
         not_claimed: vec![
             "raw APFS-specific size sources (dstream / decmpfs precedence)".to_string(),
             "live mounted raw-scan correctness".to_string(),
-            "physical/shared/exclusive accounting".to_string(),
+            "exclusive / shared / snapshot-retained byte accounting".to_string(),
             "incremental cache reuse".to_string(),
             "encryption decryption or keybag handling".to_string(),
             "snapshot, sealed-volume, or volume-group merged semantics".to_string(),
@@ -368,6 +399,7 @@ struct BulkMeta {
     kind: EntryKind,
     file_id: u64,
     logical_size: u64,
+    allocated_bytes: u64,
     dev_id: u32,
 }
 
@@ -429,6 +461,7 @@ fn child_from_bulk(entry: BulkEntry) -> ChildEntry {
         kind: entry.kind.clone(),
         file_id: entry.file_id,
         logical_size: entry.logical_size,
+        allocated_bytes: entry.allocated_bytes,
         dev_id: entry.dev_id,
     };
     ChildEntry {
@@ -466,7 +499,13 @@ fn entry_kind_from_meta(meta: &fs::Metadata) -> EntryKind {
 }
 
 /// Per-directory unique-inode aggregate, mirroring
-/// `src/apfs_fastindex/aggregate.py` (SR-009).
+/// `src/apfs_fastindex/aggregate.py` (SR-009). The
+/// `unique_inode_allocated_total` collapses to `None` if any
+/// contributing inode has `allocated_size == None` (mirrors the raw
+/// namespace.rs SR-019 fail-closed contract). In fallback mode all
+/// regular files emit `Some(_)` so the column should always populate
+/// in practice; the None branch exists for the `EntryKind::Other`
+/// case.
 fn build_aggregates(entries: &[NamespaceEntry]) -> Vec<DirectoryAggregate> {
     let mut directories: BTreeSet<String> = BTreeSet::new();
     directories.insert(".".to_string());
@@ -475,7 +514,7 @@ fn build_aggregates(entries: &[NamespaceEntry]) -> Vec<DirectoryAggregate> {
             directories.insert(entry.path.clone());
         }
     }
-    let mut contributors: BTreeMap<String, BTreeMap<u64, u64>> = BTreeMap::new();
+    let mut contributors: BTreeMap<String, BTreeMap<u64, (u64, Option<u64>)>> = BTreeMap::new();
     for path in &directories {
         contributors.insert(path.clone(), BTreeMap::new());
     }
@@ -485,19 +524,25 @@ fn build_aggregates(entries: &[NamespaceEntry]) -> Vec<DirectoryAggregate> {
         }
         for ancestor in ancestor_directories(&entry.path) {
             if let Some(map) = contributors.get_mut(&ancestor) {
-                map.entry(entry.file_id).or_insert(entry.logical_size);
+                map.entry(entry.file_id)
+                    .or_insert((entry.logical_size, entry.allocated_size));
             }
         }
     }
     contributors
         .into_iter()
         .map(|(path, file_sizes)| {
-            let unique_inode_logical_total = file_sizes.values().sum();
+            let unique_inode_logical_total: u64 =
+                file_sizes.values().map(|(logical, _)| *logical).sum();
+            let unique_inode_allocated_total: Option<u64> = file_sizes
+                .values()
+                .try_fold(0u64, |acc, (_, allocated)| allocated.map(|a| acc + a));
             let contributing_file_ids = file_sizes.keys().copied().collect();
             DirectoryAggregate {
                 path,
                 unique_inode_logical_total,
                 contributing_file_ids,
+                unique_inode_allocated_total,
             }
         })
         .collect()
@@ -560,6 +605,32 @@ mod tests {
         assert_eq!(link.entry_kind, EntryKind::Symlink);
         assert_eq!(link.symlink_target.as_deref(), Some("moved.txt"));
         assert_eq!(link.logical_size, "moved.txt".len() as u64);
+        // EX-22 / SR-019: fallback emits Some(0) for symlinks so the
+        // shape parity with raw-mode emission holds.
+        assert_eq!(link.allocated_size, Some(0));
+
+        let moved = parser_output
+            .entries
+            .iter()
+            .find(|e| e.path == "dst/moved.txt")
+            .expect("dst/moved.txt present");
+        assert_eq!(moved.entry_kind, EntryKind::File);
+        // Regular files: fallback emits Some(st_blocks * 512), which
+        // is the EX-22 oracle. We do not assert the exact value
+        // because it depends on the host's block size and any APFS
+        // local-snapshot interaction, only that it is Some(_).
+        assert!(
+            moved.allocated_size.is_some(),
+            "regular file should emit Some(allocated_size); got None"
+        );
+
+        let dst_dir = parser_output
+            .entries
+            .iter()
+            .find(|e| e.path == "dst")
+            .expect("dst directory entry present");
+        assert_eq!(dst_dir.entry_kind, EntryKind::Dir);
+        assert_eq!(dst_dir.allocated_size, Some(0));
 
         let aggregates: Vec<&str> = parser_output
             .aggregates
@@ -567,6 +638,17 @@ mod tests {
             .map(|a| a.path.as_str())
             .collect();
         assert_eq!(aggregates, vec![".", "dst", "src"]);
+        // The fallback's per-file allocated_size is always Some(_)
+        // for files, so the aggregate must populate as Some(_).
+        let root_agg = parser_output
+            .aggregates
+            .iter()
+            .find(|a| a.path == ".")
+            .expect("root aggregate present");
+        assert!(
+            root_agg.unique_inode_allocated_total.is_some(),
+            "fallback unique_inode_allocated_total should populate; got None"
+        );
         assert!(parser_output.walk_skips.is_empty());
     }
 

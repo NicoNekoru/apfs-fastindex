@@ -19,7 +19,16 @@
 //!   normalization or case fold; lookup-by-name explicitly not claimed),
 //! - SR-009 unique-inode per-directory aggregate policy (each directory's
 //!   total counts every contributing inode exactly once, mirroring
-//!   `src/apfs_fastindex/aggregate.py`).
+//!   `src/apfs_fastindex/aggregate.py`),
+//! - SR-019 + EX-22 allocated-size precedence: regular + dstream + no
+//!   `INO_EXT_TYPE_SPARSE_BYTES` xfield -> `Some(alloced_size)`;
+//!   regular + dstream + sparse_bytes set -> `None` (EX-22 saw
+//!   `alloced_size` overstate the kernel's `st_blocks * 512` by
+//!   exactly `sparse_bytes`); regular + decmpfs xattr -> `None`;
+//!   symlink -> `Some(0)`; directory -> `Some(0)`; else -> `None`.
+//!   The directory aggregate's `unique_inode_allocated_total`
+//!   collapses to `None` if any contributing inode has
+//!   `allocated_size == None`.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -151,16 +160,40 @@ impl<'a> NamespaceIndex<'a> {
             let entry_kind = entry_kind_from_drec(child.entry_type);
             let (logical_size, symlink_target) =
                 self.logical_size_and_target(child.file_id, child.entry_type);
+            let allocated_size = self.allocated_size(child.file_id, child.entry_type);
             out.push(NamespaceEntry {
                 path: path.clone(),
                 entry_kind: entry_kind.clone(),
                 file_id: child.file_id,
                 logical_size,
                 symlink_target,
+                allocated_size,
             });
             if matches!(entry_kind, EntryKind::Dir) && visited.insert(child.file_id) {
                 self.walk_dir(child.file_id, &path, out, visited);
             }
+        }
+    }
+
+    /// Apply the EX-22-amended SR-019 precedence per inode.
+    fn allocated_size(&self, file_id: u64, entry_type: u8) -> Option<u64> {
+        match entry_type {
+            DT_LNK | DT_DIR => Some(0),
+            DT_REG => {
+                let inode = self.inode_by_id.get(&file_id).copied()?;
+                let xattrs = self.xattrs_by_id.get(&file_id);
+                let has_decmpfs = xattrs
+                    .map(|m| m.contains_key(XATTR_DECMPFS_NAME))
+                    .unwrap_or(false);
+                if has_decmpfs {
+                    return None;
+                }
+                if inode.sparse_bytes.is_some() {
+                    return None;
+                }
+                inode.dstream.as_ref().map(|dstream| dstream.alloced_size)
+            }
+            _ => None,
         }
     }
 
@@ -275,6 +308,10 @@ fn hex_nibble(byte: u8) -> Option<u8> {
 /// `src/apfs_fastindex/aggregate.py`. Each directory's total counts every
 /// file inode in its subtree exactly once, regardless of how many
 /// hard-link paths refer to the same inode (SR-009).
+///
+/// `unique_inode_allocated_total` collapses to `None` if any
+/// contributing inode has `allocated_size == None` (SR-019 / EX-22
+/// fail-closed cases). A partial total cannot be authoritative.
 fn build_aggregates(entries: &[NamespaceEntry]) -> Vec<DirectoryAggregate> {
     let mut directories: BTreeSet<String> = BTreeSet::new();
     directories.insert(".".to_string());
@@ -283,7 +320,7 @@ fn build_aggregates(entries: &[NamespaceEntry]) -> Vec<DirectoryAggregate> {
             directories.insert(entry.path.clone());
         }
     }
-    let mut contributors: BTreeMap<String, BTreeMap<u64, u64>> = BTreeMap::new();
+    let mut contributors: BTreeMap<String, BTreeMap<u64, (u64, Option<u64>)>> = BTreeMap::new();
     for path in &directories {
         contributors.insert(path.clone(), BTreeMap::new());
     }
@@ -293,19 +330,25 @@ fn build_aggregates(entries: &[NamespaceEntry]) -> Vec<DirectoryAggregate> {
         }
         for ancestor in ancestor_directories(&entry.path) {
             if let Some(map) = contributors.get_mut(&ancestor) {
-                map.entry(entry.file_id).or_insert(entry.logical_size);
+                map.entry(entry.file_id)
+                    .or_insert((entry.logical_size, entry.allocated_size));
             }
         }
     }
     contributors
         .into_iter()
         .map(|(path, file_sizes)| {
-            let unique_inode_logical_total = file_sizes.values().sum();
+            let unique_inode_logical_total: u64 =
+                file_sizes.values().map(|(logical, _)| *logical).sum();
+            let unique_inode_allocated_total: Option<u64> = file_sizes
+                .values()
+                .try_fold(0u64, |acc, (_, allocated)| allocated.map(|a| acc + a));
             let contributing_file_ids = file_sizes.keys().copied().collect();
             DirectoryAggregate {
                 path,
                 unique_inode_logical_total,
                 contributing_file_ids,
+                unique_inode_allocated_total,
             }
         })
         .collect()
@@ -361,5 +404,100 @@ mod tests {
     fn decmpfs_size_rejects_short_payload() {
         let payload = "00000000";
         assert_eq!(decmpfs_uncompressed_size(payload), None);
+    }
+
+    /// SR-019 / EX-22 aggregate None-collapse: a directory whose
+    /// inodes include even one `None` allocated_size must report
+    /// `unique_inode_allocated_total = None`, never a partial sum.
+    #[test]
+    fn aggregate_collapses_when_any_inode_has_none_allocated() {
+        let entries = vec![
+            NamespaceEntry {
+                path: "ordinary.txt".to_string(),
+                entry_kind: EntryKind::File,
+                file_id: 10,
+                logical_size: 100,
+                symlink_target: None,
+                allocated_size: Some(4096),
+            },
+            NamespaceEntry {
+                path: "sparse.bin".to_string(),
+                entry_kind: EntryKind::File,
+                file_id: 11,
+                logical_size: 200,
+                symlink_target: None,
+                allocated_size: None,
+            },
+        ];
+        let aggregates = build_aggregates(&entries);
+        let root = aggregates
+            .iter()
+            .find(|a| a.path == ".")
+            .expect("root aggregate exists");
+        assert_eq!(root.unique_inode_logical_total, 300);
+        assert_eq!(root.unique_inode_allocated_total, None);
+        assert_eq!(root.contributing_file_ids, vec![10, 11]);
+    }
+
+    /// All inodes Some -> aggregate sums them.
+    #[test]
+    fn aggregate_sums_allocated_when_all_inodes_present() {
+        let entries = vec![
+            NamespaceEntry {
+                path: "a.txt".to_string(),
+                entry_kind: EntryKind::File,
+                file_id: 20,
+                logical_size: 100,
+                symlink_target: None,
+                allocated_size: Some(4096),
+            },
+            NamespaceEntry {
+                path: "b.txt".to_string(),
+                entry_kind: EntryKind::File,
+                file_id: 21,
+                logical_size: 200,
+                symlink_target: None,
+                allocated_size: Some(8192),
+            },
+        ];
+        let aggregates = build_aggregates(&entries);
+        let root = aggregates
+            .iter()
+            .find(|a| a.path == ".")
+            .expect("root aggregate exists");
+        assert_eq!(root.unique_inode_allocated_total, Some(12288));
+    }
+
+    /// A hard-link sibling that shares an inode contributes its
+    /// allocated bytes exactly once, even if both rows carry the
+    /// same `file_id` and `allocated_size`.
+    #[test]
+    fn aggregate_counts_hard_linked_inode_once_for_allocation() {
+        let entries = vec![
+            NamespaceEntry {
+                path: "ordinary.txt".to_string(),
+                entry_kind: EntryKind::File,
+                file_id: 30,
+                logical_size: 29,
+                symlink_target: None,
+                allocated_size: Some(4096),
+            },
+            NamespaceEntry {
+                path: "hard.txt".to_string(),
+                entry_kind: EntryKind::File,
+                file_id: 30,
+                logical_size: 29,
+                symlink_target: None,
+                allocated_size: Some(4096),
+            },
+        ];
+        let aggregates = build_aggregates(&entries);
+        let root = aggregates
+            .iter()
+            .find(|a| a.path == ".")
+            .expect("root aggregate exists");
+        assert_eq!(root.unique_inode_logical_total, 29);
+        assert_eq!(root.unique_inode_allocated_total, Some(4096));
+        assert_eq!(root.contributing_file_ids, vec![30]);
     }
 }

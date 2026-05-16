@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-import sys
 from dataclasses import asdict
 from pathlib import Path
 
@@ -63,6 +62,7 @@ def _rust_to_parser_output(rust_doc: dict) -> ParserOutput:
             file_id=e["file_id"],
             logical_size=e.get("logical_size", 0),
             symlink_target=e.get("symlink_target"),
+            allocated_size=e.get("allocated_size"),
         )
         for e in parser_output.get("entries", [])
     )
@@ -71,6 +71,7 @@ def _rust_to_parser_output(rust_doc: dict) -> ParserOutput:
             path=a["path"],
             unique_inode_logical_total=a["unique_inode_logical_total"],
             contributing_file_ids=tuple(a.get("contributing_file_ids", [])),
+            unique_inode_allocated_total=a.get("unique_inode_allocated_total"),
         )
         for a in parser_output.get("aggregates", [])
     )
@@ -135,6 +136,65 @@ def main() -> int:
         expected_aggregates = build_directory_aggregates(parser_output.entries)
         aggregate_diff = _aggregate_diff(parser_output.aggregates, expected_aggregates)
 
+        # SR-019 / EX-22 column smoke. The proof fixture contains
+        # exactly one sparse file (`dst/sparse.bin`) and no decmpfs
+        # files, so the expected per-row state is:
+        #
+        #   - dst/sparse.bin -> allocated_size is None (SR-019 step:
+        #     regular + dstream + SPARSE_BYTES present -> fail closed)
+        #   - every other regular file -> allocated_size is Some(int)
+        #     and Some(int) > 0 for the non-empty fixture files
+        #   - every symlink and directory -> allocated_size == 0
+        #
+        # And the expected per-aggregate state is:
+        #
+        #   - `.` and `dst` -> unique_inode_allocated_total is None
+        #     (sparse.bin sits inside their subtrees and collapses
+        #     the total by the SR-019 fail-closed contract)
+        #   - `src` -> unique_inode_allocated_total is Some(int)
+        #
+        # Each list below records *unexpected* deviations from that
+        # state; `allocated_column_ok` is true iff all four are
+        # empty.
+        EXPECTED_SPARSE_PATHS = {"dst/sparse.bin"}
+        EXPECTED_AGGREGATE_NONE_PATHS = {".", "dst"}
+
+        allocated_column_check: dict[str, list] = {
+            "files_with_unexpected_none_allocated": [],
+            "files_with_unexpected_some_allocated": [],
+            "non_file_with_nonzero_allocated_size": [],
+            "aggregate_with_unexpected_none_total": [],
+            "aggregate_with_unexpected_some_total": [],
+        }
+        for entry in parser_output.entries:
+            if entry.entry_kind == "file":
+                expects_none = entry.path in EXPECTED_SPARSE_PATHS
+                if expects_none and entry.allocated_size is not None:
+                    allocated_column_check["files_with_unexpected_some_allocated"].append(
+                        {"path": entry.path, "value": entry.allocated_size}
+                    )
+                elif not expects_none and entry.allocated_size is None:
+                    allocated_column_check["files_with_unexpected_none_allocated"].append(
+                        entry.path
+                    )
+            elif entry.entry_kind in {"dir", "symlink"}:
+                if entry.allocated_size not in (0, None):
+                    allocated_column_check["non_file_with_nonzero_allocated_size"].append(
+                        {"path": entry.path, "value": entry.allocated_size}
+                    )
+        for agg in parser_output.aggregates:
+            expects_none = agg.path in EXPECTED_AGGREGATE_NONE_PATHS
+            if expects_none and agg.unique_inode_allocated_total is not None:
+                allocated_column_check["aggregate_with_unexpected_some_total"].append(
+                    {"path": agg.path, "value": agg.unique_inode_allocated_total}
+                )
+            elif not expects_none and agg.unique_inode_allocated_total is None:
+                allocated_column_check["aggregate_with_unexpected_none_total"].append(
+                    agg.path
+                )
+
+        allocated_column_ok = all(not v for v in allocated_column_check.values())
+
         report = {
             "fixture_image": str(fixture.image_path),
             "operations": list(fixture.operations),
@@ -149,9 +209,17 @@ def main() -> int:
                 "mismatches": [asdict(m) for m in entry_diff.mismatches],
             },
             "aggregate_python_vs_rust_diff": aggregate_diff,
+            "allocated_column_check": allocated_column_check,
+            "allocated_column_ok": allocated_column_ok,
         }
         print(json.dumps(report, indent=2, sort_keys=True))
-        return 0 if entry_diff.matched and aggregate_diff["matched"] else 1
+        return (
+            0
+            if entry_diff.matched
+            and aggregate_diff["matched"]
+            and allocated_column_ok
+            else 1
+        )
 
 
 if __name__ == "__main__":
