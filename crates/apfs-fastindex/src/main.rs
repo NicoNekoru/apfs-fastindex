@@ -295,7 +295,7 @@ fn slim_entries(entries: &[apfs_fastindex::NamespaceEntry]) -> Vec<serde_json::V
             );
             obj.insert(
                 "entry_kind".to_string(),
-                serde_json::to_value(&entry.entry_kind).unwrap(),
+                serde_json::to_value(entry.entry_kind).unwrap(),
             );
             obj.insert(
                 "logical_size".to_string(),

@@ -30,7 +30,7 @@
 //!   collapses to `None` if any contributing inode has
 //!   `allocated_size == None`.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::fs_record_body::{FsRecordKey, FsRecordRow, FsRecordValue};
 use crate::fs_records::FsRecordDump;
@@ -59,7 +59,10 @@ pub(crate) fn build_namespace(
     let index = NamespaceIndex::from_records(&dump.records);
     let mut entries: Vec<NamespaceEntry> = Vec::new();
     index.walk_into(&mut entries);
-    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    // Paths inside a single volume's namespace are unique, so stable
+    // sort is not required; sort_unstable_by is faster on the
+    // post-walk ordering pass.
+    entries.sort_unstable_by(|a, b| a.path.cmp(&b.path));
     let aggregates = build_aggregates(&entries);
     (entries, aggregates)
 }
@@ -117,7 +120,10 @@ impl<'a> NamespaceIndex<'a> {
         // output deterministic across runs without claiming lookup
         // semantics.
         for children in drec_children.values_mut() {
-            children.sort_by(|a, b| a.name.cmp(b.name));
+            // Stored DREC keys are unique on a well-formed APFS volume;
+            // stability is not required for the per-directory child
+            // ordering.
+            children.sort_unstable_by(|a, b| a.name.cmp(b.name));
         }
 
         Self {
@@ -161,17 +167,21 @@ impl<'a> NamespaceIndex<'a> {
             let (logical_size, symlink_target) =
                 self.logical_size_and_target(child.file_id, child.entry_type);
             let allocated_size = self.allocated_size(child.file_id, child.entry_type);
+            let is_dir = matches!(entry_kind, EntryKind::Dir);
+            if is_dir && visited.insert(child.file_id) {
+                // Recurse before the entry move so we can hand the
+                // child path in by reference; the parent path Vec push
+                // still consumes its own owned String afterwards.
+                self.walk_dir(child.file_id, &path, out, visited);
+            }
             out.push(NamespaceEntry {
-                path: path.clone(),
-                entry_kind: entry_kind.clone(),
+                path,
+                entry_kind,
                 file_id: child.file_id,
                 logical_size,
                 symlink_target,
                 allocated_size,
             });
-            if matches!(entry_kind, EntryKind::Dir) && visited.insert(child.file_id) {
-                self.walk_dir(child.file_id, &path, out, visited);
-            }
         }
     }
 
@@ -312,50 +322,76 @@ fn hex_nibble(byte: u8) -> Option<u8> {
 /// `unique_inode_allocated_total` collapses to `None` if any
 /// contributing inode has `allocated_size == None` (SR-019 / EX-22
 /// fail-closed cases). A partial total cannot be authoritative.
+///
+/// Implementation uses `HashMap` keyed by `&str` slices borrowed
+/// from the entries' own `path` Strings; the ancestor walk allocates
+/// nothing per file. Only the final sorted emission converts to
+/// owned `String`s.
 fn build_aggregates(entries: &[NamespaceEntry]) -> Vec<DirectoryAggregate> {
-    let mut directories: BTreeSet<String> = BTreeSet::new();
-    directories.insert(".".to_string());
+    let mut contributors: HashMap<&str, HashMap<u64, (u64, Option<u64>)>> = HashMap::new();
+    contributors.insert(".", HashMap::new());
     for entry in entries {
         if matches!(entry.entry_kind, EntryKind::Dir) {
-            directories.insert(entry.path.clone());
+            contributors.entry(entry.path.as_str()).or_default();
         }
-    }
-    let mut contributors: BTreeMap<String, BTreeMap<u64, (u64, Option<u64>)>> = BTreeMap::new();
-    for path in &directories {
-        contributors.insert(path.clone(), BTreeMap::new());
     }
     for entry in entries {
         if !matches!(entry.entry_kind, EntryKind::File) {
             continue;
         }
-        for ancestor in ancestor_directories(&entry.path) {
-            if let Some(map) = contributors.get_mut(&ancestor) {
-                map.entry(entry.file_id)
-                    .or_insert((entry.logical_size, entry.allocated_size));
+        let mut current: &str = entry.path.as_str();
+        loop {
+            match current.rfind('/') {
+                Some(idx) => {
+                    let parent = &current[..idx];
+                    let key = if parent.is_empty() { "." } else { parent };
+                    if let Some(map) = contributors.get_mut(key) {
+                        map.entry(entry.file_id)
+                            .or_insert((entry.logical_size, entry.allocated_size));
+                    }
+                    if parent.is_empty() {
+                        break;
+                    }
+                    current = parent;
+                }
+                None => {
+                    if let Some(map) = contributors.get_mut(".") {
+                        map.entry(entry.file_id)
+                            .or_insert((entry.logical_size, entry.allocated_size));
+                    }
+                    break;
+                }
             }
         }
     }
-    contributors
-        .into_iter()
-        .map(|(path, file_sizes)| {
-            let unique_inode_logical_total: u64 =
-                file_sizes.values().map(|(logical, _)| *logical).sum();
-            let unique_inode_allocated_total: Option<u64> = file_sizes
-                .values()
-                .try_fold(0u64, |acc, (_, allocated)| allocated.map(|a| acc + a));
-            let contributing_file_ids = file_sizes.keys().copied().collect();
-            DirectoryAggregate {
-                path,
-                unique_inode_logical_total,
-                contributing_file_ids,
-                unique_inode_allocated_total,
-            }
-        })
-        .collect()
+
+    let mut paths: Vec<&str> = contributors.keys().copied().collect();
+    paths.sort_unstable();
+    let mut out: Vec<DirectoryAggregate> = Vec::with_capacity(paths.len());
+    for path in paths {
+        let file_sizes = contributors
+            .remove(path)
+            .expect("path was just keys()d from the map");
+        let unique_inode_logical_total: u64 =
+            file_sizes.values().map(|(logical, _)| *logical).sum();
+        let unique_inode_allocated_total: Option<u64> = file_sizes
+            .values()
+            .try_fold(0u64, |acc, (_, allocated)| allocated.map(|a| acc + a));
+        let mut contributing_file_ids: Vec<u64> = file_sizes.keys().copied().collect();
+        contributing_file_ids.sort_unstable();
+        out.push(DirectoryAggregate {
+            path: path.to_string(),
+            unique_inode_logical_total,
+            contributing_file_ids,
+            unique_inode_allocated_total,
+        });
+    }
+    out
 }
 
-/// Return every parent directory of `path`, ending with `"."` for the root.
-/// `"a/b/c.txt"` -> `["a/b", "a", "."]`.
+/// (legacy ancestor_directories was removed in r2c-fallback-perf;
+/// the new build_aggregates walks ancestors as &str slices inline.)
+#[cfg(test)]
 fn ancestor_directories(path: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut current = path;
