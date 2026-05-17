@@ -17,6 +17,15 @@
 //! - On any error (open failure, parse failure, kernel error mid-stream)
 //!   the caller falls back to the std implementation. The bulk path is a
 //!   perf optimization, not a correctness gate.
+//!
+//! ## Buffer reuse
+//!
+//! A whole-machine scan touches ~200k directories. Allocating a 64 KiB
+//! kernel-fill buffer for each one is ~13 GiB of allocation churn. The
+//! public surface here is a `BulkReader` that owns one buffer for the
+//! lifetime of the walk; the caller calls `read_directory` per
+//! directory and the buffer (plus the output `Vec`) are reused
+//! between calls.
 
 #![allow(non_upper_case_globals)]
 
@@ -46,90 +55,122 @@ pub(crate) struct BulkEntry {
     pub dev_id: u32,
 }
 
-/// Read every entry in `dir` via `getattrlistbulk`. Returns the entries in
-/// the order the kernel returned them (the caller sorts).
-///
-/// On any error this returns `Err`. The caller is expected to fall through
-/// to `std::fs::read_dir` and continue.
-#[cfg(target_os = "macos")]
-pub(crate) fn read_directory_bulk(dir: &Path) -> io::Result<Vec<BulkEntry>> {
-    use libc::c_void;
-
-    const ATTR_CMN_ERROR: libc::attrgroup_t = 0x2000_0000;
-
-    let c_path = CString::new(dir.as_os_str().as_bytes())
-        .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
-    // SAFETY: pointer is a valid NUL-terminated C string for the duration of
-    // the call.
-    let fd = unsafe { libc::open(c_path.as_ptr(), libc::O_RDONLY) };
-    if fd < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    let _guard = FdGuard(fd);
-
-    let mut alist: libc::attrlist = unsafe { std::mem::zeroed() };
-    alist.bitmapcount = libc::ATTR_BIT_MAP_COUNT;
-    alist.commonattr = libc::ATTR_CMN_RETURNED_ATTRS
-        | libc::ATTR_CMN_NAME
-        | libc::ATTR_CMN_DEVID
-        | libc::ATTR_CMN_OBJTYPE
-        | libc::ATTR_CMN_FILEID
-        | ATTR_CMN_ERROR;
-    // ATTR_FILE_TOTALSIZE returns the logical size (matches `st_size`
-    // for regular files); ATTR_FILE_ALLOCSIZE returns the allocated
-    // size in bytes (matches `st_blocks * 512`). Both are file-only
-    // attributes that come back zero for directories and symlinks;
-    // the parser handles that below.
-    alist.fileattr = libc::ATTR_FILE_TOTALSIZE | libc::ATTR_FILE_ALLOCSIZE;
-
-    // 64 KiB buffer; in practice 16-32 entries per batch.
-    let mut buf = vec![0u8; 65_536];
-    let mut out: Vec<BulkEntry> = Vec::new();
-    loop {
-        // SAFETY: alist and buf are valid for the duration of the call;
-        // the kernel writes at most `buf.len()` bytes into buf.
-        let count = unsafe {
-            libc::getattrlistbulk(
-                fd,
-                &mut alist as *mut _ as *mut c_void,
-                buf.as_mut_ptr() as *mut c_void,
-                buf.len(),
-                0,
-            )
-        };
-        if count < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        if count == 0 {
-            break;
-        }
-        let mut offset = 0usize;
-        for _ in 0..count {
-            let entry_len = read_u32_le(&buf, offset)? as usize;
-            if entry_len < 24 || offset + entry_len > buf.len() {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "getattrlistbulk returned malformed entry length",
-                ));
-            }
-            let entry = &buf[offset..offset + entry_len];
-            match parse_entry(entry) {
-                Ok(Some(parsed)) => out.push(parsed),
-                Ok(None) => {} // entry had an error; skip silently
-                Err(err) => return Err(err),
-            }
-            offset += entry_len;
-        }
-    }
-    Ok(out)
+/// One-shot bulk-attribute reader. Owns the 64 KiB kernel-fill buffer
+/// (`vec![0u8; 65_536]` reallocated per directory was ~13 GiB of churn
+/// on a 200k-directory `/` scan) and the per-call output `Vec`. Reuse
+/// across directories by calling `read_directory(dir, &mut out)`
+/// repeatedly with the same `out` Vec; `out` is cleared at the top of
+/// each call.
+pub(crate) struct BulkReader {
+    #[cfg(target_os = "macos")]
+    buf: Vec<u8>,
 }
 
-#[cfg(not(target_os = "macos"))]
-pub(crate) fn read_directory_bulk(_dir: &Path) -> io::Result<Vec<BulkEntry>> {
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "getattrlistbulk is macOS-only",
-    ))
+impl BulkReader {
+    pub(crate) fn new() -> Self {
+        Self {
+            #[cfg(target_os = "macos")]
+            buf: vec![0u8; 65_536],
+        }
+    }
+
+    /// Read every entry in `dir` via `getattrlistbulk`. Writes the
+    /// entries into `out` in the order the kernel returned them; the
+    /// caller sorts.
+    ///
+    /// On any error this returns `Err`. The caller is expected to
+    /// fall through to `std::fs::read_dir` and continue. `out` is
+    /// cleared at entry so a partial fill on the error path is
+    /// discarded.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn read_directory(
+        &mut self,
+        dir: &Path,
+        out: &mut Vec<BulkEntry>,
+    ) -> io::Result<()> {
+        use libc::c_void;
+
+        const ATTR_CMN_ERROR: libc::attrgroup_t = 0x2000_0000;
+
+        out.clear();
+
+        let c_path = CString::new(dir.as_os_str().as_bytes())
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
+        // SAFETY: pointer is a valid NUL-terminated C string for the
+        // duration of the call.
+        let fd = unsafe { libc::open(c_path.as_ptr(), libc::O_RDONLY) };
+        if fd < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let _guard = FdGuard(fd);
+
+        let mut alist: libc::attrlist = unsafe { std::mem::zeroed() };
+        alist.bitmapcount = libc::ATTR_BIT_MAP_COUNT;
+        alist.commonattr = libc::ATTR_CMN_RETURNED_ATTRS
+            | libc::ATTR_CMN_NAME
+            | libc::ATTR_CMN_DEVID
+            | libc::ATTR_CMN_OBJTYPE
+            | libc::ATTR_CMN_FILEID
+            | ATTR_CMN_ERROR;
+        // ATTR_FILE_TOTALSIZE returns the logical size (matches `st_size`
+        // for regular files); ATTR_FILE_ALLOCSIZE returns the allocated
+        // size in bytes (matches `st_blocks * 512`). Both are file-only
+        // attributes that come back zero for directories and symlinks;
+        // the parser handles that below.
+        alist.fileattr = libc::ATTR_FILE_TOTALSIZE | libc::ATTR_FILE_ALLOCSIZE;
+
+        loop {
+            // SAFETY: alist and self.buf are valid for the duration of
+            // the call; the kernel writes at most `self.buf.len()`
+            // bytes into self.buf.
+            let count = unsafe {
+                libc::getattrlistbulk(
+                    fd,
+                    &mut alist as *mut _ as *mut c_void,
+                    self.buf.as_mut_ptr() as *mut c_void,
+                    self.buf.len(),
+                    0,
+                )
+            };
+            if count < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            if count == 0 {
+                break;
+            }
+            let buf_len = self.buf.len();
+            let mut offset = 0usize;
+            for _ in 0..count {
+                let entry_len = read_u32_le(&self.buf, offset)? as usize;
+                if entry_len < 24 || offset + entry_len > buf_len {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "getattrlistbulk returned malformed entry length",
+                    ));
+                }
+                let entry = &self.buf[offset..offset + entry_len];
+                match parse_entry(entry) {
+                    Ok(Some(parsed)) => out.push(parsed),
+                    Ok(None) => {} // entry had an error; skip silently
+                    Err(err) => return Err(err),
+                }
+                offset += entry_len;
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub(crate) fn read_directory(
+        &mut self,
+        _dir: &Path,
+        _out: &mut Vec<BulkEntry>,
+    ) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "getattrlistbulk is macOS-only",
+        ))
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -347,7 +388,9 @@ mod tests {
         }
         symlink("file-1.txt", root.join("link.txt")).unwrap();
 
-        let mut bulk = read_directory_bulk(root).expect("bulk reads");
+        let mut reader = BulkReader::new();
+        let mut bulk: Vec<BulkEntry> = Vec::new();
+        reader.read_directory(root, &mut bulk).expect("bulk reads");
         bulk.sort_by(|a, b| a.name.cmp(&b.name));
 
         let names: Vec<&str> = bulk.iter().map(|e| e.name.as_str()).collect();
@@ -401,13 +444,53 @@ mod tests {
         let tmp = TempDir::new();
         let f = tmp.path().join("a-file");
         File::create(&f).unwrap();
-        let err = read_directory_bulk(&f).expect_err("non-dir is rejected");
+        let mut reader = BulkReader::new();
+        let mut out: Vec<BulkEntry> = Vec::new();
+        let err = reader
+            .read_directory(&f, &mut out)
+            .expect_err("non-dir is rejected");
         // The exact errno varies (ENOTDIR / EISDIR depending on platform)
         // but either way it should be an io::Error.
         assert!(
             !err.to_string().is_empty(),
             "expected a real io::Error message"
         );
+    }
+
+    #[test]
+    fn bulk_reader_reuses_buffer_across_directories() {
+        // Two siblings; reusing the reader's buffer must not bleed
+        // results from the first directory into the second.
+        let tmp = TempDir::new();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("dir-a")).unwrap();
+        std::fs::create_dir_all(root.join("dir-b")).unwrap();
+        for name in ["alpha.txt", "beta.txt"] {
+            let mut f = File::create(root.join("dir-a").join(name)).unwrap();
+            f.write_all(b"a").unwrap();
+        }
+        {
+            let mut f = File::create(root.join("dir-b").join("gamma.bin")).unwrap();
+            f.write_all(b"b").unwrap();
+        }
+
+        let mut reader = BulkReader::new();
+        let mut out: Vec<BulkEntry> = Vec::new();
+
+        reader
+            .read_directory(&root.join("dir-a"), &mut out)
+            .expect("read dir-a");
+        let dir_a_names: Vec<String> = out.iter().map(|e| e.name.clone()).collect();
+
+        reader
+            .read_directory(&root.join("dir-b"), &mut out)
+            .expect("read dir-b");
+        let dir_b_names: Vec<String> = out.iter().map(|e| e.name.clone()).collect();
+
+        let mut sorted_a = dir_a_names.clone();
+        sorted_a.sort();
+        assert_eq!(sorted_a, vec!["alpha.txt", "beta.txt"]);
+        assert_eq!(dir_b_names, vec!["gamma.bin"]);
     }
 
     /// Reuses the same tiny in-tree TempDir helper from fallback.rs::tests.

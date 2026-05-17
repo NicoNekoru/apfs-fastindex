@@ -1,8 +1,12 @@
 # Measurement Baseline
 
 Status: Active
-Date: 2026-05-14
-Source: first benchmark run on the patched crate (R1 + EX-21 Rust port)
+Date: 2026-05-16 (r2c-fallback-perf microopt pass)
+Source: first benchmark run on the patched crate (R1 + EX-21 Rust port);
+re-measured after the r2c-fallback-perf micro-optimisation pass
+(buffer-reuse BulkReader, HashMap + `&str` aggregate walk,
+`EntryKind: Copy`, drop unconditional `relative_str.clone()`, switch
+to `sort_unstable_by`).
 
 This page records the first reproducible measurement of
 `apfs-fastindex-scan` against three reference targets. It is the standing
@@ -34,6 +38,56 @@ build (`cargo build --release`).
 | `/Applications` tree        | fallback (bulk)    | 163,667     | 1.04 s        | 157,155     | 347 ms / 608 ms          |
 | `/Users` user-data scan     | fallback (bulk)    | 1,304,073   | 26.65 s       | 48,933      | 2.92 s / 6.62 s          |
 | `/` whole-machine scan      | fallback (bulk)    | 5,260,624   | 108.7 s       | 48,380      | 14.85 s / 29.80 s        |
+
+## r2c-fallback-perf micro-optimisation pass (2026-05-16)
+
+Same host, same `apfs-fastindex-scan --mode fallback` driver, same
+bench script (`PYTHONPATH=src python3 -m apfs_fastindex.bench`,
+median of 5 runs), comparing the parent commit of the perf branch
+against its tip. The perf branch lands four changes:
+
+- `BulkReader` owns one 64 KiB `getattrlistbulk` buffer and one
+  output `Vec` across the whole walk (was a fresh
+  `vec![0u8; 65_536]` per directory; ~200k dirs × 64 KiB on a
+  `/`-scan).
+- `build_aggregates` switched from
+  `BTreeMap<String, BTreeMap<u64, ..>>` keyed by owned ancestor
+  paths to `HashMap<&str, HashMap<u64, ..>>` keyed by slices
+  borrowed from `entries[i].path`. The old shape walked ancestors
+  as a `Vec<String>` per file (~25M owned-String allocations on a
+  5M-row tree). Same rewrite mirrored in `namespace.rs` (raw path).
+- `EntryKind: Copy` removes pointless `.clone()` calls in the
+  per-entry walker hot path.
+- `relative_str.clone()` per entry collapsed: the mount-boundary
+  branch is the only one that ever needed a second copy; the
+  common path now moves the `String` into `NamespaceEntry`. All
+  three `sort_by` callsites switched to `sort_unstable_by`
+  (paths inside one walk are unique).
+
+| target              | metric                  | before        | after         | delta              |
+| ------------------- | ----------------------- | ------------- | ------------- | ------------------ |
+| apfs-fastindex repo | median wall             | 58.6 ms       | 53.9 ms       | **−8%**            |
+| apfs-fastindex repo | user CPU (median)       | 21 ms         | 17 ms         | **−19%**           |
+| apfs-fastindex repo | sys CPU (median)        | 32 ms         | 32 ms         | flat               |
+| apfs-fastindex repo | throughput              | 323,721 ent/s | 351,757 ent/s | **+9%**            |
+| `/Applications`     | median wall             | 950 ms        | 816 ms        | **−14%**           |
+| `/Applications`     | user CPU (median)       | 340 ms        | 227 ms        | **−33%**           |
+| `/Applications`     | sys CPU (median)        | 535 ms        | 515 ms        | flat               |
+| `/Applications`     | throughput              | 172,283 ent/s | 200,512 ent/s | **+16%**           |
+
+The user-CPU delta is the clean signal: −19% on the small tree,
+−33% on the medium tree. Larger trees should see closer to the
+medium-tree percentage, because the aggregate phase scales with
+entry count and that is where the
+`BTreeMap<String, ..>` ↔ `HashMap<&str, ..>` substitution does
+the most work. System CPU is flat (the syscall count is
+unchanged; only the per-directory allocator pressure is gone).
+The whole-machine `/` scan was not re-measured in this pass
+because the host's filesystem cache state would dominate any
+single re-measurement; the medium-tree percentages are the
+load-bearing data points.
+
+## Pre-perf historical context
 
 "std" rows used `std::fs::read_dir` + `symlink_metadata` per entry. "bulk"
 rows used the macOS `getattrlistbulk` backend in
