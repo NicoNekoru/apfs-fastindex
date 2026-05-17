@@ -1,0 +1,14 @@
+{
+  "cwd": "/Users/kai/Projects/apfs-fastindex/docs/research/experiments/EX-25-parallel-walker/artifacts",
+  "hw_logicalcpu": 14,
+  "hw_perflevel0_physicalcpu": 10,
+  "hw_perflevel1_physicalcpu": 4,
+  "hw_physicalcpu": 14,
+  "platform": "macOS-26.3.1-arm64-arm-64bit-Mach-O",
+  "python": "3.13.9",
+  "runs_per_thread_count": 5,
+  "rustc": "rustc 1.94.0 (4a4ef493e 2026-03-02)",
+  "sw_vers": "ProductName:\t\tmacOS\nProductVersion:\t\t26.3.1\nProductVersionExtra:\t(a)\nBuildVersion:\t\t25D771280a\n",
+  "target": "/Applications",
+  "timestamp": "2026-05-16T21:58:12.441666+00:00"
+}

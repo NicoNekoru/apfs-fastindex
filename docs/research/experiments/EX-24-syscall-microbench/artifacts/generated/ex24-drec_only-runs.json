@@ -1,0 +1,49 @@
+{
+  "runs": [
+    {
+      "config": "drec_only",
+      "entries": 163651,
+      "entries_per_second": 76873,
+      "sys_seconds": 0.802579,
+      "target": "/Applications",
+      "user_seconds": 0.015654,
+      "wall_seconds": 2.12884
+    },
+    {
+      "config": "drec_only",
+      "entries": 163651,
+      "entries_per_second": 309836,
+      "sys_seconds": 0.515067,
+      "target": "/Applications",
+      "user_seconds": 0.011937,
+      "wall_seconds": 0.528185
+    },
+    {
+      "config": "drec_only",
+      "entries": 163651,
+      "entries_per_second": 314207,
+      "sys_seconds": 0.507661,
+      "target": "/Applications",
+      "user_seconds": 0.011888,
+      "wall_seconds": 0.520838
+    },
+    {
+      "config": "drec_only",
+      "entries": 163651,
+      "entries_per_second": 312622,
+      "sys_seconds": 0.511255,
+      "target": "/Applications",
+      "user_seconds": 0.011702,
+      "wall_seconds": 0.523479
+    },
+    {
+      "config": "drec_only",
+      "entries": 163651,
+      "entries_per_second": 316166,
+      "sys_seconds": 0.505155,
+      "target": "/Applications",
+      "user_seconds": 0.01165,
+      "wall_seconds": 0.517611
+    }
+  ]
+}

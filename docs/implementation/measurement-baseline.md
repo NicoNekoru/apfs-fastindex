@@ -87,6 +87,67 @@ because the host's filesystem cache state would dominate any
 single re-measurement; the medium-tree percentages are the
 load-bearing data points.
 
+## r2c-syscall-perf-research parallel-walker pass (2026-05-16)
+
+After r2c-fallback-perf landed, the remaining cost on
+`/Applications` was ~63% sys-CPU — structurally kernel-side
+work that user-space micro-opts could not touch. SR-021
+synthesised four parallel research reports (xnu source,
+Spotlight, OSS-tool survey, jwalk/rayon prior art) into a
+single cost map; EX-24 falsified the attribute-mask alternative
+(drec_only ≈ current_walker within 1%); EX-25 measured the
+parallel-walker scaling envelope and verdicted T=4 as the
+optimum on Apple silicon (the APFS container lock identified
+by Szorc-2018 / Apple-DTS-2025 fires beyond T=4).
+
+The Rust slice landed a `--threads N` flag on
+`apfs-fastindex-scan` with default `min(hw.physicalcpu, 4)`.
+Per-worker `BulkReader`, shared `WorkQueue`
+(`Mutex<Vec<WalkFrame>>` + outstanding-counter + condvar +
+atomic-bool done flag). On-join, per-worker entry Vecs are
+concat-merged on the main thread; the existing
+`sort_unstable_by` + `build_aggregates` pass then normalises
+ordering. Test count 69 → 70
+(`parallel_walker_matches_serial_shape` asserts byte-for-byte
+identical output across schedulers).
+
+End-to-end measurement on `/Applications`, same host as the
+r2c-fallback-perf table above, median of 5 runs each side:
+
+| target          | metric            | T=1 (post-fallback) | T=4 (this slice) | delta                |
+| --------------- | ----------------- | ------------------- | ---------------- | -------------------- |
+| `/Applications` | median wall       | 816 ms              | 523 ms           | **−36%**             |
+| `/Applications` | throughput        | 200,512 ent/s       | 312,879 ent/s    | **+56%**             |
+| `/Applications` | user CPU (median) | 227 ms              | 256 ms           | +13% (worker setup)  |
+| `/Applications` | sys CPU (median)  | 515 ms              | 802 ms           | +56% (kernel scales) |
+
+EX-25 microbench numbers for context (pure-kernel throughput
+without post-processing, same host, same target):
+
+| T  | wall    | sys     | sys/T   | ent/s    | speedup vs T=1 |
+|----|---------|---------|---------|----------|----------------|
+| 1  | 0.521 s | 0.508 s | 0.508 s | 314,380  | 1.00×          |
+| 2  | 0.316 s | 0.616 s | 0.308 s | 517,437  | 1.65×          |
+| **4** | **0.211 s** | 0.819 s | **0.205 s** | **776,196** | **2.47×**  |
+| 8  | 0.268 s | 2.076 s | 0.260 s | 609,748  | 1.94× (regress)|
+| 14 | 0.378 s | 4.717 s | 0.337 s | 432,866  | 1.38× (catastrophic) |
+
+Cumulative `/Applications` throughput across both perf passes:
+**172,283 → 312,879 ent/s = +82%** (1.82× cumulative).
+
+The user-CPU gap (production 256 ms vs microbench 20 ms at T=4)
+quantifies the user-space post-processing tax —
+`NamespaceEntry` allocation, per-worker merge, final
+`sort_unstable_by`, `build_aggregates`. Recorded as a candidate
+future optimisation in RL-12; not load-bearing today.
+
+System CPU rose with T as the agents predicted; the sub-linear
+shape (sys/T = 0.205 s at T=4 vs 0.508 s at T=1, then jumping
+to 0.260 s at T=8 with total sys 4× T=1) is exactly the APFS
+container-lock signature. Defaulting to T=4 stays in the
+favourable regime; explicit `--threads N` is available for
+users who want to test their host's curve.
+
 ## Pre-perf historical context
 
 "std" rows used `std::fs::read_dir` + `symlink_metadata` per entry. "bulk"

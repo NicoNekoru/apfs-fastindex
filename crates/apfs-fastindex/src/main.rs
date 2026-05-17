@@ -9,7 +9,8 @@ use apfs_fastindex::{
 };
 
 const USAGE: &str = "usage: apfs-fastindex-scan [--summary] [--pretty] [--slim] \
-                     [--mode raw|fallback|auto] [--cross-mounts] [--progress] <source-path>\n\
+                     [--mode raw|fallback|auto] [--cross-mounts] [--progress] \
+                     [--threads N] <source-path>\n\
                      source-path may be:\n  \
                      - a detached APFS .dmg image (raw mode)\n  \
                      - a raw APFS container device (/dev/rdiskN) (raw mode)\n  \
@@ -21,7 +22,13 @@ const USAGE: &str = "usage: apfs-fastindex-scan [--summary] [--pretty] [--slim] 
                      --cross-mounts lets the fallback walker descend into directories on a \
                      different device than the root (default: stop at mount boundaries).\n\
                      --progress writes one JSON object every 250 ms to stderr describing scan \
-                     progress (fallback mode only; raw mode emits no progress today).";
+                     progress (fallback mode only; raw mode emits no progress today). The \
+                     parallel walker fires the same events from a dedicated progress thread, \
+                     sampled from per-worker atomic counters.\n\
+                     --threads N picks the parallel-walker worker count for fallback mode. \
+                     Default is min(hw.physicalcpu, 4) per EX-25's 2.47x-at-T=4 verdict; \
+                     beyond T=4 the APFS container lock fires and scaling regresses. Pass \
+                     --threads 1 for single-threaded (preserves live --progress).";
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 enum Mode {
@@ -42,8 +49,10 @@ fn main() -> ExitCode {
     let mut mode = Mode::Auto;
     let mut source_path: Option<String> = None;
     let mut pending_mode_value = false;
+    let mut pending_threads_value = false;
     let mut cross_mounts = false;
     let mut progress = false;
+    let mut threads_arg: Option<usize> = None;
     for arg in args {
         if pending_mode_value {
             mode = match arg.as_str() {
@@ -57,6 +66,17 @@ fn main() -> ExitCode {
                 }
             };
             pending_mode_value = false;
+            continue;
+        }
+        if pending_threads_value {
+            threads_arg = match parse_threads(arg.as_str()) {
+                Ok(n) => Some(n),
+                Err(msg) => {
+                    eprintln!("apfs-fastindex-scan: --threads: {msg}");
+                    return ExitCode::from(2);
+                }
+            };
+            pending_threads_value = false;
             continue;
         }
         match arg.as_str() {
@@ -81,6 +101,19 @@ fn main() -> ExitCode {
             }
             "--progress" => {
                 progress = true;
+            }
+            "--threads" => {
+                pending_threads_value = true;
+            }
+            other if other.starts_with("--threads=") => {
+                let value = &other["--threads=".len()..];
+                threads_arg = match parse_threads(value) {
+                    Ok(n) => Some(n),
+                    Err(msg) => {
+                        eprintln!("apfs-fastindex-scan: --threads: {msg}");
+                        return ExitCode::from(2);
+                    }
+                };
             }
             other if other.starts_with("--mode=") => {
                 let value = &other["--mode=".len()..];
@@ -114,6 +147,11 @@ fn main() -> ExitCode {
         eprintln!("{USAGE}");
         return ExitCode::from(2);
     }
+    if pending_threads_value {
+        eprintln!("apfs-fastindex-scan: --threads requires a value");
+        eprintln!("{USAGE}");
+        return ExitCode::from(2);
+    }
     let Some(path) = source_path else {
         eprintln!("{USAGE}");
         return ExitCode::from(2);
@@ -132,11 +170,84 @@ fn main() -> ExitCode {
             if progress {
                 eprintln!("apfs-fastindex-scan: warning: --progress has no effect in raw mode (no streaming hooks yet)");
             }
+            if threads_arg.is_some() {
+                eprintln!("apfs-fastindex-scan: warning: --threads has no effect in raw mode (the raw decoder is single-threaded by design; raw-tree b-trees are walked in order)");
+            }
             run_raw(&path, summary_only, pretty, slim)
         }
-        Mode::Fallback => run_fallback(&path, summary_only, cross_mounts, pretty, slim, progress),
+        Mode::Fallback => {
+            let threads = threads_arg.unwrap_or_else(default_fallback_threads);
+            run_fallback(
+                &path,
+                summary_only,
+                cross_mounts,
+                pretty,
+                slim,
+                progress,
+                threads,
+            )
+        }
         Mode::Auto => unreachable!("auto resolves to Raw or Fallback above"),
     }
+}
+
+/// Parse `--threads N` into a strict positive integer. Reject 0 and
+/// non-numeric values so the caller doesn't accidentally pass
+/// "--threads=auto" expecting it to mean "default."
+fn parse_threads(value: &str) -> Result<usize, String> {
+    match value.parse::<usize>() {
+        Ok(n) if n >= 1 => Ok(n),
+        Ok(_) => Err("must be >= 1".to_string()),
+        Err(err) => Err(format!("not a positive integer: {err}")),
+    }
+}
+
+/// CLI default thread count for fallback mode, per EX-25's verdict.
+/// On Apple silicon hosts the optimum is T=4 (2.47× of T=1); beyond
+/// that the APFS container lock fires and sys-CPU grows super-
+/// linearly. We clamp to `hw.physicalcpu` so smaller hosts don't
+/// over-subscribe their physical cores.
+fn default_fallback_threads() -> usize {
+    const CEILING: usize = 4;
+    let physical = physical_cpu_count();
+    physical.clamp(1, CEILING)
+}
+
+/// Read `hw.physicalcpu` via `sysctlbyname`. Falls back to
+/// `std::thread::available_parallelism()` (which on macOS returns
+/// logical CPUs) if the sysctl fails. The fallback is safe because
+/// `default_fallback_threads` clamps the result to `<= CEILING` so
+/// even a logical-CPU overshoot is bounded.
+#[cfg(target_os = "macos")]
+fn physical_cpu_count() -> usize {
+    let name = std::ffi::CString::new("hw.physicalcpu").expect("static cstring");
+    let mut value: i32 = 0;
+    let mut size: libc::size_t = std::mem::size_of::<i32>();
+    // SAFETY: sysctlbyname writes at most `size` bytes into `value`;
+    // value is a valid &mut i32 and size is the matching length.
+    let rc = unsafe {
+        libc::sysctlbyname(
+            name.as_ptr(),
+            &mut value as *mut i32 as *mut std::ffi::c_void,
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if rc == 0 && value > 0 {
+        value as usize
+    } else {
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1)
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn physical_cpu_count() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
 }
 
 fn auto_detect_mode(path: &str) -> Mode {
@@ -192,6 +303,7 @@ fn run_fallback(
     pretty: bool,
     slim: bool,
     progress: bool,
+    threads: usize,
 ) -> ExitCode {
     let mut progress_writer = |event: ProgressEvent| {
         let mut stderr = std::io::stderr().lock();
@@ -207,10 +319,11 @@ fn run_fallback(
     let options = FallbackOptions {
         cross_mounts,
         progress: if progress {
-            Some(&mut progress_writer as &mut dyn FnMut(ProgressEvent))
+            Some(&mut progress_writer as &mut (dyn FnMut(ProgressEvent) + Send))
         } else {
             None
         },
+        threads,
     };
     match fallback_scan_path_with_options(path, options) {
         Ok(output) => {

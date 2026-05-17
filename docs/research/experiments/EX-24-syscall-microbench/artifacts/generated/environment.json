@@ -1,0 +1,10 @@
+{
+  "cwd": "/Users/kai/Projects/apfs-fastindex/docs/research/experiments/EX-24-syscall-microbench/artifacts",
+  "platform": "macOS-26.3.1-arm64-arm-64bit-Mach-O",
+  "python": "3.13.9",
+  "runs_per_config": 5,
+  "rustc": "rustc 1.94.0 (4a4ef493e 2026-03-02)",
+  "sw_vers": "ProductName:\t\tmacOS\nProductVersion:\t\t26.3.1\nProductVersionExtra:\t(a)\nBuildVersion:\t\t25D771280a\n",
+  "target": "/Applications",
+  "timestamp": "2026-05-16T21:51:43.672878+00:00"
+}
