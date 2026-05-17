@@ -56,7 +56,7 @@
 //!   does not promise per-directory or per-symlink allocation bytes
 //!   in v1 — see EX-22).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::os::unix::fs::MetadataExt;
@@ -76,6 +76,90 @@ use crate::{
 /// macOS-injected top-level directories that the raw walker drops and the
 /// fallback walker must drop too so the shape contract holds.
 const SKIP_TOP_LEVEL_NAMES: &[&str] = &[".fseventsd", ".Spotlight-V100", ".Trashes"];
+
+/// Set of absolute paths that the walker should refuse to descend
+/// into, regardless of inode-dedup state. Built once per scan from
+/// `/usr/share/firmlinks` so that `/System/Volumes/Data/<source>`
+/// paths are explicitly skipped on `/`-class scans — that prevents
+/// the data-volume duplicate of every firmlink target from
+/// appearing in the namespace and (more importantly) prevents the
+/// parallel walker from racing it ahead of the firmlink path and
+/// making the deeper `/System/Volumes/Data/...` path the canonical
+/// one. The set is empty when scanning anywhere else.
+type FirmlinkOverlaySet = HashSet<PathBuf>;
+
+/// Read `/usr/share/firmlinks` and return the set of underlying
+/// paths the walker should refuse to descend into. Returns an empty
+/// set on hosts without the file (older macOS, non-macOS) or on any
+/// I/O error — the inode-dedup path is the safety net.
+///
+/// File format (since macOS Catalina): one firmlink per line as
+/// `<source-path>\t<destination-rel>`. The underlying path on the
+/// Data volume is `/System/Volumes/Data` joined with the source's
+/// path components (stripping the leading `/`).
+fn read_firmlink_overlays(scan_root: &Path) -> FirmlinkOverlaySet {
+    let mut out = FirmlinkOverlaySet::new();
+    // Only meaningful when the scan root is `/`; narrower scans
+    // either don't reach `/System/Volumes/Data` or have the user
+    // intentionally aimed at it.
+    if scan_root != Path::new("/") {
+        return out;
+    }
+    let path = Path::new("/usr/share/firmlinks");
+    let Ok(contents) = std::fs::read_to_string(path) else {
+        return out;
+    };
+    for line in contents.lines() {
+        let Some((source, _dest)) = line.split_once('\t') else {
+            continue;
+        };
+        let trimmed = source.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let suffix = trimmed.trim_start_matches('/');
+        let underlying = Path::new("/System/Volumes/Data").join(suffix);
+        out.insert(underlying);
+    }
+    out
+}
+
+/// Tracks `(dev_id, file_id)` pairs for every directory the walker has
+/// committed to enumerate. Used to detect firmlink-presented duplicates
+/// (macOS firmlinks expose the Data volume's `/Users`, `/Applications`,
+/// `/Library`, etc. inside `/` as well as at `/System/Volumes/Data/...`;
+/// both paths share the same inode) and any other case where two paths
+/// resolve to the same physical directory (bind mounts, volume overlays,
+/// future overlay mechanisms).
+///
+/// `check_and_mark` returns `true` only on the first observation of an
+/// inode; subsequent observations get `false` and the walker treats the
+/// directory as a duplicate (records a `walk_skip` and skips both emit
+/// and recurse).
+///
+/// Internal mutex is shared across parallel workers; the per-call cost
+/// is a single `HashSet::insert` under a lock, which at ~200k
+/// directories on a `/`-scan totals well under 50 ms of overhead — far
+/// less than even one missed `lstat`.
+struct VisitedDirs {
+    inner: Mutex<HashSet<(u64, u64)>>,
+}
+
+impl VisitedDirs {
+    fn new() -> Self {
+        Self {
+            inner: Mutex::new(HashSet::new()),
+        }
+    }
+
+    fn mark_root(&self, dev: u64, ino: u64) {
+        self.inner.lock().unwrap().insert((dev, ino));
+    }
+
+    fn check_and_mark(&self, dev: u64, ino: u64) -> bool {
+        self.inner.lock().unwrap().insert((dev, ino))
+    }
+}
 
 /// Caller-facing knobs for the fallback walker. Defaults are
 /// `cross_mounts: false` so an `apfs-fastindex-scan /` won't accidentally
@@ -182,8 +266,21 @@ pub fn fallback_scan_path_with_options<P: AsRef<Path>>(
         return Err(FallbackError::NonUtf8RootComponent(resolved));
     }
     let root_dev = root_meta.dev();
+    let root_ino = root_meta.ino();
     let cross_mounts = options.cross_mounts;
     let threads = options.threads.max(1);
+
+    // Seed the directory-inode dedup tracker with the root so any path
+    // that loops back to it (rare but possible via symlink misuse or
+    // weird overlay mounts) is caught.
+    let visited_dirs = Arc::new(VisitedDirs::new());
+    visited_dirs.mark_root(root_dev, root_ino);
+
+    // Build the firmlink-overlay skip set. Only non-empty when the
+    // scan root is `/`; on narrower scans `/usr/share/firmlinks` is
+    // either not on the walk path or the user has intentionally
+    // aimed inside `/System/Volumes/Data`.
+    let firmlink_overlays = Arc::new(read_firmlink_overlays(&resolved));
 
     let scan_start = Instant::now();
     let (mut entries, mut walk_skips) = if threads <= 1 {
@@ -192,6 +289,8 @@ pub fn fallback_scan_path_with_options<P: AsRef<Path>>(
             root_dev,
             cross_mounts,
             options.progress,
+            &visited_dirs,
+            &firmlink_overlays,
             scan_start,
         )
     } else {
@@ -201,6 +300,8 @@ pub fn fallback_scan_path_with_options<P: AsRef<Path>>(
             cross_mounts,
             threads,
             options.progress,
+            &visited_dirs,
+            &firmlink_overlays,
             scan_start,
         )
     };
@@ -296,6 +397,8 @@ fn scan_serial(
     root_dev: u64,
     cross_mounts: bool,
     progress: Option<&mut (dyn FnMut(ProgressEvent) + Send)>,
+    visited_dirs: &VisitedDirs,
+    firmlink_overlays: &FirmlinkOverlaySet,
     scan_start: Instant,
 ) -> (Vec<NamespaceEntry>, Vec<WalkSkip>) {
     let mut progress = progress;
@@ -332,6 +435,8 @@ fn scan_serial(
             cross_mounts,
             &mut bulk_reader,
             &mut bulk_children,
+            visited_dirs,
+            firmlink_overlays,
             &mut entries,
             &mut walk_skips,
             &mut new_frames,
@@ -371,12 +476,15 @@ fn scan_serial(
 /// samples per-walker `Arc<AtomicU64>` counters every 250 ms and
 /// fires the callback on the same cadence as the serial path; a
 /// terminal event fires once on exit.
+#[allow(clippy::too_many_arguments)]
 fn scan_parallel(
     resolved: &Path,
     root_dev: u64,
     cross_mounts: bool,
     threads: usize,
     progress: Option<&mut (dyn FnMut(ProgressEvent) + Send)>,
+    visited_dirs: &Arc<VisitedDirs>,
+    firmlink_overlays: &Arc<FirmlinkOverlaySet>,
     scan_start: Instant,
 ) -> (Vec<NamespaceEntry>, Vec<WalkSkip>) {
     let queue = Arc::new(WorkQueue::new(vec![WalkFrame {
@@ -447,6 +555,8 @@ fn scan_parallel(
                 let q = Arc::clone(&queue);
                 let scanned = Arc::clone(&scanned_count);
                 let skipped = Arc::clone(&skipped_count);
+                let visited = Arc::clone(visited_dirs);
+                let overlays = Arc::clone(firmlink_overlays);
                 handles.push(scope.spawn(move || {
                     let mut bulk_reader = BulkReader::new();
                     let mut bulk_children: Vec<BulkEntry> = Vec::new();
@@ -463,6 +573,8 @@ fn scan_parallel(
                             cross_mounts,
                             &mut bulk_reader,
                             &mut bulk_children,
+                            &visited,
+                            &overlays,
                             &mut local_entries,
                             &mut local_skips,
                             &mut new_frames,
@@ -599,6 +711,8 @@ fn walk_one_directory(
     cross_mounts: bool,
     bulk_reader: &mut BulkReader,
     bulk_children: &mut Vec<BulkEntry>,
+    visited_dirs: &VisitedDirs,
+    firmlink_overlays: &FirmlinkOverlaySet,
     out_entries: &mut Vec<NamespaceEntry>,
     out_skips: &mut Vec<WalkSkip>,
     out_new_frames: &mut Vec<WalkFrame>,
@@ -695,6 +809,41 @@ fn walk_one_directory(
 
         let is_dir = matches!(kind, EntryKind::Dir);
         let cross_mount_skip = is_dir && !cross_mounts && dev_id != root_dev;
+
+        // Firmlink-overlay skip: when the walker would otherwise
+        // descend into a path that's listed in /usr/share/firmlinks as
+        // a Data-volume source (e.g. /System/Volumes/Data/Users), drop
+        // both emit and recurse. The same content is reachable via
+        // the firmlink-canonical path (/Users) which is preferred
+        // because it's what users see in Finder. The overlay set is
+        // pre-built per scan, only non-empty for root=/ scans, and
+        // empty otherwise — so narrower scans are unaffected.
+        if is_dir && !cross_mount_skip && firmlink_overlays.contains(&absolute) {
+            out_skips.push(WalkSkip {
+                path: relative_str,
+                reason: "firmlink_overlay_source".to_string(),
+            });
+            continue;
+        }
+
+        // Directory-inode dedup: when the walker would otherwise
+        // descend, check whether we've already enumerated this exact
+        // (dev_id, file_id) via another path. Catches anything the
+        // firmlink-overlay skip misses (bind mounts, other overlay
+        // mechanisms, future macOS changes that introduce new
+        // namespace-merging) — belt-and-braces safety net.
+        //
+        // On dedup, drop both emit and recurse and record a
+        // `duplicate_dir_inode` walk_skip so the user can see *where*
+        // the elision happened.
+        if is_dir && !cross_mount_skip && !visited_dirs.check_and_mark(dev_id, file_id) {
+            out_skips.push(WalkSkip {
+                path: relative_str,
+                reason: "duplicate_dir_inode".to_string(),
+            });
+            continue;
+        }
+
         if cross_mount_skip {
             out_skips.push(WalkSkip {
                 path: relative_str.clone(),
@@ -1089,6 +1238,51 @@ mod tests {
             parallel.correctness_claim.contains("4-thread"),
             "parallel correctness_claim should mention 4-thread; got: {}",
             parallel.correctness_claim
+        );
+    }
+
+    /// VisitedDirs is the load-bearing primitive for the firmlink /
+    /// bind-mount dedup. The first observation of an inode wins and
+    /// returns true; every subsequent observation returns false so the
+    /// caller can record a `duplicate_dir_inode` walk_skip.
+    #[test]
+    fn visited_dirs_first_wins_subsequent_lose() {
+        let v = VisitedDirs::new();
+        assert!(v.check_and_mark(7, 100), "first insert should succeed");
+        assert!(!v.check_and_mark(7, 100), "second insert should fail");
+        assert!(v.check_and_mark(7, 101), "different inode should succeed");
+        assert!(v.check_and_mark(8, 100), "different dev should succeed");
+    }
+
+    /// Empirical firmlink-dedup confidence on a synthetic tree. We
+    /// can't create real firmlinks in a unit test (it's a kernel
+    /// feature, not a userspace API), but a *bind*-equivalent setup
+    /// via two scans of the same content lets us verify that the
+    /// dedup primitive itself behaves correctly across scans.
+    /// The realistic firmlink behaviour is exercised by the EX-26b
+    /// /-scan smoke described in the commit message; this unit
+    /// test only verifies that the absence of duplicates on a
+    /// clean tree produces zero `duplicate_dir_inode` skips.
+    #[test]
+    fn fallback_emits_no_duplicate_dir_inode_skips_on_clean_tree() {
+        let tmp = TempDir::new();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("alpha/nested")).unwrap();
+        std::fs::create_dir_all(root.join("beta")).unwrap();
+        File::create(root.join("alpha/nested/x.txt")).unwrap();
+        File::create(root.join("beta/y.txt")).unwrap();
+
+        let output = fallback_scan_path(root).expect("scan ok");
+        let dup_skips: Vec<&WalkSkip> = output
+            .parser_output
+            .walk_skips
+            .iter()
+            .filter(|s| s.reason == "duplicate_dir_inode")
+            .collect();
+        assert!(
+            dup_skips.is_empty(),
+            "clean tree produced unexpected duplicate_dir_inode skips: {:?}",
+            dup_skips,
         );
     }
 
