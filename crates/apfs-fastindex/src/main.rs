@@ -22,8 +22,9 @@ const USAGE: &str = "usage: apfs-fastindex-scan [--summary] [--pretty] [--slim] 
                      --cross-mounts lets the fallback walker descend into directories on a \
                      different device than the root (default: stop at mount boundaries).\n\
                      --progress writes one JSON object every 250 ms to stderr describing scan \
-                     progress (fallback mode only; raw mode emits no progress today; silenced \
-                     in --threads >1 because the callback shape is not Send).\n\
+                     progress (fallback mode only; raw mode emits no progress today). The \
+                     parallel walker fires the same events from a dedicated progress thread, \
+                     sampled from per-worker atomic counters.\n\
                      --threads N picks the parallel-walker worker count for fallback mode. \
                      Default is min(hw.physicalcpu, 4) per EX-25's 2.47x-at-T=4 verdict; \
                      beyond T=4 the APFS container lock fires and scaling regresses. Pass \
@@ -315,16 +316,10 @@ fn run_fallback(
             event.terminal
         );
     };
-    if progress && threads > 1 {
-        eprintln!(
-            "apfs-fastindex-scan: warning: --progress events are silenced in parallel mode \
-             (--threads {threads}); pass --threads 1 to re-enable live progress."
-        );
-    }
     let options = FallbackOptions {
         cross_mounts,
         progress: if progress {
-            Some(&mut progress_writer as &mut dyn FnMut(ProgressEvent))
+            Some(&mut progress_writer as &mut (dyn FnMut(ProgressEvent) + Send))
         } else {
             None
         },

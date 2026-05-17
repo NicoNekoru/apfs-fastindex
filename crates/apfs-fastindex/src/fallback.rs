@@ -61,7 +61,7 @@ use std::fs;
 use std::io;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -89,13 +89,15 @@ pub struct FallbackOptions<'a> {
     /// every 250 ms with a snapshot of `(scanned, skipped, elapsed)`.
     /// The CLI uses this to stream JSON-per-line progress to stderr.
     ///
-    /// **Only invoked from the serial walker (`threads <= 1`).** When
-    /// the parallel walker (`threads > 1`) is in use, progress
-    /// reporting is silenced because the existing
-    /// `&mut dyn FnMut(...)` shape is not `Send` and we deliberately
-    /// kept the callback interface backward-compatible rather than
-    /// add a `Send` bound. See EX-25 and `RL-12` for the trade-off.
-    pub progress: Option<&'a mut dyn FnMut(ProgressEvent)>,
+    /// Fires from both the serial and parallel walkers. The `+ Send`
+    /// bound is what lets the parallel walker hand the callback to a
+    /// dedicated progress thread inside `std::thread::scope`; that
+    /// thread samples per-worker atomic counters and calls the
+    /// callback on the same cadence as the serial path. The bound is
+    /// satisfied by any closure that doesn't capture a non-Send
+    /// resource (the CLI's `let mut progress_writer = |event| { ...
+    /// stderr ... };` qualifies, and most reasonable embedders do too).
+    pub progress: Option<&'a mut (dyn FnMut(ProgressEvent) + Send)>,
     /// Number of worker threads for the parallel walker. `0` and `1`
     /// both select the serial implementation (preserves the original
     /// single-threaded behaviour and the FnMut progress contract).
@@ -193,7 +195,14 @@ pub fn fallback_scan_path_with_options<P: AsRef<Path>>(
             scan_start,
         )
     } else {
-        scan_parallel(&resolved, root_dev, cross_mounts, threads, scan_start)
+        scan_parallel(
+            &resolved,
+            root_dev,
+            cross_mounts,
+            threads,
+            options.progress,
+            scan_start,
+        )
     };
 
     // Paths are unique inside a walk (no two entries can share a full
@@ -254,7 +263,7 @@ pub fn fallback_scan_path_with_options<P: AsRef<Path>>(
          recorded in walk_skips; {mount_clause}"
     );
 
-    let mut not_claimed = vec![
+    let not_claimed = vec![
         "raw APFS-specific size sources (dstream / decmpfs precedence)".to_string(),
         "live mounted raw-scan correctness".to_string(),
         "exclusive / shared / snapshot-retained byte accounting".to_string(),
@@ -267,13 +276,10 @@ pub fn fallback_scan_path_with_options<P: AsRef<Path>>(
              through them)"
             .to_string(),
     ];
-    if threads > 1 {
-        not_claimed.push(
-            "live --progress event delivery in parallel mode (silenced because the \
-             callback contract is not Send; pass --threads 1 to re-enable it)"
-                .to_string(),
-        );
-    }
+    // Parallel-mode progress is now wired through the in-scope
+    // progress thread; the previous not_claimed entry no longer
+    // applies and the `threads` field above already disambiguates
+    // the regime.
 
     Ok(FallbackScanOutput {
         parser_output,
@@ -289,7 +295,7 @@ fn scan_serial(
     resolved: &Path,
     root_dev: u64,
     cross_mounts: bool,
-    progress: Option<&mut dyn FnMut(ProgressEvent)>,
+    progress: Option<&mut (dyn FnMut(ProgressEvent) + Send)>,
     scan_start: Instant,
 ) -> (Vec<NamespaceEntry>, Vec<WalkSkip>) {
     let mut progress = progress;
@@ -359,58 +365,143 @@ fn scan_serial(
 /// (sys-CPU grows super-linearly with T). The CLI clamps T to
 /// `min(hw.physicalcpu, 4)` by default.
 ///
-/// Progress callbacks are not invoked from this path — see the
-/// FallbackOptions::progress doc comment for the reasoning.
+/// Progress callbacks are invoked from a dedicated `progress`
+/// thread spawned inside `std::thread::scope` so the borrowed
+/// callback reference stays alive for the whole walk. The thread
+/// samples per-walker `Arc<AtomicU64>` counters every 250 ms and
+/// fires the callback on the same cadence as the serial path; a
+/// terminal event fires once on exit.
 fn scan_parallel(
     resolved: &Path,
     root_dev: u64,
     cross_mounts: bool,
     threads: usize,
-    _scan_start: Instant,
+    progress: Option<&mut (dyn FnMut(ProgressEvent) + Send)>,
+    scan_start: Instant,
 ) -> (Vec<NamespaceEntry>, Vec<WalkSkip>) {
     let queue = Arc::new(WorkQueue::new(vec![WalkFrame {
         absolute: resolved.to_path_buf(),
         relative: PathBuf::new(),
     }]));
+    // Atomic counters drive the progress thread. Workers bump
+    // them as they accumulate per-thread entries / skips; the
+    // progress thread polls and forwards to the callback. The
+    // counters mirror the per-thread Vec lengths at scan
+    // completion, modulo the post-walk sort + merge (which
+    // doesn't change the totals).
+    let scanned_count = Arc::new(AtomicU64::new(0));
+    let skipped_count = Arc::new(AtomicU64::new(0));
+    let progress_done = Arc::new(AtomicBool::new(false));
 
-    let mut handles: Vec<std::thread::JoinHandle<(Vec<NamespaceEntry>, Vec<WalkSkip>)>> =
-        Vec::with_capacity(threads);
-    for _ in 0..threads {
-        let q = Arc::clone(&queue);
-        handles.push(std::thread::spawn(move || {
-            let mut bulk_reader = BulkReader::new();
-            let mut bulk_children: Vec<BulkEntry> = Vec::new();
-            let mut local_entries: Vec<NamespaceEntry> = Vec::new();
-            let mut local_skips: Vec<WalkSkip> = Vec::new();
-            let mut new_frames: Vec<WalkFrame> = Vec::new();
-            while let Some(frame) = q.pop() {
-                new_frames.clear();
-                walk_one_directory(
-                    &frame,
-                    root_dev,
-                    cross_mounts,
-                    &mut bulk_reader,
-                    &mut bulk_children,
-                    &mut local_entries,
-                    &mut local_skips,
-                    &mut new_frames,
-                );
-                let drained: Vec<WalkFrame> = std::mem::take(&mut new_frames);
-                q.push_many(drained);
-                q.complete();
+    std::thread::scope(
+        |scope| -> (Vec<NamespaceEntry>, Vec<WalkSkip>) {
+            // Optional progress thread. We move the &mut callback
+            // (Send-bounded) into the spawned closure so it lives for
+            // the whole scope. The callback fires roughly every 250 ms,
+            // matching the serial walker's cadence so consumers
+            // (SwiftUI status bar, terminal stderr) see the same shape.
+            let progress_handle = progress.map(|callback| {
+                let scanned = Arc::clone(&scanned_count);
+                let skipped = Arc::clone(&skipped_count);
+                let done = Arc::clone(&progress_done);
+                scope.spawn(move || {
+                    let interval = Duration::from_millis(250);
+                    // Poll cadence is short so the done-flag latency is
+                    // bounded; the callback itself only fires on the
+                    // 250 ms tick.
+                    let poll = Duration::from_millis(50);
+                    let mut next_tick = scan_start + interval;
+                    loop {
+                        if done.load(Ordering::Acquire) {
+                            break;
+                        }
+                        let now = Instant::now();
+                        if now >= next_tick {
+                            callback(ProgressEvent {
+                                scanned: scanned.load(Ordering::Relaxed),
+                                skipped: skipped.load(Ordering::Relaxed),
+                                elapsed: now.duration_since(scan_start),
+                                terminal: false,
+                            });
+                            next_tick = now + interval;
+                        }
+                        std::thread::sleep(poll);
+                    }
+                    // Final terminal event with the most recent counts.
+                    callback(ProgressEvent {
+                        scanned: scanned.load(Ordering::Relaxed),
+                        skipped: skipped.load(Ordering::Relaxed),
+                        elapsed: scan_start.elapsed(),
+                        terminal: true,
+                    });
+                })
+            });
+
+            // Spawn N worker threads. Each owns its own BulkReader +
+            // per-worker entries / skips Vecs, and bumps the shared
+            // atomic counters as it processes a frame.
+            let mut handles: Vec<
+                std::thread::ScopedJoinHandle<'_, (Vec<NamespaceEntry>, Vec<WalkSkip>)>,
+            > = Vec::with_capacity(threads);
+            for _ in 0..threads {
+                let q = Arc::clone(&queue);
+                let scanned = Arc::clone(&scanned_count);
+                let skipped = Arc::clone(&skipped_count);
+                handles.push(scope.spawn(move || {
+                    let mut bulk_reader = BulkReader::new();
+                    let mut bulk_children: Vec<BulkEntry> = Vec::new();
+                    let mut local_entries: Vec<NamespaceEntry> = Vec::new();
+                    let mut local_skips: Vec<WalkSkip> = Vec::new();
+                    let mut new_frames: Vec<WalkFrame> = Vec::new();
+                    while let Some(frame) = q.pop() {
+                        let prev_entries = local_entries.len();
+                        let prev_skips = local_skips.len();
+                        new_frames.clear();
+                        walk_one_directory(
+                            &frame,
+                            root_dev,
+                            cross_mounts,
+                            &mut bulk_reader,
+                            &mut bulk_children,
+                            &mut local_entries,
+                            &mut local_skips,
+                            &mut new_frames,
+                        );
+                        let added_entries = (local_entries.len() - prev_entries) as u64;
+                        let added_skips = (local_skips.len() - prev_skips) as u64;
+                        if added_entries > 0 {
+                            scanned.fetch_add(added_entries, Ordering::Relaxed);
+                        }
+                        if added_skips > 0 {
+                            skipped.fetch_add(added_skips, Ordering::Relaxed);
+                        }
+                        let drained: Vec<WalkFrame> = std::mem::take(&mut new_frames);
+                        q.push_many(drained);
+                        q.complete();
+                    }
+                    (local_entries, local_skips)
+                }));
             }
-            (local_entries, local_skips)
-        }));
-    }
 
-    let mut entries: Vec<NamespaceEntry> = Vec::new();
-    let mut walk_skips: Vec<WalkSkip> = Vec::new();
-    for h in handles {
-        let (e, s) = h.join().expect("fallback worker thread panicked");
-        entries.extend(e);
-        walk_skips.extend(s);
-    }
-    (entries, walk_skips)
+            // Join all worker threads first.
+            let mut entries: Vec<NamespaceEntry> = Vec::new();
+            let mut walk_skips: Vec<WalkSkip> = Vec::new();
+            for h in handles {
+                let (e, s) = h.join().expect("fallback worker thread panicked");
+                entries.extend(e);
+                walk_skips.extend(s);
+            }
+            // Signal the progress thread to fire its terminal event
+            // and exit; then join it so its callback finishes before
+            // `progress` (the &mut reference) is returned to the
+            // caller.
+            progress_done.store(true, Ordering::Release);
+            if let Some(h) = progress_handle {
+                h.join().expect("progress thread panicked");
+            }
+            (entries, walk_skips)
+        },
+    )
 }
 
 /// Shared FIFO work queue + outstanding-work counter for the parallel
