@@ -28,6 +28,16 @@ final class ScanController: ObservableObject {
     @Published var mode: ScanMode = .auto
     @Published var crossMounts: Bool = false
     @Published var isScanning: Bool = false
+    /// True from the moment the scanner subprocess exits to the
+    /// moment the viz fires `ingest_succeeded` (or `ingest_failed`).
+    /// Covers three concrete sub-phases that the user sees as one
+    /// "still working" gap: writing the scan JSON to a temp file,
+    /// the WKWebView's XHR fetching it, and the viz's JSON.parse +
+    /// `ingest()` materialising the treemap. On a `/`-scale scan
+    /// (3M entries, ~150 MB JSON) this gap is several seconds long;
+    /// without a spinner the UI looks frozen because `isScanning`
+    /// has already flipped to false.
+    @Published var isIngesting: Bool = false
     @Published var scannedCount: UInt64 = 0
     @Published var skippedCount: UInt64 = 0
     @Published var elapsedMs: UInt64 = 0
@@ -127,9 +137,11 @@ final class ScanController: ObservableObject {
     /// True iff the viz has a usable scan loaded. The toolbar collapses
     /// from the "pick a target" prompt to a compact summary whenever
     /// this is true, so the user isn't asked to start a scan they
-    /// already finished.
+    /// already finished. While `isIngesting` is true we deliberately
+    /// return false so the toolbar stays on the scanning-style chrome
+    /// (no "Rescan / New…" buttons) until the treemap actually shows.
     var hasLoadedScan: Bool {
-        !isScanning && lastError == nil && scannedCount > 0
+        !isScanning && !isIngesting && lastError == nil && scannedCount > 0
     }
 
     /// Drop the loaded scan and reset the viz, leaving `targetPath`
@@ -148,6 +160,7 @@ final class ScanController: ObservableObject {
         selectedPath = ""
         lastError = nil
         lastOperationMessage = nil
+        isIngesting = false
         cleanupLastTempScan()
         evaluateClearScan()
     }
@@ -282,6 +295,10 @@ final class ScanController: ObservableObject {
         stdoutBox.clear()
         stderrBuffer.removeAll(keepingCapacity: false)
         isScanning = true
+        // A rescan from the loaded-scan state could otherwise leave
+        // isIngesting true if the previous ingest hasn't reported back
+        // yet. Reset here so the spinner only ever reflects this scan.
+        isIngesting = false
         scanCancelled = false
 
         var args: [String] = ["--slim", "--progress"]
@@ -401,6 +418,12 @@ final class ScanController: ObservableObject {
             lastError = "scanner exited with status \(exitCode)"
             return
         }
+
+        // Flip into the ingest phase: scanner has exited successfully
+        // but the viz hasn't materialised the treemap yet. The spinner
+        // overlay reads this flag; it clears in handleBridgeMessage on
+        // either ingest_succeeded or ingest_failed.
+        isIngesting = true
 
         // Pull the small `correctness_claim` field off the raw bytes
         // before we ship the rest of the blob to disk. Doing this on
@@ -556,6 +579,10 @@ final class ScanController: ObservableObject {
             NSLog("[viz] console.error: %@", message)
         case .ingestStarted:
             NSLog("[viz] ingest started")
+            // ingestStarted fires *during* the viz's JSON.parse +
+            // ingest() pass; keep isIngesting true through this
+            // sub-phase so the spinner stays visible. It will clear
+            // in the success or failure branch below.
             self.logicalTotal = 0
             self.allocatedTotal = nil
             self.allocatedColumnAvailable = false
@@ -582,9 +609,16 @@ final class ScanController: ObservableObject {
             self.lastScanSourceKind = sourceKind
             self.lastScanRequestedPath = sourceRequestedPath
             self.lastOperationMessage = nil
+            // Treemap is on-screen now; drop the loading spinner and
+            // flip into the loaded-scan toolbar.
+            self.isIngesting = false
         case .ingestFailed(let message):
             NSLog("[viz] ingest failed: %@", message)
             self.lastError = "viz failed to load scan: \(message)"
+            // Ingest failed: drop the spinner so the error message
+            // is what the user sees (instead of a perpetual
+            // spinner over an empty viz).
+            self.isIngesting = false
         }
     }
 

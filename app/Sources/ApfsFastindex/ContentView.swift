@@ -23,19 +23,75 @@ struct ContentView: View {
         VStack(spacing: 0) {
             toolbar
             Divider().background(VizPalette.border)
-            VizWebView(
-                onMessage: controller.handleBridgeMessage,
-                onReady: controller.bindWebView,
-                onDeliverScanFileURL: controller.pendingScanFileURL,
-                onDeliverProgress: controller.pendingProgress
-            )
+            ZStack {
+                VizWebView(
+                    onMessage: controller.handleBridgeMessage,
+                    onReady: controller.bindWebView,
+                    onDeliverScanFileURL: controller.pendingScanFileURL,
+                    onDeliverProgress: controller.pendingProgress
+                )
+                if controller.isIngesting {
+                    ingestSpinnerOverlay
+                        .transition(.opacity)
+                }
+            }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Animate the overlay's appear/disappear so the spinner
+            // doesn't snap in and out — at the boundaries the user
+            // already sees a state change in the toolbar, and the
+            // fade keeps the eye on the right region.
+            .animation(.easeOut(duration: 0.18), value: controller.isIngesting)
             Divider().background(VizPalette.border)
             statusBar
         }
         .background(VizPalette.bg)
         .preferredColorScheme(.dark)
         .foregroundStyle(VizPalette.text)
+    }
+
+    /// Loading spinner shown over the WKWebView in the gap between
+    /// scanner-process-exit and viz `ingest_succeeded`. On a /-scan
+    /// (~3M entries, ~150 MB JSON) that gap is several seconds:
+    /// writing the temp file (background queue), the WebKit XHR
+    /// fetching it, JSON.parse on the WebKit main thread, and the
+    /// viz's `ingest()` materialising the treemap. Without this
+    /// overlay the UI looks frozen because `isScanning` is already
+    /// false. The overlay covers the whole viz area, dims the
+    /// underlying empty/old-treemap state, and shows a centered
+    /// spinner + "Loading visualization…" label so the user knows
+    /// the app is still working.
+    private var ingestSpinnerOverlay: some View {
+        ZStack {
+            // Slight darkening over the viz so a previously-loaded
+            // treemap (after a rescan) reads as "stale" while the
+            // new one is being built.
+            VizPalette.bg.opacity(0.72)
+                .ignoresSafeArea(edges: .bottom)
+            VStack(spacing: 12) {
+                ProgressView()
+                    .controlSize(.large)
+                    .progressViewStyle(.circular)
+                    .tint(VizPalette.accent)
+                Text("Loading visualization…")
+                    .font(.system(size: 13))
+                    .foregroundStyle(VizPalette.muted)
+            }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 18)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(VizPalette.panel)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(VizPalette.border, lineWidth: 1)
+                    )
+            )
+        }
+        // Swallow clicks so the user can't accidentally interact with
+        // the underlying webview (right-click context menu, link clicks)
+        // while the ingest is mid-flight.
+        .contentShape(Rectangle())
+        .onTapGesture { /* swallow */ }
     }
 
     // MARK: - Toolbar (state-aware)
