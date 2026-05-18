@@ -121,8 +121,29 @@ struct ContentView: View {
     /// Idle: no scan yet. Prominent target picker + Scan.
     private var idleToolbar: some View {
         HStack(spacing: 8) {
-            Image(systemName: "folder")
-                .foregroundStyle(VizPalette.muted)
+            // The folder icon is the affordance the user reaches for
+            // when they want to pick a directory — keeping the browse
+            // action on a separate `ellipsis.circle` on the far side
+            // of the text field was the original UX miss. The icon
+            // itself is now the button: full hit target, plain
+            // styling so it doesn't shout, ⌘O still bound for
+            // keyboard. The text field stays editable for paste-in
+            // or typed paths, but no longer has a competing browse
+            // affordance next to it.
+            Button {
+                browseForTarget()
+            } label: {
+                Image(systemName: "folder")
+                    .font(.system(size: 14))
+                    .foregroundStyle(VizPalette.muted)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 4)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Browse… (⌘O)")
+            .keyboardShortcut("o", modifiers: .command)
+
             TextField("Pick a folder or detached .dmg", text: $controller.targetPath)
                 .textFieldStyle(.plain)
                 .foregroundStyle(VizPalette.text)
@@ -135,16 +156,6 @@ struct ContentView: View {
                         .stroke(VizPalette.border, lineWidth: 1)
                 )
                 .frame(minWidth: 220, idealWidth: 420)
-
-            Button {
-                browseForTarget()
-            } label: {
-                Image(systemName: "ellipsis.circle")
-            }
-            .buttonStyle(.borderless)
-            .foregroundStyle(VizPalette.muted)
-            .help("Browse… (⌘O)")
-            .keyboardShortcut("o", modifiers: .command)
 
             modePicker
 
