@@ -462,24 +462,31 @@
   #breadcrumb span.crumb:hover { text-decoration: underline; }
   #breadcrumb .sep { color: var(--muted); margin: 0 6px; }
 
-  svg { display: block; width: 100%; height: 100%; }
-  .cell rect {
+  /* Canvas treemap. `display: block` kills the inline-image baseline
+     gap that would otherwise leak ~4 px past the bottom of
+     `#bottom-pane`. The cursor stays `pointer` while we're over
+     the canvas — the hit-test result governs whether a click
+     does anything; the hint to the user that something is
+     clickable stays constant. The canvas internally renders at
+     `devicePixelRatio` for crisp lines/text on Retina; the CSS
+     width/height pin the display size. */
+  canvas#treemap {
+    display: block;
+    width: 100%;
+    height: 100%;
     cursor: pointer;
   }
-  .leaf rect {
-    stroke: rgba(0, 0, 0, 0.35);
-    stroke-width: 0.5;
-    transition: opacity 120ms;
-  }
-  .leaf:hover rect { opacity: 0.78; }
-  .dir-bg:hover { fill: rgba(60, 75, 95, 0.7); }
-  .cell text {
+  /* Hover affordance for the cell currently under the cursor.
+     `pointer-events: none` keeps mousemove flowing through to the
+     canvas so the overlay never absorbs its own follow-up events.
+     Positioned by JS in `bottomPane`-relative CSS pixels. */
+  #hover-overlay {
+    position: absolute;
     pointer-events: none;
-    font: 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  }
-  .dir-label {
-    font-weight: 600;
-    text-shadow: 0 1px 1px rgba(0,0,0,0.5);
+    border: 1.5px solid rgba(255, 255, 255, 0.55);
+    box-sizing: border-box;
+    display: none;
+    z-index: 5;
   }
   #tooltip {
     position: absolute;
@@ -648,7 +655,8 @@
   </div>
   <div class="splitter-h" id="splitter-h"></div>
   <div id="bottom-pane">
-    <svg id="treemap"></svg>
+    <canvas id="treemap"></canvas>
+    <div id="hover-overlay"></div>
     <div id="tooltip"></div>
   </div>
 </div>
@@ -703,7 +711,19 @@ const extListSubtitle = document.getElementById("ext-list-subtitle");
 const splitterH = document.getElementById("splitter-h");
 const splitterV = document.getElementById("splitter-v");
 const treeListPane = document.getElementById("tree-list-pane");
-const svg = d3.select("#treemap");
+const canvas = document.getElementById("treemap");
+const canvasCtx = canvas.getContext("2d", { alpha: true });
+const hoverOverlay = document.getElementById("hover-overlay");
+
+/// Current display dimensions (CSS pixels) of the treemap canvas.
+/// The drawing buffer is sized at `devicePixelRatio` × these for
+/// crisp output on Retina; `setTransform()` translates the
+/// drawing coordinates back into CSS-pixel space so all the
+/// per-cell math in `buildCells()` matches event-coordinate math.
+let canvasCssW = 0;
+let canvasCssH = 0;
+let canvasDpr = 1;
+
 let currentSkips = [];
 
 let rootNode = null;
@@ -744,10 +764,6 @@ let allocatedAvailable = false;
 /// proceeds, before the render block is reached, and `let`
 /// declarations are TDZ-locked until that line executes.
 let maxDepth = 10;
-/// rAF handle for the in-flight progressive render. Cleared on
-/// completion or on a fresh `render()` call so we never paint into
-/// a navigated-away tree.
-let progressiveRafHandle = null;
 
 /// Cache d3 treemap layouts keyed on `(node.path, depth, metric,
 /// width × height)`. A hit lets renderAtDepth skip the
@@ -882,16 +898,23 @@ statusSkips.addEventListener("click", () => {
 });
 skipsClose.addEventListener("click", () => { skipsModal.style.display = "none"; });
 // Window resize re-lays out the treemap only. The tree-list and
-// ext-list use flex sizing and don't depend on viewport pixels, so
-// rebuilding their DOM on every resize tick (formerly via
-// `navigate(currentNode)`) was wasted work. Layout-cache entries
-// are keyed by viewport size; clear so we don't bloat the cache
-// with every pixel-different drag step.
-window.addEventListener("resize", () => {
-  if (!currentNode) return;
-  treemapLayoutCache.clear();
-  render(currentNode);
-});
+// ext-list use flex sizing and don't depend on viewport pixels.
+// Throttled through rAF so a frantic-resize stream collapses to
+// one render per frame. The layout cache is cleared because its
+// keys include viewport dims; old entries are inert at the new
+// size and just take memory until LRU evicts them — clearing is
+// O(8) and cheaper.
+let resizeRenderScheduled = false;
+function scheduleResizeRender(clearCache) {
+  if (clearCache) treemapLayoutCache.clear();
+  if (resizeRenderScheduled || !currentNode) return;
+  resizeRenderScheduled = true;
+  requestAnimationFrame(() => {
+    resizeRenderScheduled = false;
+    if (currentNode) render(currentNode);
+  });
+}
+window.addEventListener("resize", () => scheduleResizeRender(true));
 
 function loadFile(file) {
   const reader = new FileReader();
@@ -925,13 +948,19 @@ function ingest(doc, filename) {
   // the previous tree, so wipe the layout cache before we replace
   // `rootNode`. The truncated-hierarchy clones inside cached
   // entries also hold strong refs to old nodes; clearing breaks
-  // those refs so the old tree is GC-able. Also reset the
-  // `renderedKey` tracking so the visibility-toggle fast path
-  // doesn't fire against the previous scan's painted SVG.
+  // those refs so the old tree is GC-able. Also discard the
+  // current `cells` array, hit-grid, and depth-filter tracking
+  // so the fast-path redraw doesn't fire against the previous
+  // scan's geometry.
   treemapLayoutCache.clear();
   apfsPerfLog.length = 0;
-  renderedKey = null;
-  renderedMaxDepth = 0;
+  cells = [];
+  cellsContextKey = null;
+  cellsMaxDepth = 0;
+  currentDepthFilter = 0;
+  hitGrid = null;
+  lastHoverCell = null;
+  updateHoverOverlay(null);
   const parserOutput = doc.parser_output || doc;
   const entries = parserOutput.entries || [];
   const aggregates = parserOutput.aggregates || [];
@@ -1464,98 +1493,90 @@ const MIN_LEAF_LABEL_W = 40;
 const MIN_LEAF_LABEL_H = 14;
 const MIN_DIR_LABEL_W = 48;
 
-/// Progressive render state. The current treemap is built up in
-/// passes — pass 1 lays out depth-1 children of `currentNode`, pass
-/// 2 adds the second level, …, up to `maxDepth`. Each pass replaces
-/// the SVG (d3.treemap squarifies in one shot; partial-tree
-/// incremental layout would require a custom packer), but the
-/// outer rectangles' positions are stable between passes because
-/// d3 sizes them off subtree totals which don't change with depth.
-/// `maxDepth` and `progressiveRafHandle` are declared near the top
-/// of the script so the depth-input wiring above can assign to
-/// them without TDZ-tripping `let`.
+/// With canvas rendering, a single full draw at the target depth
+/// is fast enough (~50-100 ms on `/Applications`, ~200-400 ms on
+/// a `/`-scan) that the earlier per-depth progressive walker is
+/// no longer worth its cost — each intermediate step paid a full
+/// `truncatedHierarchy` + `d3.hierarchy` + `d3.treemap` pipeline
+/// to produce a temporary view that the next step immediately
+/// replaced. Cold renders now go straight to the target depth;
+/// subsequent depth toggles within the same `(node, metric, dims)`
+/// take the `currentDepthFilter` redraw fast path.
 
-/// `renderedKey` and `renderedMaxDepth` describe what is currently
-/// in the SVG. Together they let `render()` short-circuit to a
-/// pure visibility toggle when the target depth is shallower than
-/// (or equal to) what we have already painted for the same
-/// (node, metric, dims). On a hit, the entire layout + DOM-build
-/// pipeline is skipped — the change is one `style.display` flip
-/// per cell, which is sub-millisecond even at ~50k rects.
-let renderedKey = null;
-let renderedMaxDepth = 0;
+/// `cellsContextKey` and `cellsMaxDepth` describe the
+/// `cells[]`/`hitGrid` state currently held in memory and painted
+/// on the canvas. When `render()` is invoked with the same
+/// context and a target depth ≤ what we have cells for, the
+/// fast path is "swap `currentDepthFilter`, redraw, re-bucket the
+/// hit-grid by depth filter, done". When the context differs or
+/// the requested depth is deeper than what's in `cells`, fall
+/// through to the layout + flatten + draw + grid-build pipeline.
+let cellsContextKey = null;
+let cellsMaxDepth = 0;
+/// The depth that's currently visible on screen. ≤ `cellsMaxDepth`.
+let currentDepthFilter = 0;
+
+/// Flat array of `{x0,y0,x1,y1,depth,isDir,data,label,fill}`
+/// produced from the most recent d3 layout. Drawing iterates this
+/// in order (descendants pre-order so shallow-then-deep), filtering
+/// by `currentDepthFilter`. Held strongly between renders so depth
+/// toggles avoid relayout.
+let cells = [];
 
 function renderContextKey(node, w, h) {
   return `${activeMetric}|${w}x${h}|${node.path === "." ? "/" : node.path}`;
 }
 
 function render(node) {
-  if (progressiveRafHandle !== null) {
-    cancelAnimationFrame(progressiveRafHandle);
-    progressiveRafHandle = null;
-  }
-  const width = bottomPane.clientWidth;
-  const height = bottomPane.clientHeight;
-  svg.attr("viewBox", `0 0 ${width} ${height}`);
+  resizeCanvasBuffer();
+  const width = canvasCssW;
+  const height = canvasCssH;
 
   if (!node.children || node.children.length === 0) {
-    svg.selectAll("*").remove();
-    renderedKey = null;
-    renderedMaxDepth = 0;
-    svg.append("text")
-      .attr("x", width / 2).attr("y", height / 2)
-      .attr("text-anchor", "middle").attr("fill", "var(--muted)")
-      .text(node.kind === "dir" ? "(empty directory)" : node.path);
+    drawEmptyState(node);
+    cells = [];
+    cellsContextKey = null;
+    cellsMaxDepth = 0;
+    hitGrid = null;
     return;
   }
 
   const targetDepth = Math.max(1, Math.min(20, maxDepth | 0));
   const contextKey = renderContextKey(node, width, height);
 
-  // Pure visibility-toggle fast path. Triggered when the user
-  // lowers the depth picker, drills into a child and bounces
-  // back, or in general revisits a (node, metric, dims) context
-  // that we've already painted at this depth or deeper.
-  if (renderedKey === contextKey && targetDepth <= renderedMaxDepth && renderedMaxDepth > 0) {
+  // Fast path: same context, depth within what's already
+  // flattened in `cells`. Just change the filter and redraw —
+  // no layout, no flatten, no grid rebuild. On a 50 k-cell
+  // canvas this is ~20-40 ms total (clear + cell-loop fill +
+  // label pass). The previous SVG visibility-toggle was sub-ms,
+  // but canvas redraw replaces both that path *and* the
+  // multi-second DOM rebuild, so the cost is bounded by draw
+  // time regardless of which direction we went in the picker.
+  if (cellsContextKey === contextKey && targetDepth <= cellsMaxDepth && cellsMaxDepth > 0) {
+    currentDepthFilter = targetDepth;
     const t0 = performance.now();
-    applyDepthVisibility(targetDepth);
-    pushPerf("visibility_toggle", performance.now() - t0, {
-      fromDepth: renderedMaxDepth,
+    drawCells();
+    pushPerf("redraw_depth_change", performance.now() - t0, {
+      fromDepth: cellsMaxDepth,
       toDepth: targetDepth,
       path: node.path,
     });
+    // Hit-grid doesn't depend on filter (we depth-check inside
+    // `hitTest`), so it stays valid.
     return;
   }
 
-  // The context changed, OR the target depth is deeper than what
-  // is currently in the SVG. Either way, we have to lay out the
-  // tree at the new depth. Cache hits on the layout step skip
-  // the truncate → hierarchy → squarify chain; DOM build is the
-  // remaining cost.
-  const finalKey = layoutCacheKey(node, targetDepth, activeMetric, width, height);
-  if (treemapLayoutCache.has(finalKey)) {
-    renderAtDepth(node, targetDepth, width, height);
-    return;
-  }
-  // Cold layout: progressive render gives the user visible
-  // feedback while deeper layouts compute. Each step populates
-  // the layout cache; the last step also updates
-  // `renderedMaxDepth` so subsequent depth-down toggles land on
-  // the visibility-only fast path.
-  renderAtDepth(node, 1, width, height);
-  if (targetDepth > 1) scheduleNextDepth(node, 2, targetDepth, width, height);
-}
-
-/// Toggle visibility on every painted cell so only those whose
-/// d3-hierarchy depth is ≤ `targetDepth` remain visible. The
-/// laid-out positions are stable across this call — directories
-/// at `targetDepth` keep their paddingTop strip and dir-bg fill,
-/// just with their children hidden — which is the intended
-/// "folder waiting to be drilled into" visual.
-function applyDepthVisibility(targetDepth) {
-  svg.selectAll(".cell").style("display", function(d) {
-    return d.depth <= targetDepth ? null : "none";
-  });
+  // Slow path: layout + flatten + draw + hit-grid in one shot.
+  // The earlier SVG-build path needed the per-depth progressive
+  // walker to give the user feedback during a multi-second
+  // first paint; with canvas the cold render lands in
+  // ~200-400 ms on a /-scan, so single-shot beats sprinkling
+  // intermediate frames that each pay a full layout. If a
+  // larger scan ever pushes this above ~half a second again,
+  // the right move is to animate `currentDepthFilter` from 1 →
+  // target on top of one target-depth layout, not to redo the
+  // per-depth pipeline.
+  renderAtDepth(node, targetDepth, width, height);
 }
 
 function layoutCacheKey(node, depth, metric, w, h) {
@@ -1628,17 +1649,6 @@ function resolveLayout(node, depth, width, height) {
   return layout;
 }
 
-function scheduleNextDepth(node, depth, targetDepth, width, height) {
-  progressiveRafHandle = requestAnimationFrame(() => {
-    renderAtDepth(node, depth, width, height);
-    if (depth < targetDepth) {
-      scheduleNextDepth(node, depth + 1, targetDepth, width, height);
-    } else {
-      progressiveRafHandle = null;
-    }
-  });
-}
-
 function renderAtDepth(node, depth, width, height) {
   const layout = resolveLayout(node, depth, width, height);
   const treeRoot = layout.treeRoot;
@@ -1646,104 +1656,293 @@ function renderAtDepth(node, depth, width, height) {
   // bail at the top-level dir check, but defensive).
   if (!treeRoot.children || treeRoot.children.length === 0) return;
 
-  const tDom0 = performance.now();
-  svg.selectAll("*").remove();
+  const tFlatten0 = performance.now();
+  buildCells(treeRoot);
+  cellsContextKey = renderContextKey(node, width, height);
+  cellsMaxDepth = depth;
+  currentDepthFilter = depth;
+  const tFlatten1 = performance.now();
 
-  // Partition every visible cell into directories vs files. We
-  // render *all* directories (including those at the depth
-  // boundary which d3 currently sees as leaves of the truncated
-  // hierarchy) with the same container styling — dir-bg fill,
-  // paddingTop strip, label — so a later depth-down toggle that
-  // hides deeper descendants leaves the boundary directory
-  // looking identical to a same-depth full render. The
-  // _isTruncatedDir flag is still set on the data for telemetry
-  // and click-target purposes but no longer drives a separate
-  // rendering path.
-  const visibleCells = treeRoot.descendants()
-    .filter(d => d.depth > 0 && pixelArea(d) >= MIN_PIXEL_AREA);
-  const dirCells = visibleCells.filter(d => d.data.kind === "dir");
-  const fileCells = visibleCells.filter(d => d.data.kind !== "dir");
+  buildHitGrid();
+  const tGrid1 = performance.now();
 
-  // Draw directories first so file leaves sit on top of any
-  // overlapping dir background.
-  const dirSel = svg.selectAll("g.dir")
-    .data(dirCells)
-    .enter()
-    .append("g")
-    .attr("class", "dir cell")
-    .attr("transform", d => `translate(${d.x0},${d.y0})`);
+  drawCells();
+  const tDraw1 = performance.now();
 
-  dirSel.append("rect")
-    .attr("class", "dir-bg")
-    .attr("width", d => Math.max(0, d.x1 - d.x0))
-    .attr("height", d => Math.max(0, d.y1 - d.y0))
-    .attr("fill", "rgba(30, 35, 45, 0.55)")
-    .attr("stroke", "rgba(120, 140, 170, 0.4)")
-    .attr("stroke-width", 0.5)
-    .on("mousemove", (event, d) => showTooltip(event, d.data))
-    .on("mouseleave", hideTooltip)
-    .on("click", (_, d) => {
-      // Either a true container (has children visible in the
-      // truncated hierarchy) or a truncated dir at the boundary
-      // — in both cases the click means "drill in".
-      const original = d.data._original || d.data;
-      if (original.kind === "dir") navigate(original);
-    })
-    .on("contextmenu", (event, d) => emitContextMenu(event, d.data._original || d.data));
-
-  dirSel.append("text")
-    .attr("class", "dir-label")
-    .attr("x", 4)
-    .attr("y", 11)
-    .attr("fill", "#cfd6e4")
-    .attr("font-size", 11)
-    .text(d => dirLabel(d))
-    .each(function (d) {
-      if ((d.x1 - d.x0) < MIN_DIR_LABEL_W || (d.y1 - d.y0) < DIR_LABEL_HEIGHT + 2) {
-        d3.select(this).remove();
-      }
-    });
-
-  const leafSel = svg.selectAll("g.leaf")
-    .data(fileCells)
-    .enter()
-    .append("g")
-    .attr("class", "leaf cell")
-    .attr("transform", d => `translate(${d.x0},${d.y0})`);
-
-  leafSel.append("rect")
-    .attr("width", d => Math.max(0, d.x1 - d.x0))
-    .attr("height", d => Math.max(0, d.y1 - d.y0))
-    .attr("fill", d => leafColor(d.data))
-    .on("mousemove", (event, d) => showTooltip(event, d.data))
-    .on("mouseleave", hideTooltip)
-    .on("click", (_, d) => emitSelected(d.data._original || d.data))
-    .on("contextmenu", (event, d) => emitContextMenu(event, d.data._original || d.data));
-
-  leafSel.append("text")
-    .attr("x", 4)
-    .attr("y", 11)
-    .attr("fill", "#0b0d12")
-    .attr("font-size", 10)
-    .text(d => leafLabel(d))
-    .each(function (d) {
-      if ((d.x1 - d.x0) < MIN_LEAF_LABEL_W || (d.y1 - d.y0) < MIN_LEAF_LABEL_H) {
-        d3.select(this).remove();
-      }
-    });
-
-  // Record what is now in the SVG so a follow-up `render()` with
-  // a shallower target depth can short-circuit straight to
-  // visibility toggling.
-  renderedKey = renderContextKey(node, width, height);
-  renderedMaxDepth = depth;
-
-  pushPerf("dom_build", performance.now() - tDom0, {
+  pushPerf("render_full", tDraw1 - tFlatten0, {
     depth,
     path: node.path,
-    dirCount: dirCells.length,
-    leafCount: fileCells.length,
+    cellCount: cells.length,
+    flattenMs: tFlatten1 - tFlatten0,
+    gridMs: tGrid1 - tFlatten1,
+    drawMs: tDraw1 - tGrid1,
   });
+}
+
+/// Walk the laid-out d3 hierarchy in pre-order (parents before
+/// children) and emit a flat record per visible cell. Pre-order
+/// is the paint order — parents first so deeper rectangles overdraw
+/// them. Pre-computed `label` and `fill` strings stay on the cell
+/// so the draw loop never calls back into `dirLabel` / `leafColor`
+/// for the same node twice.
+function buildCells(treeRoot) {
+  const out = [];
+  for (const d of treeRoot.descendants()) {
+    if (d.depth === 0) continue;
+    const w = d.x1 - d.x0;
+    const h = d.y1 - d.y0;
+    if (w * h < MIN_PIXEL_AREA) continue;
+    const isDir = d.data.kind === "dir";
+    out.push({
+      x0: d.x0, y0: d.y0, x1: d.x1, y1: d.y1,
+      w, h,
+      depth: d.depth,
+      isDir,
+      data: d.data,
+      value: d.value,
+      label: isDir ? dirLabel(d) : leafLabel(d),
+      fill: isDir ? null : leafColor(d.data),
+    });
+  }
+  cells = out;
+}
+
+/// 64×64 axis-aligned spatial hash so `hitTest()` never walks
+/// the full `cells` array on a mousemove tick. Each cell is
+/// pushed into every grid bucket it overlaps; buckets are then
+/// sorted depth-descending so the first-containing match in the
+/// loop is always the deepest cell at that position.
+const HIT_GRID_N = 64;
+let hitGrid = null;
+let hitGridCellW = 0;
+let hitGridCellH = 0;
+
+function buildHitGrid() {
+  hitGridCellW = canvasCssW / HIT_GRID_N;
+  hitGridCellH = canvasCssH / HIT_GRID_N;
+  const buckets = new Array(HIT_GRID_N * HIT_GRID_N);
+  for (let i = 0; i < buckets.length; i++) buckets[i] = [];
+  for (const c of cells) {
+    const gx0 = Math.max(0, Math.floor(c.x0 / hitGridCellW));
+    const gy0 = Math.max(0, Math.floor(c.y0 / hitGridCellH));
+    const gx1 = Math.min(HIT_GRID_N - 1, Math.floor((c.x1 - 0.0001) / hitGridCellW));
+    const gy1 = Math.min(HIT_GRID_N - 1, Math.floor((c.y1 - 0.0001) / hitGridCellH));
+    for (let gy = gy0; gy <= gy1; gy++) {
+      const row = gy * HIT_GRID_N;
+      for (let gx = gx0; gx <= gx1; gx++) {
+        buckets[row + gx].push(c);
+      }
+    }
+  }
+  for (const bucket of buckets) {
+    bucket.sort((a, b) => b.depth - a.depth);
+  }
+  hitGrid = buckets;
+}
+
+function hitTest(x, y) {
+  if (!hitGrid) return null;
+  if (x < 0 || y < 0 || x >= canvasCssW || y >= canvasCssH) return null;
+  const gx = Math.min(HIT_GRID_N - 1, Math.floor(x / hitGridCellW));
+  const gy = Math.min(HIT_GRID_N - 1, Math.floor(y / hitGridCellH));
+  const bucket = hitGrid[gy * HIT_GRID_N + gx];
+  for (let i = 0; i < bucket.length; i++) {
+    const c = bucket[i];
+    if (c.depth > currentDepthFilter) continue;
+    if (x >= c.x0 && x < c.x1 && y >= c.y0 && y < c.y1) {
+      return c;
+    }
+  }
+  return null;
+}
+
+/// Pull the on-screen canvas dimensions and reset the 2d context
+/// transform so `cells`-space (CSS pixel) draws land on the right
+/// device pixels. Called from `render()` and from the window
+/// resize / splitter drag paths so a layout that produced cells
+/// at the OLD canvas size doesn't draw onto the NEW buffer with
+/// stale coords (the caller is responsible for re-laying-out in
+/// that case).
+function resizeCanvasBuffer() {
+  const w = bottomPane.clientWidth | 0;
+  const h = bottomPane.clientHeight | 0;
+  const dpr = window.devicePixelRatio || 1;
+  if (w === canvasCssW && h === canvasCssH && dpr === canvasDpr) return;
+  canvasCssW = Math.max(1, w);
+  canvasCssH = Math.max(1, h);
+  canvasDpr = dpr;
+  canvas.width = Math.max(1, Math.floor(canvasCssW * dpr));
+  canvas.height = Math.max(1, Math.floor(canvasCssH * dpr));
+  canvas.style.width = canvasCssW + "px";
+  canvas.style.height = canvasCssH + "px";
+  canvasCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  // Crisper, faster text — disable AA we'd otherwise inherit from
+  // the GPU compositor's defaults on small font sizes.
+  canvasCtx.textBaseline = "top";
+}
+
+/// Paint every cell whose d3 depth is ≤ `currentDepthFilter`.
+/// Two-pass: fills first (all rectangles), then labels. The split
+/// keeps text crisp because all the fill operations alpha-blend
+/// over one another (semi-transparent dir-bg), and the labels we
+/// drop in the second pass land on the final colour mix. Cells
+/// are iterated in `cells[]` order, which is descendants-pre-order
+/// — parents before children — so deeper rectangles naturally
+/// overpaint their ancestors.
+function drawCells() {
+  const ctx = canvasCtx;
+  // Clear via fillRect with the body bg (alpha:true canvas would
+  // otherwise leave us compositing onto whatever was previously
+  // there during a partial redraw).
+  ctx.globalCompositeOperation = "source-over";
+  ctx.fillStyle = "#0f1115";
+  ctx.fillRect(0, 0, canvasCssW, canvasCssH);
+
+  const filter = currentDepthFilter;
+  let drawn = 0;
+
+  // Pass 1: fills.
+  for (let i = 0; i < cells.length; i++) {
+    const c = cells[i];
+    if (c.depth > filter) continue;
+    if (c.isDir) {
+      ctx.fillStyle = "rgba(30, 35, 45, 0.55)";
+      ctx.fillRect(c.x0, c.y0, c.w, c.h);
+      ctx.strokeStyle = "rgba(120, 140, 170, 0.4)";
+      ctx.lineWidth = 0.5;
+      ctx.strokeRect(c.x0 + 0.25, c.y0 + 0.25, c.w - 0.5, c.h - 0.5);
+    } else {
+      ctx.fillStyle = c.fill;
+      ctx.fillRect(c.x0, c.y0, c.w, c.h);
+      // Leaf stroke (was SVG `stroke: rgba(0,0,0,0.35)` at 0.5px)
+      // is dropped here — at MIN_PIXEL_AREA=1 it would dominate
+      // every visible pixel anyway, and the contrast between
+      // adjacent leaves comes from `leafColor` per-extension.
+    }
+    drawn++;
+  }
+
+  // Pass 2: labels. Setting the canvas `font` is one of the
+  // pricier 2d-context calls, so we set it once per family/size
+  // change and group cells that share styling.
+  ctx.fillStyle = "#cfd6e4";
+  ctx.font = "600 11px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+  for (let i = 0; i < cells.length; i++) {
+    const c = cells[i];
+    if (c.depth > filter) continue;
+    if (!c.isDir) continue;
+    if (c.w < MIN_DIR_LABEL_W || c.h < DIR_LABEL_HEIGHT + 2) continue;
+    ctx.fillText(c.label, c.x0 + 4, c.y0 + 2);
+  }
+
+  ctx.fillStyle = "#0b0d12";
+  ctx.font = "10px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+  for (let i = 0; i < cells.length; i++) {
+    const c = cells[i];
+    if (c.depth > filter) continue;
+    if (c.isDir) continue;
+    if (c.w < MIN_LEAF_LABEL_W || c.h < MIN_LEAF_LABEL_H) continue;
+    ctx.fillText(c.label, c.x0 + 4, c.y0 + 2);
+  }
+
+  pushPerf("draw", -1, { drawn, total: cells.length, filter });
+}
+
+/// Special-case render path: no children to lay out. Draw a
+/// muted centred string ("(empty directory)" or the path).
+function drawEmptyState(node) {
+  const ctx = canvasCtx;
+  ctx.fillStyle = "#0f1115";
+  ctx.fillRect(0, 0, canvasCssW, canvasCssH);
+  ctx.fillStyle = "#8b93a5";
+  ctx.font = "13px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText(
+    node.kind === "dir" ? "(empty directory)" : node.path,
+    canvasCssW / 2,
+    canvasCssH / 2,
+  );
+  ctx.textAlign = "start"; // restore default for other passes
+}
+
+/// Position the hover-outline div over `cell` in `bottomPane`-
+/// relative CSS pixels. `cell === null` hides it.
+function updateHoverOverlay(cell) {
+  if (!cell) {
+    hoverOverlay.style.display = "none";
+    return;
+  }
+  hoverOverlay.style.display = "block";
+  hoverOverlay.style.left = cell.x0 + "px";
+  hoverOverlay.style.top = cell.y0 + "px";
+  hoverOverlay.style.width = cell.w + "px";
+  hoverOverlay.style.height = cell.h + "px";
+}
+
+/// Canvas mouse plumbing. Hover state is throttled to one rAF tick
+/// so a frantic mousemove doesn't kick off 200 hit-tests/sec.
+/// Click and contextmenu do an immediate hit-test because they're
+/// rare enough that latency dominates throughput.
+let pendingHoverEvent = null;
+let pendingHoverScheduled = false;
+let lastHoverCell = null;
+
+canvas.addEventListener("mousemove", (e) => {
+  pendingHoverEvent = e;
+  if (pendingHoverScheduled) return;
+  pendingHoverScheduled = true;
+  requestAnimationFrame(processHover);
+});
+
+canvas.addEventListener("mouseleave", () => {
+  pendingHoverEvent = null;
+  pendingHoverScheduled = false;
+  lastHoverCell = null;
+  hideTooltip();
+  updateHoverOverlay(null);
+});
+
+function processHover() {
+  pendingHoverScheduled = false;
+  const e = pendingHoverEvent;
+  if (!e) return;
+  pendingHoverEvent = null;
+  const pt = canvasPoint(e);
+  const cell = hitTest(pt.x, pt.y);
+  if (cell !== lastHoverCell) {
+    lastHoverCell = cell;
+    updateHoverOverlay(cell);
+  }
+  if (cell) showTooltip(e, cell.data);
+  else hideTooltip();
+}
+
+canvas.addEventListener("click", (e) => {
+  const pt = canvasPoint(e);
+  const cell = hitTest(pt.x, pt.y);
+  if (!cell) return;
+  const original = cell.data._original || cell.data;
+  if (cell.isDir) {
+    navigate(original);
+  } else {
+    emitSelected(original);
+  }
+});
+
+canvas.addEventListener("contextmenu", (e) => {
+  e.preventDefault();
+  const pt = canvasPoint(e);
+  const cell = hitTest(pt.x, pt.y);
+  if (!cell) return;
+  emitContextMenu(e, cell.data._original || cell.data);
+});
+
+function canvasPoint(e) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: e.clientX - rect.left,
+    y: e.clientY - rect.top,
+  };
 }
 
 /// Walk `node`'s subtree and produce a shallow copy where any
@@ -1998,9 +2197,12 @@ function escapeHtml(s) {
       const delta = e.clientY - startCoord;
       const newH = Math.max(120, Math.min(containerSize - 140, startSize + delta));
       topPane.style.height = `${newH}px`;
-      // Treemap depends on `bottomPane.clientWidth/clientHeight`, so
-      // re-render whenever its area changes.
-      if (currentNode) render(currentNode);
+      // Treemap depends on `bottomPane.clientWidth/clientHeight`,
+      // so re-render whenever its area changes — but throttle
+      // through rAF + clear the (dim-keyed) layout cache so a
+      // continuous drag doesn't fan out into one layout +
+      // canvas-rebuild per mousemove tick.
+      scheduleResizeRender(true);
     } else if (dragging === "v") {
       const delta = e.clientX - startCoord;
       const newW = Math.max(220, Math.min(containerSize - 200, startSize + delta));
