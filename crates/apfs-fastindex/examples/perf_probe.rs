@@ -1,21 +1,69 @@
-//! Standalone perf probe for the indexing path.
+//! Standalone perf probe + ablation rig for the indexing path.
 //!
 //! Usage:
 //!   cargo run --release --example perf_probe -- <path> [threads]
 //!
-//! Reports:
-//!   - wall time for `fallback_scan_path` (walker + per-entry stat)
-//!   - wall time for `Tree::build` (synthesised tree)
-//!   - entry / node counts
-//!   - peak RSS (parsed from `getrusage`)
-//!   - heap size of the entry vec + tree node vec (struct-only,
-//!     not including String/Vec backing storage)
+//! Per-phase timings (walk / sort / aggregates) print to stderr
+//! when `APFS_PHASE_TIMINGS=1` is set — handy for the ablation
+//! sweeps below.
+//!
+//! Also runs a custom counting allocator that totals every
+//! `alloc` / `dealloc` call so we can quantify per-phase
+//! allocation pressure without external profilers.
 
+use std::alloc::{GlobalAlloc, Layout, System};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use apfs_fastindex::fallback::{fallback_scan_path_with_options, FallbackOptions};
 use apfs_fastindex::tree::{Tree, TreeNode};
 use apfs_fastindex::NamespaceEntry;
+
+/// Counting wrapper around the system allocator. Tracks total
+/// allocations + bytes allocated since process start; the probe
+/// snapshots before/after each phase. Cost per call: two relaxed
+/// atomics — single-digit ns, swamped by the actual allocator
+/// work, so timing impact is negligible (verified by comparing
+/// the wall-clock with/without the wrapper on a sample run).
+struct CountingAlloc;
+
+static ALLOC_COUNT: AtomicU64 = AtomicU64::new(0);
+static ALLOC_BYTES: AtomicU64 = AtomicU64::new(0);
+
+unsafe impl GlobalAlloc for CountingAlloc {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        ALLOC_COUNT.fetch_add(1, Ordering::Relaxed);
+        ALLOC_BYTES.fetch_add(layout.size() as u64, Ordering::Relaxed);
+        System.alloc(layout)
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        System.dealloc(ptr, layout)
+    }
+}
+
+#[global_allocator]
+static GLOBAL: CountingAlloc = CountingAlloc;
+
+#[derive(Copy, Clone)]
+struct AllocStats {
+    count: u64,
+    bytes: u64,
+}
+
+fn snap() -> AllocStats {
+    AllocStats {
+        count: ALLOC_COUNT.load(Ordering::Relaxed),
+        bytes: ALLOC_BYTES.load(Ordering::Relaxed),
+    }
+}
+
+fn delta(before: AllocStats, after: AllocStats) -> AllocStats {
+    AllocStats {
+        count: after.count.saturating_sub(before.count),
+        bytes: after.bytes.saturating_sub(before.bytes),
+    }
+}
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -33,15 +81,23 @@ fn main() {
         threads,
         progress: None,
     };
+
+    let pre_scan = snap();
     let scan_t0 = Instant::now();
     let out = fallback_scan_path_with_options(&path, opts).expect("scan failed");
     let scan_ms = scan_t0.elapsed().as_secs_f64() * 1000.0;
+    let post_scan = snap();
+    let scan_allocs = delta(pre_scan, post_scan);
+
     let entries = out.parser_output.entries;
     let entry_count = entries.len();
 
+    let pre_tree = snap();
     let tree_t0 = Instant::now();
     let tree = Tree::build(&entries);
     let tree_ms = tree_t0.elapsed().as_secs_f64() * 1000.0;
+    let post_tree = snap();
+    let tree_allocs = delta(pre_tree, post_tree);
     let node_count = tree.nodes.len();
 
     let entry_struct_bytes =
@@ -52,6 +108,10 @@ fn main() {
 
     println!("path                = {}", path);
     println!("threads             = {}", threads);
+    println!(
+        "bulk buf            = {} KiB",
+        std::env::var("APFS_BULK_BUF_KIB").unwrap_or_else(|_| "64".to_string())
+    );
     println!("scan wall           = {:.1} ms", scan_ms);
     println!("tree wall           = {:.1} ms", tree_ms);
     println!("entry count         = {}", entry_count);
@@ -80,6 +140,20 @@ fn main() {
     println!(
         "tree rate           = {:.2} µs/entry",
         tree_ms * 1000.0 / entry_count as f64
+    );
+    println!(
+        "scan allocs         = {} ({:.1} MiB)",
+        scan_allocs.count,
+        scan_allocs.bytes as f64 / (1024.0 * 1024.0)
+    );
+    println!(
+        "tree allocs         = {} ({:.1} MiB)",
+        tree_allocs.count,
+        tree_allocs.bytes as f64 / (1024.0 * 1024.0)
+    );
+    println!(
+        "scan allocs/entry   = {:.2}",
+        scan_allocs.count as f64 / entry_count.max(1) as f64
     );
 }
 

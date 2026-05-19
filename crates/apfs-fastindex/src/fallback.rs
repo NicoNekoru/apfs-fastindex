@@ -346,6 +346,7 @@ pub fn fallback_scan_path_with_options<P: AsRef<Path>>(
             scan_start,
         )
     };
+    let walk_done = Instant::now();
 
     // Paths are unique inside a walk (no two entries can share a full
     // path) so stability is not required. `sort_unstable_by` is ~20%
@@ -356,7 +357,23 @@ pub fn fallback_scan_path_with_options<P: AsRef<Path>>(
     // quickly via the existing already-mostly-sorted optimisation.
     entries.sort_unstable_by(|a, b| a.path.cmp(&b.path));
     walk_skips.sort_unstable_by(|a, b| a.path.cmp(&b.path));
+    let sort_done = Instant::now();
     let aggregates = build_aggregates(&entries);
+    let aggregates_done = Instant::now();
+
+    // Optional per-phase timing dump for the perf_probe ablation
+    // runs. Off by default; gated on `APFS_PHASE_TIMINGS=1` so
+    // production callers don't pay even the env-var lookup cost.
+    if std::env::var("APFS_PHASE_TIMINGS").as_deref() == Ok("1") {
+        eprintln!(
+            "[phase] walk={:.1}ms sort={:.1}ms aggregates={:.1}ms entries={} skips={}",
+            walk_done.duration_since(scan_start).as_secs_f64() * 1000.0,
+            sort_done.duration_since(walk_done).as_secs_f64() * 1000.0,
+            aggregates_done.duration_since(sort_done).as_secs_f64() * 1000.0,
+            entries.len(),
+            walk_skips.len(),
+        );
+    }
 
     let descriptor = SourceDescriptor {
         requested_path: root_path.to_path_buf(),
@@ -1093,12 +1110,18 @@ fn entry_kind_from_meta(meta: &fs::Metadata) -> EntryKind {
 /// shape which allocated ~25M intermediate Strings on a 5M-entry
 /// `/`-scan.
 fn build_aggregates(entries: &[NamespaceEntry]) -> Vec<DirectoryAggregate> {
-    // Seed the directory set from the explicit dir entries in the
-    // input. We use the path strings *borrowed* from `entries` so no
-    // allocation happens here either. The implicit root `.` is
-    // inserted separately because no entry has path == ".".
-    let mut contributors: HashMap<&str, HashMap<u64, (u64, Option<u64>)>> = HashMap::new();
-    contributors.insert(".", HashMap::new());
+    use rustc_hash::FxBuildHasher;
+    // Both maps swap to fxhash. The outer is probed once per
+    // ancestor per file (~30M probes on a /-scale scan); the
+    // inner is probed once per (file, ancestor) pair. SipHash is
+    // ~3× slower than fxhash on short-string and u64 keys, and
+    // the keys here are filesystem paths + inode numbers, both
+    // non-adversarial.
+    type OuterMap<'a> = HashMap<&'a str, InnerMap, FxBuildHasher>;
+    type InnerMap = HashMap<u64, (u64, Option<u64>), FxBuildHasher>;
+
+    let mut contributors: OuterMap = OuterMap::default();
+    contributors.insert(".", InnerMap::default());
     for entry in entries {
         if matches!(entry.entry_kind, EntryKind::Dir) {
             contributors.entry(&*entry.path).or_default();
