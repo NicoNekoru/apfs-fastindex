@@ -35,7 +35,18 @@
 
 use std::collections::HashMap;
 
+use rustc_hash::FxBuildHasher;
+
 use crate::{EntryKind, NamespaceEntry};
+
+/// Per-dir child-lookup map used during `Tree::build`. The keys
+/// are filenames (short, non-adversarial UTF-8), so the
+/// DoS-resistant SipHash backing std's default `HashMap` is
+/// overkill — fxhash is ~3× faster on this workload at the cost
+/// of weaker collision resistance, which is irrelevant for
+/// filesystem names. Bounded to build time only; the map is
+/// discarded post-build.
+type FxChildMap = HashMap<Box<str>, u32, FxBuildHasher>;
 
 /// Sentinel value used by FFI callers for "no such node" /
 /// "metric isn't a sum I can give you". `u32::MAX` matches the
@@ -102,7 +113,7 @@ impl Tree {
         // owning `TreeNode.name` can share the same allocation
         // — we clone the box (one alloc) instead of allocating
         // the name string twice.
-        let mut child_maps: Vec<Option<HashMap<Box<str>, u32>>> = Vec::with_capacity(cap);
+        let mut child_maps: Vec<Option<FxChildMap>> = Vec::with_capacity(cap);
 
         // Index 0 = root. Empty path; the renderer displays it
         // as "/" in the breadcrumb.
@@ -119,7 +130,7 @@ impl Tree {
             value_allocated: None,
             item_count: 0,
         });
-        child_maps.push(Some(HashMap::new()));
+        child_maps.push(Some(FxChildMap::default()));
 
         for entry in entries {
             let path = &*entry.path;
@@ -182,7 +193,7 @@ impl Tree {
                                     value_allocated: None,
                                     item_count: 0,
                                 });
-                                child_maps.push(Some(HashMap::new()));
+                                child_maps.push(Some(FxChildMap::default()));
                                 nodes[cursor as usize].children.push(new_idx);
                                 if let Some(cm_mut) = &mut child_maps[cursor as usize] {
                                     cm_mut.insert(name_box, new_idx);
@@ -241,7 +252,7 @@ impl Tree {
                                 value_allocated: None,
                                 item_count: 0,
                             });
-                            child_maps.push(Some(HashMap::new()));
+                            child_maps.push(Some(FxChildMap::default()));
                             nodes[cursor as usize].children.push(new_idx);
                             if let Some(cm_mut) = &mut child_maps[cursor as usize] {
                                 cm_mut.insert(name_box, new_idx);
