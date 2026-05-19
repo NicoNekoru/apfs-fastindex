@@ -128,10 +128,11 @@ walk or a POSIX traversal; the field set and the semantic mode are
 identical.
 
 \paragraph{The slow path is not slow.} Chapter~12 shows that the
-fallback sustains roughly 130 thousand entries per second on warm
-directory trees with ordinary \texttt{lstat}, and roughly 157
-thousand with macOS's \texttt{getattrlistbulk}. On a cold whole-
-machine scan the bottleneck is the disk, not the parser. The
+parallel fallback (four workers by default) sustains roughly 313
+thousand entries per second on warm directory trees on Apple
+silicon --- 2.47$\times$ the post-micro-optimisation single-threaded
+throughput and 1.82$\times$ the pre-perf baseline. On a cold
+whole-machine scan the bottleneck is the disk, not the parser. The
 fallback is fast enough to be the default for sources outside the
 raw allowlist, not a degraded mode.
 
@@ -145,10 +146,14 @@ silently incomplete totals.
 
 \textbf{Observation.} Per-entry \texttt{EACCES}, \texttt{EPERM}, and
 \texttt{ENOENT} are recorded in \texttt{parser\_output.walk\_skips}
-with a reason; the walk continues. A normal-user \texttt{/} scan on
-the host the project tested completes with roughly 830 skipped paths
-and reports them in the output document. The caller can render the
-skip list as a diagnostic without it affecting the row stream.
+with a reason; the walk continues. The same log carries the
+\texttt{firmlink\_overlay\_source} and \texttt{duplicate\_dir\_inode}
+skip kinds introduced by the dedup pass below. A normal-user
+\texttt{/} scan on the host the project tested completes with
+roughly five hundred recorded skips (the exact count varies with
+the host's app sandbox profile and the firmlink set) and reports
+them in the output document. The caller can render the skip list
+as a diagnostic without it affecting the row stream.
 
 The walker also skips top-level system directories that exist only as
 APFS-internal artefacts on the boot disk
@@ -156,6 +161,90 @@ APFS-internal artefacts on the boot disk
 rather than letting the operating system raise an error on them.
 That skip is documented in the source so it can be revisited as
 support broadens.
+
+\section{Parallel Fallback}
+
+\textbf{Observation.} The fallback walker accepts a
+\texttt{--threads N} flag. The default is
+\texttt{min(hw.physicalcpu, 4)}; the lower bound is 1, the upper
+bound clamped to 4. Per-worker \texttt{BulkReader} owns its own
+64~KiB \texttt{getattrlistbulk} buffer; a shared work queue
+distributes directories; per-worker entry vectors are
+concatenated and re-sorted on the main thread.
+
+The default's ceiling at 4 is not arbitrary. The single APFS
+container holds a B-tree contention point that pre-Mojave was
+described as a global mutex (Szorc 2018) and that the Apple
+Developer Forums position (Apple DTS, 2025) describes as having
+been largely addressed in macOS~10.14 while leaving a residual
+per-container cost. Empirical measurement on Apple silicon
+(EX-25, chapter~12) shows the throughput envelope peaking at
+$T = 4$ with 2.47$\times$ speedup over single-threaded, then
+\emph{regressing} at $T = 8$ and falling further at $T = 14$. At
+$T = 8$ the total system CPU is $4\times$ the $T = 1$ value while
+the throughput is only $1.94\times$; at $T = 14$ system CPU is
+$9.3\times$ for $1.38\times$ throughput --- the kernel pays
+super-linearly more work to deliver sub-linearly more answers.
+The 4-thread ceiling stays clear of that regime by construction.
+
+The parallel walker preserves the serial walker's contract by
+shape, asserted by a synthetic-tree regression test
+(\texttt{parallel\_walker\_matches\_serial\_shape}): identical
+entries, aggregates, and skip lists; the only difference is the
+order in which directories are visited, which the final sort
+normalises.
+
+Live progress events flow through a dedicated sampling thread
+inside the parallel scheduler at a 250~ms cadence (matching the
+serial path), so the user-visible stopwatch and entry counter
+tick smoothly even on a whole-machine scan that is otherwise
+silent for tens of seconds.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{figures/app-progress.png}
+\caption{A whole-machine \texttt{/} scan mid-flight. The
+stopwatch and entry counter come from the parallel walker's
+progress thread; 231 paths have been recorded as skipped at this
+point in the walk (sandboxed application data, sealed-system
+locations). The Cancel control terminates the worker pool
+cleanly.}
+\end{figure}
+
+\section{Firmlink Overlay Dedup}
+
+\textbf{Observation.} On macOS the user-visible startup root is a
+join of the System volume and the Data volume. Specific paths ---
+\texttt{/Users}, \texttt{/Applications}, \texttt{/Library},
+\texttt{/private}, \texttt{/usr/local}, and a few others --- are
+exposed both at their canonical location \emph{and} at
+\texttt{/System/Volumes/Data/<source>} via firmlinks. The same
+underlying inode is visible through two paths. A naive recursive
+walker descends both and double-counts everything inside the
+overlay.
+
+The fallback walker, when the root is \texttt{/}, reads
+\texttt{/usr/share/firmlinks} at scan-start and builds a
+\texttt{HashSet} of the \texttt{/System/Volumes/Data/<source>}
+overlay paths. A descent into any such path is refused with a
+\texttt{firmlink\_overlay\_source} skip; the canonical path
+remains the one that contributes to the namespace and aggregates.
+
+A second layer of safety, a per-scan
+\texttt{Mutex<HashSet<(dev, ino)>>}, catches any directory
+inode reached through a path the firmlink overlay set did not
+cover. A second observation of the same inode through a different
+path is recorded as a \texttt{duplicate\_dir\_inode} skip and the
+walker does not recurse.
+
+The effect on whole-machine scans is large. Before the dedup, a
+\texttt{/} scan on the test host reported 5,250,000 entries;
+after, 3,060,000 entries with seventeen
+\texttt{firmlink\_overlay\_source} skips (one per existing
+firmlink target) and zero \texttt{duplicate\_dir\_inode} skips
+(the overlay layer caught everything). The forty-two per cent
+that disappeared were not real files: they were the same files
+counted twice through two paths.
 
 \section{Auto-Dispatch}
 

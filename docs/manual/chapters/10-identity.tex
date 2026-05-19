@@ -99,14 +99,16 @@ for at this stage. It means the mathematical foundation is sound:
 if two parses see the same node identity, they will get the same
 summary, and reusing one for the other is safe.
 
-It is not yet a production cache theorem. The probe ran on one corpus,
-on detached images, with mutations limited to a small set. Three
-things still have to land before a cache is part of the product:
+It is not yet a production cache theorem. The probe ran on one
+corpus, on detached images, with mutations limited to a small set.
+Three things still have to land before a cache is part of the
+product:
 
 \begin{enumerate}
   \item Re-run EX-07's mutation grid against the native Rust full
-    parse (now possible, since R1 is complete) to confirm the
-    finding holds when the parser is the project's own Rust code
+    parse (now possible, since R1 is complete and the parallel
+    fallback of chapter~11 has landed) to confirm the finding
+    holds when the parser is the project's own production code
     rather than a third-party reference.
   \item Build a cache storage design with crash-safe writes; a
     cache that can corrupt during a kill produces stale-and-wrong
@@ -117,13 +119,16 @@ things still have to land before a cache is part of the product:
     missing volume continuity, source identity mismatch,
     unsupported feature drift, checkpoint rollback, snapshot
     switch, unknown record-body type, or any new metric the cache
-    did not record.
+    did not record (R2-A's allocated-size column is the most
+    recent example of a column a pre-existing cache would not
+    have recorded).
 \end{enumerate}
 
 Until those gates pass, the safe default is full reparse, validated
-against the namespace and logical-size oracles. A second scan of
-the same volume produces the same answer as the first; it does not
-necessarily produce it faster.
+against the namespace, logical-size, and allocated-size oracles. A
+second scan of the same volume produces the same answer as the
+first; the parallel walker has made it produce that answer faster,
+but it does not yet produce it incrementally.
 
 \section{The Identity-Tracking Discipline}
 

@@ -146,4 +146,41 @@ Does a POSIX-traversal fallback emit the same
 raw mode on the proof fixture? Yes; Python and Rust ports both pass.
 & validated-fallback-skeleton \\
 
+EX-22 &
+Does the SR-019 per-inode allocated-size precedence reproduce
+\texttt{st\_blocks * 512} for ordinary, sparse, clone, hard-link,
+symlink, and decmpfs cases? Three of five emit-rows match; sparse
+overstates by exactly the sparse-bytes hint; decmpfs is correctly
+fail-closed. Sparse case split into a dedicated fail-closed branch
+pending an EX-22b sparse corpus.
+& partial-validated-sr-019-alloced-size \\
+
+EX-23 &
+Does the existing fallback walker produce byte-identical rows when
+pointed at a live volume and a read-only snapshot of the same
+volume? Probe ran on a clean dev workstation, found only the
+sealed-system OS-update snapshot (correctly skipped), and emitted
+a blocked verdict with the privileged-rerun reproducer. The shape
+claim itself remains unclaimed pending the rerun.
+& blocked-no-snapshots-at-all \\
+
+EX-24 &
+For the production walker's \texttt{getattrlistbulk} attribute
+mask, is the SR-021 vnode-rage hypothesis a measurable lever?
+Drec-only and current-mask landed within 1\% on every dimension;
+\texttt{fts(3)} was 1.7$\times$ slower than the current mask. The
+vnode-rage cost is not load-bearing; the Phase-2 deferred-attribute
+refactor is de-prioritised; \texttt{fts} follow-up cancelled.
+& vnode-cost-marginal \\
+
+EX-25 &
+What is the parallel walker's scaling envelope on Apple silicon at
+$T \in \{1, 2, 4, 8, 14\}$? T=4 reaches 2.47$\times$ T=1; T=8
+regresses; T=14 catastrophically loses (9.3$\times$ T=1 system CPU
+for 1.38$\times$ throughput). The Szorc-2018 / Apple-DTS-2025
+container-lock contention regime is real and starts at $T = 2 \times
+\text{optimum}$ on this kernel. Production default
+\texttt{min(hw.physicalcpu, 4)}.
+& validated-parallel-scaling \\
+
 \end{longtable}

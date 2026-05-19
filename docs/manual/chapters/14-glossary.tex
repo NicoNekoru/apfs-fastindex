@@ -9,7 +9,17 @@ identifier as well as the prose definition.
   \item[Allocated size.] Bytes the filesystem has assigned to a
     file's content. Distinct from logical size (the user-visible
     byte length) and from exclusive size (bytes only this inode
-    owns). Out of v1 scope; opens as R2-A.
+    owns). R2-A: landed for ordinary, clone, hard-link, symlink,
+    and directory case classes; fail-closed for sparse files and
+    decmpfs-compressed files. Emitted as
+    \texttt{allocated\_size: Option<u64>}; \texttt{None} indicates
+    a deliberately-not-claimed row.
+  \item[\texttt{alloced\_size}.] The
+    \texttt{j\_dstream\_t.alloced\_size} on-disk field. The
+    source for the R2-A allocated-size column on the case classes
+    that emit a value. On macOS-produced volumes the field equals
+    \texttt{round\_up(ds\_size, blocksize)}; on sparse files this
+    overstates the actual allocation by the sparse-bytes hint.
   \item[APSB.] APFS volume superblock
     (\texttt{apfs\_superblock\_t}). Reached through the container
     OMAP at the scan XID; carries the volume OMAP, the FS-tree
@@ -18,6 +28,11 @@ identifier as well as the prose definition.
     APFS container. Carries enough metadata to find the
     checkpoint descriptor area but is not itself authoritative for
     the live container state.
+  \item[\texttt{BulkReader}.] The Rust struct that owns a
+    reusable 64~KiB \texttt{getattrlistbulk} buffer and one output
+    \texttt{Vec<BulkEntry>} across the whole walk. The
+    micro-optimisation pass introduced it to replace the
+    per-directory fresh allocation.
   \item[Checkpoint descriptor area.] A contiguous run of blocks
     that hold the rotating ring of container superblocks and
     their associated checkpoint maps. The authoritative live NXSB
@@ -26,15 +41,24 @@ identifier as well as the prose definition.
     for the selected checkpoint. Walked in order from
     \texttt{nx\_xp\_desc\_index}; the last block carries the
     \texttt{CHECKPOINT\_MAP\_LAST} flag.
+  \item[decmpfs.] The Apple compression xattr family. Small
+    compressed files store their data inline in
+    \texttt{com.apple.decmpfs} with no \texttt{j\_dstream\_t};
+    larger files use \texttt{com.apple.ResourceFork}. v1
+    fails closed on the allocated-size column for any inode whose
+    only size source is decmpfs, because no public reader has
+    been oracle-validated against the macOS
+    \texttt{st\_blocks * 512} for the resource-fork path.
   \item[Directory aggregate.] A per-directory total expressed
     under the unique-inode logical-sum policy: each inode
-    contributes its logical size at most once per aggregate
-    root, regardless of how many hard-linked paths inside that
-    root name it.
-  \item[\texttt{DIR\_REC}.] Directory record. The FS-tree leaf that
-    represents a directory entry; key carries the parent inode's
-    file ID and the name; value carries the child file ID and the
-    POSIX entry type.
+    contributes its logical size at most once per aggregate root,
+    regardless of how many hard-linked paths inside that root
+    name it. Allocated-size aggregates use the same rule plus a
+    \texttt{None}-propagation step.
+  \item[\texttt{DIR\_REC}.] Directory record. The FS-tree leaf
+    that represents a directory entry; key carries the parent
+    inode's file ID and the name; value carries the child file ID
+    and the POSIX entry type.
   \item[Dstream.] An APFS data stream. Logical and allocated size
     plus a default-extent reference; carried inline in the inode's
     xfields as \texttt{INO\_EXT\_TYPE\_DSTREAM} or in a separate
@@ -54,7 +78,11 @@ identifier as well as the prose definition.
   \item[Firmlink.] A macOS presentation mechanism that joins
     selected paths from a System volume to corresponding paths on
     a Data volume to produce the user-visible startup namespace.
-    Out of v1 scope.
+    Out of v1 scope for raw mode. The fallback walker reads
+    \texttt{/usr/share/firmlinks} at scan-start and skips the
+    \texttt{/System/Volumes/Data/<source>} overlay paths so the
+    canonical path is the one that contributes to namespace and
+    aggregates.
   \item[\texttt{FsRecordDump} / \texttt{FsRecordRow}.] The Rust
     crate's structured output for the FS-tree record-family dump
     and one decoded record respectively. Field-level equal to the
@@ -65,7 +93,10 @@ identifier as well as the prose definition.
     records, and extents.
   \item[\texttt{getattrlistbulk}.] macOS syscall that returns
     metadata for many directory entries per call. Used by the
-    fallback walker for the bulk perf path.
+    fallback walker for the bulk perf path. Adding inode-required
+    attributes (size, mode, mtime) to the attribute mask used to
+    be thought a load-bearing cost; EX-24 falsified that for
+    modern Apple silicon.
   \item[Hard link.] A directory entry that names an inode already
     named by another directory entry. APFS represents the
     relationship through SIBLING\_LINK and SIBLING\_MAP records;
@@ -83,9 +114,9 @@ identifier as well as the prose definition.
     entry with the highest stored XID less than or equal to the
     requested value. The whole point of pinning the scan XID.
   \item[\texttt{NamespaceEntry}.] One row of the namespace
-    output: path, entry kind, file ID, logical size, and
-    optional symlink target. Stable across raw and fallback
-    backends.
+    output: path, entry kind, file ID, logical size, optional
+    allocated size, optional symlink target. Stable across raw
+    and fallback backends.
   \item[NX / NXSB.] APFS container superblock
     (\texttt{nx\_superblock\_t}). The block-zero copy is the
     locator; the authoritative selected NXSB lives in the
@@ -99,9 +130,19 @@ identifier as well as the prose definition.
   \item[Paddr.] Physical block address. The on-disk location of an
     APFS object. Returned by an OMAP lookup for virtual objects;
     equal to \texttt{o\_oid} for physical objects.
+  \item[Parallel walker.] The default fallback scheduler.
+    Per-worker \texttt{BulkReader}, shared work queue, per-worker
+    entry vectors merged on the main thread. Default thread count
+    \texttt{min(hw.physicalcpu, 4)}, clamped to \texttt{[1, 4]}.
+    The ceiling stays clear of the APFS container-lock regime
+    that fires at $T > 4$ on Apple silicon.
   \item[Parsable.] Source property: checkpoint and root discovery
-    succeed; raw traversal runs. Necessary but not sufficient
-    for "supported."
+    succeed; raw traversal runs. Necessary but not sufficient for
+    ``supported.''
+  \item[\texttt{-{}-progress}.] CLI flag emitting stderr
+    progress events at a 250~ms cadence. The parallel walker
+    delivers events through a dedicated sampling thread so the
+    cadence matches the serial path.
   \item[Raw mode.] The native APFS-parsing backend. Used when the
     source is in the raw-mode allowlist (detached \texttt{.dmg},
     caller-supplied raw device, explicitly stable APFS source).
@@ -116,25 +157,44 @@ identifier as well as the prose definition.
     sibling-group identifier and the linked name;
     \texttt{j\_sibling\_map\_val\_t} closes the mapping from
     sibling ID to inode.
-  \item[Sparse bytes.] \texttt{INO\_EXT\_TYPE\_SPARSE\_BYTES}: the
-    count of bytes the sparse-allocation layer has not committed
-    to disk. An allocation hint, not a logical size. Treat as
-    diagnostic in chapter~8's precedence rule.
+  \item[Snapshot, APFS.] A read-only view of a volume at a
+    point in time, named in the volume's snapshot meta tree.
+    Sealed-system snapshots (\texttt{com.apple.os.update-*})
+    are out of v1 scope. R2-B's
+    \texttt{-{}-snapshot <mountpoint>} flag accepts an
+    already-mounted snapshot directory; the mount step itself is
+    privileged.
+  \item[Sparse bytes.] \texttt{INO\_EXT\_TYPE\_SPARSE\_BYTES}:
+    the count of bytes the sparse-allocation layer has not
+    committed to disk. An allocation hint, not a logical size.
+    Treated as diagnostic in the logical-size precedence and as
+    the fail-closed gate for the allocated-size rule on sparse
+    files.
   \item[Supported.] Source property: the source is in the product
     allowlist for the requested mode. Validation has been
     performed; results were correct; the source class belongs in
     production.
+  \item[\texttt{-{}-threads N}.] CLI flag selecting the parallel
+    walker's worker count. Default
+    \texttt{min(hw.physicalcpu, 4)}; \texttt{N = 1} forces serial
+    mode; larger values are accepted but pay the APFS-container
+    contention cost documented in chapter~12.
   \item[Validatable.] Source property: parser output can be
     compared against a named oracle for the requested mode. A
-    prerequisite of "supported" but not, by itself, sufficient.
+    prerequisite of ``supported'' but not, by itself, sufficient.
   \item[Virtual object.] An APFS object whose
-    \texttt{obj\_phys\_t} storage flag indicates the object
-    is resolvable through an OMAP. \texttt{o\_oid} is independent
-    of the block's paddr; the header is validated against
+    \texttt{obj\_phys\_t} storage flag indicates the object is
+    resolvable through an OMAP. \texttt{o\_oid} is independent of
+    the block's paddr; the header is validated against
     \texttt{omap\_lookup.oid}.
+  \item[\texttt{walk\_skips}.] The fallback walker's per-entry
+    skip log. Records \texttt{EACCES}, \texttt{EPERM},
+    \texttt{ENOENT}, \texttt{firmlink\_overlay\_source}, and
+    \texttt{duplicate\_dir\_inode} reasons with the path and
+    keeps the walk going.
   \item[XID.] Transaction identifier. Monotonic per container.
-    Used to order checkpoints (chapter~3) and to disambiguate OMAP
-    entries (chapter~4).
+    Used to order checkpoints (chapter~3) and to disambiguate
+    OMAP entries (chapter~4).
   \item[Xfield.] The variable-length tail of an FS-tree record
     that carries extended fields. One source-backed cursor rule
     (chapter~6); fail-closed on any malformed shape
