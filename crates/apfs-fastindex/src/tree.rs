@@ -68,7 +68,6 @@ pub struct TreeNode {
 #[derive(Debug)]
 pub struct Tree {
     pub nodes: Vec<TreeNode>,
-    pub path_index: HashMap<String, u32>,
 }
 
 impl Tree {
@@ -83,12 +82,21 @@ impl Tree {
     /// is "settled" (no more entries can target it, conservatively
     /// approximated by emptying it at the end of construction).
     pub fn build(entries: &[NamespaceEntry]) -> Self {
-        let mut nodes: Vec<TreeNode> = Vec::with_capacity(entries.len() + 1);
-        let mut child_maps: Vec<HashMap<String, u32>> = Vec::with_capacity(entries.len() + 1);
-        let mut path_index: HashMap<String, u32> = HashMap::with_capacity(entries.len() + 1);
+        // Pre-size the major buffers. `entries.len() + 1` is the
+        // upper bound on node count (one node per entry plus
+        // root); on real scans synthesised dirs make the actual
+        // count a bit larger but the over-allocation cost is
+        // tiny vs. the savings from skipping Vec growth.
+        let cap = entries.len() + 1;
+        let mut nodes: Vec<TreeNode> = Vec::with_capacity(cap);
+        // Sparse: only directories need a child_map for the
+        // duplicate-detection during build. Indexed by node_idx,
+        // `None` for leaves. Saves ~5× the HashMap allocations
+        // on a file-heavy scan (most rows are files).
+        let mut child_maps: Vec<Option<HashMap<String, u32>>> = Vec::with_capacity(cap);
 
-        // Index 0 = root. Empty path; the renderer renders it as
-        // "/" in the breadcrumb.
+        // Index 0 = root. Empty path; the renderer displays it
+        // as "/" in the breadcrumb.
         nodes.push(TreeNode {
             name: String::new(),
             path: String::new(),
@@ -102,19 +110,16 @@ impl Tree {
             value_allocated: None,
             item_count: 0,
         });
-        child_maps.push(HashMap::new());
-        path_index.insert(String::new(), 0);
+        child_maps.push(Some(HashMap::new()));
 
         for entry in entries {
             let path = entry.path.as_str();
             let bytes = path.as_bytes();
             let path_len = bytes.len();
 
-            // Walk path components. Mirrors the JS hot loop:
-            //   - Skip leading/duplicate '/'.
-            //   - Each non-empty segment is either an existing dir
-            //     we descend into or a new node we create.
-            //   - The last segment is the entry itself (dir or leaf).
+            // Walk path components. At each separator the
+            // current segment is either an existing dir we
+            // descend into or a new node we create.
             let mut cursor: u32 = 0;
             let mut seg_start: usize = 0;
             let mut i: usize = 0;
@@ -138,19 +143,20 @@ impl Tree {
                 if is_last {
                     match entry.entry_kind {
                         EntryKind::Dir => {
-                            let exists = child_maps[cursor as usize]
-                                .get(name)
-                                .copied();
-                            if exists.is_none() {
+                            // Dirs may be referenced as parents
+                            // by later entries; look up the
+                            // parent's child_map to dedupe.
+                            let cm = child_maps[cursor as usize]
+                                .as_ref()
+                                .expect("dir cursor must have a child_map");
+                            if !cm.contains_key(name) {
                                 let new_idx = nodes.len() as u32;
-                                let full_path = if nodes[cursor as usize].path.is_empty() {
-                                    name.to_string()
-                                } else {
-                                    format!("{}/{}", &nodes[cursor as usize].path, name)
-                                };
+                                let parent_path = nodes[cursor as usize].path.as_str();
+                                let full_path = join_path(parent_path, name);
+                                let name_owned = name.to_string();
                                 nodes.push(TreeNode {
-                                    name: name.to_string(),
-                                    path: full_path.clone(),
+                                    name: name_owned.clone(),
+                                    path: full_path,
                                     kind: EntryKind::Dir,
                                     parent: Some(cursor),
                                     children: Vec::new(),
@@ -161,23 +167,24 @@ impl Tree {
                                     value_allocated: None,
                                     item_count: 0,
                                 });
-                                child_maps.push(HashMap::new());
+                                child_maps.push(Some(HashMap::new()));
                                 nodes[cursor as usize].children.push(new_idx);
-                                child_maps[cursor as usize]
-                                    .insert(name.to_string(), new_idx);
-                                path_index.insert(full_path, new_idx);
+                                if let Some(cm_mut) = &mut child_maps[cursor as usize] {
+                                    cm_mut.insert(name_owned, new_idx);
+                                }
                             }
                         }
                         _ => {
+                            // Leaf: no child_map needed (we
+                            // never look up files during build,
+                            // and they have no children of
+                            // their own).
                             let new_idx = nodes.len() as u32;
-                            let full_path = if nodes[cursor as usize].path.is_empty() {
-                                name.to_string()
-                            } else {
-                                format!("{}/{}", &nodes[cursor as usize].path, name)
-                            };
+                            let parent_path = nodes[cursor as usize].path.as_str();
+                            let full_path = join_path(parent_path, name);
                             nodes.push(TreeNode {
                                 name: name.to_string(),
-                                path: full_path.clone(),
+                                path: full_path,
                                 kind: entry.entry_kind,
                                 parent: Some(cursor),
                                 children: Vec::new(),
@@ -188,27 +195,24 @@ impl Tree {
                                 value_allocated: entry.allocated_size,
                                 item_count: 1,
                             });
-                            child_maps.push(HashMap::new());
+                            child_maps.push(None);
                             nodes[cursor as usize].children.push(new_idx);
-                            child_maps[cursor as usize]
-                                .insert(name.to_string(), new_idx);
-                            path_index.insert(full_path, new_idx);
                         }
                     }
                 } else {
-                    let existing = child_maps[cursor as usize].get(name).copied();
+                    let existing = child_maps[cursor as usize]
+                        .as_ref()
+                        .and_then(|cm| cm.get(name).copied());
                     let child = match existing {
                         Some(idx) => idx,
                         None => {
                             let new_idx = nodes.len() as u32;
-                            let full_path = if nodes[cursor as usize].path.is_empty() {
-                                name.to_string()
-                            } else {
-                                format!("{}/{}", &nodes[cursor as usize].path, name)
-                            };
+                            let parent_path = nodes[cursor as usize].path.as_str();
+                            let full_path = join_path(parent_path, name);
+                            let name_owned = name.to_string();
                             nodes.push(TreeNode {
-                                name: name.to_string(),
-                                path: full_path.clone(),
+                                name: name_owned.clone(),
+                                path: full_path,
                                 kind: EntryKind::Dir,
                                 parent: Some(cursor),
                                 children: Vec::new(),
@@ -219,11 +223,11 @@ impl Tree {
                                 value_allocated: None,
                                 item_count: 0,
                             });
-                            child_maps.push(HashMap::new());
+                            child_maps.push(Some(HashMap::new()));
                             nodes[cursor as usize].children.push(new_idx);
-                            child_maps[cursor as usize]
-                                .insert(name.to_string(), new_idx);
-                            path_index.insert(full_path, new_idx);
+                            if let Some(cm_mut) = &mut child_maps[cursor as usize] {
+                                cm_mut.insert(name_owned, new_idx);
+                            }
                             new_idx
                         }
                     };
@@ -235,10 +239,17 @@ impl Tree {
             }
         }
 
-        let mut tree = Tree { nodes, path_index };
+        // No global `path_index` HashMap any more. On a
+        // file-heavy /-scan the eager build was the largest
+        // single share of Tree::build cost (500 k+ HashMap
+        // inserts of strings nobody ever queries). The few
+        // callers that *do* need path → node lookups (the
+        // breadcrumb's back-nav, programmatic seek) walk the
+        // tree via `node_index_for_path` instead — O(depth) +
+        // O(siblings) per lookup, which is fine at the rates
+        // those callers run.
+        let mut tree = Tree { nodes };
         tree.finalize();
-        // Drop the per-dir maps; they were construction-only.
-        // `path_index` stays as the global lookup.
         drop(child_maps);
         tree
     }
@@ -306,18 +317,75 @@ impl Tree {
         }
     }
 
-    /// Look up a node by its absolute logical path. Returns
-    /// `NODE_INVALID` if no such node exists. The empty string
-    /// maps to the root (index 0).
+    /// Look up a node by its absolute logical path. The empty
+    /// string and `"/"` both map to the root (index 0).
+    /// Returns `NODE_INVALID` if no such node exists.
+    ///
+    /// Walks the tree component-by-component (linear scan of
+    /// each parent's children at every level). On a directory
+    /// with ~100 children that's ~100 string comparisons per
+    /// step — fine at typical UI rates. The eager
+    /// `HashMap<String, u32>` we used to maintain cost ~600 ms
+    /// on a /Library-scale scan and went unused on every
+    /// scan that didn't actually issue a path lookup.
     pub fn node_index_for_path(&self, path: &str) -> u32 {
-        // "/" is also a synonym for root, since the renderer
-        // writes the root crumb that way.
         let key = if path == "/" { "" } else { path };
-        match self.path_index.get(key) {
-            Some(&idx) => idx,
-            None => NODE_INVALID,
+        if key.is_empty() {
+            return 0;
         }
+        let bytes = key.as_bytes();
+        let len = bytes.len();
+        let mut cursor: u32 = 0;
+        let mut seg_start: usize = 0;
+        let mut i: usize = 0;
+        while i <= len {
+            let at_end = i == len;
+            let is_sep = at_end || bytes[i] == b'/';
+            if !is_sep {
+                i += 1;
+                continue;
+            }
+            if i == seg_start {
+                seg_start = i + 1;
+                i += 1;
+                continue;
+            }
+            // SAFETY: caller passes a UTF-8 path; ASCII '/'
+            // boundaries leave each segment UTF-8-valid.
+            let name = unsafe { std::str::from_utf8_unchecked(&bytes[seg_start..i]) };
+            let children = &self.nodes[cursor as usize].children;
+            let mut found: Option<u32> = None;
+            for &child_idx in children {
+                if self.nodes[child_idx as usize].name == name {
+                    found = Some(child_idx);
+                    break;
+                }
+            }
+            match found {
+                Some(c) => cursor = c,
+                None => return NODE_INVALID,
+            }
+            seg_start = i + 1;
+            i += 1;
+        }
+        cursor
     }
+}
+
+/// Build `parent/name` (or just `name` if parent is empty) into
+/// a `String` with the exact capacity reserved. Avoids the
+/// `format!()` macro's intermediate `Arguments` formatting
+/// machinery — that path was a measurable share of `Tree::build`
+/// time on /-class scans.
+fn join_path(parent: &str, name: &str) -> String {
+    if parent.is_empty() {
+        return name.to_string();
+    }
+    let mut s = String::with_capacity(parent.len() + 1 + name.len());
+    s.push_str(parent);
+    s.push('/');
+    s.push_str(name);
+    s
 }
 
 #[cfg(test)]

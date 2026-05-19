@@ -50,89 +50,162 @@ enum NativeBridge {
         // wrong this will null-out or NSLog a "FAILED" line.
         // Pull when the controller actually uses `Scan` for
         // real scans (phase 5).
+        // Two probe shapes:
+        //   - lightweight (default) on /usr/bin — fast launch.
+        //   - per-phase benchmark on /Applications when
+        //     `APFS_BENCH=1` is set. Comparable to the
+        //     /Applications numbers in the v4 perf study so we
+        //     can confirm native is meaningfully faster than
+        //     the WKWebView pipeline before continuing.
         DispatchQueue.global(qos: .background).async {
-            let probePath = "/usr/bin"
-            if let scan = Scan.fallback(path: probePath, threads: 0, crossMounts: false) {
-                NSLog(
-                    "[native phase2 probe] %@: %llu entries, %llu logical bytes, allocated=%@",
-                    probePath,
-                    scan.entryCount,
-                    scan.logicalTotal,
-                    scan.allocatedTotal.map(String.init) ?? "unclaimed"
-                )
-                // Phase-3a probe: exercise the tree-query FFI.
-                // The root's aggregates must equal the scan-wide
-                // totals; that's the easy invariant to assert.
-                let nodes = scan.nodeCount
-                let rootKids = scan.childCount(of: 0)
-                let rootLogical = scan.valueLogical(of: 0)
-                let rootItems = scan.itemCount(of: 0)
-                NSLog(
-                    "[native phase3a probe] tree: %u nodes, root children=%u, root logical=%llu, items=%llu",
-                    nodes, rootKids, rootLogical, rootItems
-                )
-                // Round-trip a path: nil for a missing one, and
-                // a non-nil index for one we know exists. We also
-                // dump the first child's path to confirm the
-                // wire shape (entries are scan-root-relative).
-                let firstChildPath = scan.path(of: 1) ?? "(none)"
-                let lsIdx = scan.nodeIndex(forPath: "ls")
-                let nonsenseIdx = scan.nodeIndex(forPath: "definitely-not-there")
-                NSLog(
-                    "[native phase3a probe] first child path=%@, ls=%@, nonsense=%@",
-                    firstChildPath,
-                    lsIdx.map(String.init) ?? "nil",
-                    nonsenseIdx.map(String.init) ?? "nil"
-                )
-                // Phase-3b/c probe: lay out the scan into a
-                // 1000×1000 viewport, dump cell stats, and
-                // hit-test the centre point as a smoke check.
-                let tLayout0 = Date()
-                let layout = scan.layout(
-                    rootedAt: 0,
-                    maxDepth: 0,
-                    metric: .logical,
-                    width: 1000,
-                    height: 1000
-                )
-                let layoutMs = Date().timeIntervalSince(tLayout0) * 1000.0
-                if let layout {
-                    var dirCount = 0
-                    var leafCount = 0
-                    var minArea: Float = .infinity
-                    var maxArea: Float = 0
-                    for c in layout.cells {
-                        let area = (c.x1 - c.x0) * (c.y1 - c.y0)
-                        if area < minArea { minArea = area }
-                        if area > maxArea { maxArea = area }
-                        if c.flags & 1 != 0 { dirCount += 1 } else { leafCount += 1 }
-                    }
-                    NSLog(
-                        "[native phase3b probe] %d cells (%d dirs, %d leaves) in %.1f ms; area range %.2f-%.2f px²",
-                        layout.count, dirCount, leafCount, layoutMs, minArea, maxArea
-                    )
-                    let tHit0 = Date()
-                    let hit = layout.hitTest(x: 500, y: 500)
-                    let hitMs = Date().timeIntervalSince(tHit0) * 1000.0
-                    if let hit, hit < UInt32(layout.count) {
-                        let c = layout.cells[Int(hit)]
-                        let path = scan.path(of: c.node_index) ?? "(no path)"
-                        NSLog(
-                            "[native phase3c probe] hit at (500,500): cell %u depth %u path=%@ in %.3f ms",
-                            hit, c.depth, path, hitMs
-                        )
-                    } else {
-                        NSLog("[native phase3c probe] hit at (500,500): no cell in %.3f ms", hitMs)
-                    }
-                } else {
-                    NSLog("[native phase3b probe] layout returned nil")
-                }
+            let env = ProcessInfo.processInfo.environment
+            if env["APFS_BENCH"] == "1" {
+                let benchPath = env["APFS_BENCH_PATH"] ?? "/Applications"
+                runNativeBench(path: benchPath)
             } else {
-                NSLog("[native phase2 probe] \(probePath): FAILED")
+                runLightProbe(path: "/usr/bin")
             }
         }
         return true
     }
+}
+
+/// Lightweight per-launch probe. Same shape as the phase-2/3
+/// probes from earlier commits.
+private func runLightProbe(path probePath: String) {
+    if let scan = Scan.fallback(path: probePath, threads: 0, crossMounts: false) {
+        NSLog(
+            "[native probe] %@: %llu entries, %llu logical bytes, allocated=%@",
+            probePath,
+            scan.entryCount,
+            scan.logicalTotal,
+            scan.allocatedTotal.map(String.init) ?? "unclaimed"
+        )
+    } else {
+        NSLog("[native probe] \(probePath): FAILED")
+    }
+}
+
+/// Per-phase benchmark probe. Times scan / tree / layout / hit
+/// against the same target the v4 perf study used (/Applications
+/// by default) so the native numbers can be compared 1:1 to the
+/// WKWebView pipeline's published costs.
+private func runNativeBench(path: String) {
+    NSLog("[native bench] target=%@", path)
+
+    // Scan + tree build are folded into Scan.fallback (the FFI
+    // runs the fallback walker, then builds the tree before
+    // returning the handle), so we time them together as
+    // "scan+tree" and document the breakdown.
+    let tScan0 = Date()
+    guard let scan = Scan.fallback(path: path, threads: 0, crossMounts: false) else {
+        NSLog("[native bench] scan FAILED for %@", path)
+        return
+    }
+    let scanMs = Date().timeIntervalSince(tScan0) * 1000.0
+    let entries = scan.entryCount
+    let nodes = scan.nodeCount
+    let logical = scan.logicalTotal
+    let allocated = scan.allocatedTotal.map(String.init) ?? "unclaimed"
+    NSLog(
+        "[native bench] scan+tree: %.1f ms · %llu entries · %u nodes · logical=%llu allocated=%@",
+        scanMs, entries, nodes, logical, allocated
+    )
+
+    // Layout cold (depth=0, viewport 1200×800 to match the
+    // typical app window). Three runs so we see warm-cache vs
+    // cold-cache variance (today: no internal cache — every
+    // call is a fresh layout).
+    let viewportW: Float = 1200
+    let viewportH: Float = 800
+    var layoutMsRuns: [Double] = []
+    var lastLayout: Scan.Layout?
+    for i in 0..<3 {
+        let t0 = Date()
+        let layout = scan.layout(
+            rootedAt: 0,
+            maxDepth: 0,
+            metric: .logical,
+            width: viewportW,
+            height: viewportH
+        )
+        let ms = Date().timeIntervalSince(t0) * 1000.0
+        layoutMsRuns.append(ms)
+        if i == 2 {
+            lastLayout = layout
+        }
+    }
+    let layoutFmt = layoutMsRuns
+        .map { String(format: "%.1f", $0) }
+        .joined(separator: ", ")
+    let cellCount = lastLayout?.count ?? 0
+    NSLog(
+        "[native bench] layout (depth=0, %.0fx%.0f) [3 runs]: %@ ms · %d cells",
+        Double(viewportW), Double(viewportH), layoutFmt, cellCount
+    )
+
+    // Hit-test 10 000 random points to amortise the (1 µs)
+    // per-call cost above timer noise.
+    if let layout = lastLayout, layout.count > 0 {
+        let n = 10_000
+        let t0 = Date()
+        var hits = 0
+        for i in 0..<n {
+            // Cheap LCG-style spread, not crypto-random; we
+            // just want the points to land at varied locations.
+            let x = Float((i * 1103515245 + 12345) & 0x7fff) / 32767.0 * viewportW
+            let y = Float((i * 2147483647 + 17) & 0x7fff) / 32767.0 * viewportH
+            if layout.hitTest(x: x, y: y) != nil {
+                hits += 1
+            }
+        }
+        let totalMs = Date().timeIntervalSince(t0) * 1000.0
+        let perHitUs = (totalMs / Double(n)) * 1000.0
+        NSLog(
+            "[native bench] hit-test [%d random points]: %.1f ms total · %.2f µs/query · %d hits",
+            n, totalMs, perHitUs, hits
+        )
+    }
+
+    // Layout at a deeper rooted path so the squarify cost
+    // scaling is visible. Pick the largest top-level child by
+    // logical size — that's the dir the user is most likely to
+    // drill into first.
+    if scan.childCount(of: 0) > 0 {
+        var heaviestIdx: UInt32 = 1
+        var heaviestVal: UInt64 = 0
+        // Walk root's direct children to find the biggest by
+        // value_logical. Bounded by root's child count which
+        // is small (~150 on /Applications).
+        for i in 0..<scan.childCount(of: 0) {
+            let childIdx = UInt32(1 + Int(i)) // not strictly correct — need a real children-accessor FFI in phase 5b
+            if childIdx >= scan.nodeCount { break }
+            let v = scan.valueLogical(of: childIdx)
+            if v > heaviestVal {
+                heaviestVal = v
+                heaviestIdx = childIdx
+            }
+        }
+        let t0 = Date()
+        let sub = scan.layout(
+            rootedAt: heaviestIdx,
+            maxDepth: 0,
+            metric: .logical,
+            width: viewportW,
+            height: viewportH
+        )
+        let ms = Date().timeIntervalSince(t0) * 1000.0
+        let path = scan.path(of: heaviestIdx) ?? "(no path)"
+        NSLog(
+            "[native bench] sub-layout rooted at idx %u (%@, %llu logical): %.1f ms · %d cells",
+            heaviestIdx, path, heaviestVal, ms, sub?.count ?? 0
+        )
+    }
+
+    NSLog("[native bench] done — compare to v4 perf study (WKWebView pipeline):")
+    NSLog("[native bench]   /Applications first paint (WKWebView+canvas): ~800ms-1.5s")
+    NSLog("[native bench]   /Applications first paint (WKWebView+SVG):    ~2-3s")
+    NSLog("[native bench]   /             first paint (WKWebView):         ~5-8s")
 }
 
 /// Owning Swift wrapper around an opaque `ApfsScan *` handle.
