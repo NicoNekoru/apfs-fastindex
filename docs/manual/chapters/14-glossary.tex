@@ -28,11 +28,38 @@ identifier as well as the prose definition.
     APFS container. Carries enough metadata to find the
     checkpoint descriptor area but is not itself authoritative for
     the live container state.
+  \item[\texttt{ApfsCell}.] The flat, \texttt{\#[repr(C)]} record
+    the Rust renderer hands across the FFI as a contiguous
+    array. Holds the cell's rectangle, depth, the index of the
+    tree node it represents, a flag bitset
+    (\texttt{is\_dir}, \texttt{is\_symlink}, label-strip
+    reserved), and a precomputed \texttt{fill\_rgb}. Read by
+    Swift as an \texttt{UnsafeBufferPointer<ApfsCell>} with no
+    array copy.
+  \item[\texttt{ApfsLayout}.] The Rust handle that owns the
+    laid-out \texttt{ApfsCell} array and the spatial-hash index
+    used for hit-testing. Constructed by
+    \texttt{apfs\_layout\_new}, freed by
+    \texttt{apfs\_layout\_free}. One \texttt{ApfsLayout}
+    represents one \texttt{(subtree-root, depth, metric,
+    width$\times$height)} configuration.
+  \item[\texttt{ApfsScan}.] The Rust opaque handle the C ABI
+    returns from \texttt{apfs\_scan\_directory}. Owns the
+    \texttt{FallbackScanOutput} (entries, walk-skips,
+    \texttt{correctness\_claim}, source descriptor) and the
+    indexed tree built from it. Released by
+    \texttt{apfs\_scan\_free}.
   \item[\texttt{BulkReader}.] The Rust struct that owns a
     reusable 64~KiB \texttt{getattrlistbulk} buffer and one output
     \texttt{Vec<BulkEntry>} across the whole walk. The
     micro-optimisation pass introduced it to replace the
     per-directory fresh allocation.
+  \item[\texttt{cbindgen}.] The Rust crate that walks
+    \texttt{src/ffi.rs} and emits the C header Swift imports. Run
+    by the \texttt{build.rs} on every change so the C declarations
+    cannot drift from the Rust \texttt{\#[no\_mangle] extern "C"}
+    surface. The generated header lives in
+    \texttt{target/<profile>/include/apfs\_fastindex.h}.
   \item[Checkpoint descriptor area.] A contiguous run of blocks
     that hold the rotating ring of container superblocks and
     their associated checkpoint maps. The authoritative live NXSB
@@ -97,11 +124,28 @@ identifier as well as the prose definition.
     attributes (size, mode, mtime) to the attribute mask used to
     be thought a load-bearing cost; EX-24 falsified that for
     modern Apple silicon.
+  \item[Hit-grid.] A $64 \times 64$ axis-aligned spatial
+    hash sitting over the \texttt{ApfsCell} array. Each cell is
+    inserted into every bucket it overlaps; each bucket is then
+    sorted depth-descending so the first containing match a
+    hit-test walk sees is the deepest cell at that point.
+    Constant-time lookup turns mouse-move into a few-cell
+    comparison even on a \texttt{/}-scan layout.
   \item[Hard link.] A directory entry that names an inode already
     named by another directory entry. APFS represents the
     relationship through SIBLING\_LINK and SIBLING\_MAP records;
     the unique-inode aggregate policy ensures the inode's logical
     size is counted once per aggregate root.
+  \item[Indexed tree.] The in-memory \texttt{Tree} the FFI
+    builds once per scan from the flat
+    \texttt{Vec<NamespaceEntry>}. One \texttt{TreeNode} per
+    directory and per leaf, carrying parent and children indices,
+    own logical and allocated sizes, and post-order-computed
+    \texttt{value\_logical}, \texttt{value\_allocated}, and
+    \texttt{item\_count} aggregates. Random-access reads by
+    index are constant-time; consumers need the indexed shape
+    for the breadcrumb, the tree-list panel, the squarify
+    recursion, and the hit-test loop.
   \item[\texttt{INODE}.] Inode record. The FS-tree leaf that
     carries file/dir/symlink identity, mode, parent ID, link
     count, internal flags, and an xfield tail.
@@ -117,6 +161,15 @@ identifier as well as the prose definition.
     output: path, entry kind, file ID, logical size, optional
     allocated size, optional symlink target. Stable across raw
     and fallback backends.
+  \item[Native shell.] The SwiftUI macOS app whose visualisation
+    is laid out by Rust and drawn by Core Graphics. The Rust
+    crate is linked into the app process as a static library;
+    every call from Swift into the indexer crosses a
+    \texttt{cbindgen}-generated C ABI. No subprocess, no JSON
+    serialisation, no WebKit. Chapter~13 documents the
+    architecture; the repository still ships
+    \texttt{viz/index.html} as a standalone
+    drop-a-file-into-browser surface.
   \item[NX / NXSB.] APFS container superblock
     (\texttt{nx\_superblock\_t}). The block-zero copy is the
     locator; the authoritative selected NXSB lives in the
@@ -164,6 +217,16 @@ identifier as well as the prose definition.
     \texttt{-{}-snapshot <mountpoint>} flag accepts an
     already-mounted snapshot directory; the mount step itself is
     privileged.
+  \item[Squarify.] The treemap-layout algorithm of Bruls,
+    Huijzen, and van Wijk (2000), in the variant
+    \texttt{d3-hierarchy}'s \texttt{treemapSquarify} implements.
+    Greedy row-packing on the shorter side of each rect; rows
+    grow until the worst-case aspect ratio would worsen, then
+    lay out by dice (horizontal) or slice (vertical) and recurse
+    on the remaining strip. The Rust port preserves the d3
+    expressions for \texttt{alpha} and \texttt{beta}, so the
+    two implementations produce the same rectangles for the
+    same input.
   \item[Sparse bytes.] \texttt{INO\_EXT\_TYPE\_SPARSE\_BYTES}:
     the count of bytes the sparse-allocation layer has not
     committed to disk. An allocation hint, not a logical size.

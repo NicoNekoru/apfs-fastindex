@@ -196,19 +196,28 @@ normalises.
 
 Live progress events flow through a dedicated sampling thread
 inside the parallel scheduler at a 250~ms cadence (matching the
-serial path), so the user-visible stopwatch and entry counter
-tick smoothly even on a whole-machine scan that is otherwise
-silent for tens of seconds.
+serial path), so the CLI's \texttt{-{}-progress} stream and any
+user-space consumer of it can tick smoothly even on a
+whole-machine scan that is otherwise silent for tens of
+seconds. The in-process FFI consumed by the native shell of
+chapter~13 does not pipe these events through today --- the
+scan runs as one synchronous call --- but the event-emitting
+machinery is preserved on the library side so a future
+asynchronous-FFI slice can light up the stopwatch without
+re-implementing it.
 
 \begin{figure}[h]
 \centering
 \includegraphics[width=\linewidth]{figures/app-progress.png}
-\caption{A whole-machine \texttt{/} scan mid-flight. The
-stopwatch and entry counter come from the parallel walker's
-progress thread; 231 paths have been recorded as skipped at this
-point in the walk (sandboxed application data, sealed-system
-locations). The Cancel control terminates the worker pool
-cleanly.}
+\caption{A whole-machine \texttt{/} scan mid-flight in the
+pre-native build that consumed \texttt{-{}-progress} stderr
+events. The stopwatch and entry counter come from the parallel
+walker's progress thread; 231 paths have been recorded as
+skipped at this point in the walk (sandboxed application data,
+sealed-system locations). The Cancel control terminates the
+worker pool cleanly. The same event stream still flows from
+the CLI binary; the in-process FFI used by the current native
+shell awaits a slice that exposes it.}
 \end{figure}
 
 \section{Firmlink Overlay Dedup}

@@ -234,6 +234,73 @@ final class Scan {
         return Scan(handle: handle)
     }
 
+    /// One snapshot from the running scanner — `scanned` and
+    /// `skipped` are running entry counts, `elapsedMs` is wall
+    /// time since the scan began, `terminal` is `true` on the
+    /// final event when the scan is done (`scanned + skipped`
+    /// matches the final entry count).
+    struct ProgressSnapshot {
+        let scanned: UInt64
+        let skipped: UInt64
+        let elapsedMs: UInt64
+        let terminal: Bool
+    }
+
+    /// Like `fallback`, but invokes `onProgress` from a background
+    /// thread on each scanner tick (≈ every 250 ms during the
+    /// scan plus one terminal event). The callback is *not*
+    /// marshalled to the main queue automatically — UI consumers
+    /// must dispatch back themselves.
+    ///
+    /// Implemented with the `_with_progress` FFI: a Swift box
+    /// holding the closure is `passRetained` into Rust as the
+    /// userdata pointer, and a trampoline `extern "C" fn` casts
+    /// it back to invoke `onProgress`. The box is released after
+    /// the scan returns (success or failure) — the Rust side
+    /// guarantees no callbacks fire past return, so this is safe.
+    static func fallbackWithProgress(
+        path: String,
+        threads: UInt32 = 0,
+        crossMounts: Bool = false,
+        onProgress: @escaping (ProgressSnapshot) -> Void
+    ) -> Scan? {
+        final class Box {
+            let cb: (ProgressSnapshot) -> Void
+            init(_ cb: @escaping (ProgressSnapshot) -> Void) { self.cb = cb }
+        }
+        let box = Box(onProgress)
+        let userdata = Unmanaged.passRetained(box).toOpaque()
+
+        // Trampoline must be a non-capturing `@convention(c)`
+        // function pointer; we recover the box via the
+        // `userdata` arg and forward to `box.cb`.
+        let trampoline: @convention(c) (UInt64, UInt64, UInt64, Bool, UnsafeMutableRawPointer?) -> Void = {
+            scanned, skipped, elapsedMs, terminal, ud in
+            guard let ud else { return }
+            let b = Unmanaged<Box>.fromOpaque(ud).takeUnretainedValue()
+            b.cb(ProgressSnapshot(
+                scanned: scanned,
+                skipped: skipped,
+                elapsedMs: elapsedMs,
+                terminal: terminal
+            ))
+        }
+
+        let handle = path.withCString { cPath in
+            apfs_scan_directory_with_progress(
+                cPath, threads, crossMounts, trampoline, userdata
+            )
+        }
+        // Always release the retained box once the scan has
+        // returned (no further callbacks can fire after this
+        // point — the Rust side joins its progress thread before
+        // returning).
+        Unmanaged<Box>.fromOpaque(userdata).release()
+
+        guard let handle else { return nil }
+        return Scan(handle: handle)
+    }
+
     private let handle: OpaquePointer
 
     private init(handle: OpaquePointer) {

@@ -30,7 +30,7 @@ use std::ptr;
 use crate::ext_summary::ExtSummary;
 use crate::render::{render_cells, ApfsCell, ApfsLayout, HitGrid, Metric};
 use crate::tree::{Tree, NODE_INVALID};
-use crate::{fallback_scan_path_with_options, FallbackOptions};
+use crate::{fallback_scan_path_with_options, FallbackOptions, ProgressEvent};
 
 // ─────────────────────────────────────────────────────────────
 // Phase 1 sanity-check surface
@@ -107,6 +107,55 @@ pub extern "C" fn apfs_scan_directory(
     threads: u32,
     cross_mounts: bool,
 ) -> *mut ApfsScan {
+    // Thin wrapper: the no-progress path is just the
+    // with-progress path called with a NULL callback. Keeps the
+    // post-scan finalize logic in one place
+    // (`finalize_scan_handle`).
+    apfs_scan_directory_with_progress(path, threads, cross_mounts, None, ptr::null_mut())
+}
+
+/// C ABI signature for the progress callback the Swift side
+/// hands to `apfs_scan_directory_with_progress`. The Rust
+/// fallback walker fires events from a dedicated background
+/// thread (one event ≈ every 250 ms while the scan runs, plus
+/// a final `terminal=true` event when scanning finishes); the
+/// callback must be safe to invoke from that thread.
+/// Wrapped in `Option<...>` so the C ABI is `void (*)(...)` (a
+/// nullable function pointer); cbindgen collapses
+/// `Option<extern "C" fn>` to a plain function-pointer typedef
+/// when written this way.
+pub type ApfsProgressCallback = Option<
+    extern "C" fn(
+        scanned: u64,
+        skipped: u64,
+        elapsed_ms: u64,
+        terminal: bool,
+        userdata: *mut std::os::raw::c_void,
+    ),
+>;
+
+/// Newtype around the raw userdata pointer so we can opt into
+/// `Send` for the closure that moves it into the parallel
+/// walker. Swift caller is responsible for actual thread
+/// safety — typically the userdata is an `Unmanaged.toOpaque()`
+/// reference to a Swift box.
+struct ProgressUserdata(*mut std::os::raw::c_void);
+unsafe impl Send for ProgressUserdata {}
+
+/// Like `apfs_scan_directory` but with a live progress callback.
+/// `progress_fn` is invoked from a background thread roughly
+/// every 250 ms during the scan; the final event has
+/// `terminal == true`. Passing NULL for `progress_fn` is
+/// equivalent to calling `apfs_scan_directory` (no progress
+/// events).
+#[no_mangle]
+pub extern "C" fn apfs_scan_directory_with_progress(
+    path: *const c_char,
+    threads: u32,
+    cross_mounts: bool,
+    progress_fn: ApfsProgressCallback,
+    userdata: *mut std::os::raw::c_void,
+) -> *mut ApfsScan {
     if path.is_null() {
         return ptr::null_mut();
     }
@@ -115,27 +164,46 @@ pub extern "C" fn apfs_scan_directory(
         Ok(s) => s,
         Err(_) => return ptr::null_mut(),
     };
+    let user = ProgressUserdata(userdata);
+    let mut progress_closure = move |event: ProgressEvent| {
+        // Rebind to a reference so disjoint-captures captures the
+        // whole `ProgressUserdata` (which is `Send` via the unsafe
+        // impl above) rather than projecting `user.0`, which would
+        // be a bare `*mut c_void` and not `Send`.
+        let user = &user;
+        if let Some(cb) = progress_fn {
+            cb(
+                event.scanned,
+                event.skipped,
+                event.elapsed.as_millis() as u64,
+                event.terminal,
+                user.0,
+            );
+        }
+    };
+    let progress_ref: Option<&mut (dyn FnMut(ProgressEvent) + Send)> = if progress_fn.is_some() {
+        Some(&mut progress_closure)
+    } else {
+        None
+    };
     let options = FallbackOptions {
         cross_mounts,
-        progress: None,
+        progress: progress_ref,
         threads: if threads == 0 { 4 } else { threads as usize },
     };
     let output = match fallback_scan_path_with_options(path_str, options) {
         Ok(o) => o,
         Err(_) => return ptr::null_mut(),
     };
+    finalize_scan_handle(output)
+}
 
-    // Build the indexed tree. `Tree::build` walks the entries
-    // and aggregates value_logical / value_allocated /
-    // item_count up the tree in one post-order pass — the root's
-    // aggregates are the totals Swift used to read off the cached
-    // `logical_total` / `allocated_total` fields, so those are
-    // gone now.
+/// Shared post-scan handle construction. Called by both the
+/// progress and no-progress entry points. Builds the indexed
+/// tree, caches the `allocated_available` flag, packs paths
+/// + claim into CStrings, and hands the box back.
+fn finalize_scan_handle(output: crate::FallbackScanOutput) -> *mut ApfsScan {
     let tree = Tree::build(&output.parser_output.entries);
-
-    // The "allocated-available" flag is still cheap to compute
-    // off the flat entry list; doing so during tree-build would
-    // mean a second branch in the hot loop.
     let mut allocated_available = false;
     for entry in &output.parser_output.entries {
         if entry.allocated_size.is_some() {
@@ -143,25 +211,27 @@ pub extern "C" fn apfs_scan_directory(
             break;
         }
     }
-
     let claim_c = CString::new(output.correctness_claim.clone())
         .unwrap_or_else(|_| CString::new("").unwrap());
     let source_kind_c = CString::new(output.parser_output.source.source_kind.clone())
         .unwrap_or_else(|_| CString::new("").unwrap());
     let source_requested_path_c = CString::new(
-        output.parser_output.source.requested_path.to_string_lossy().into_owned(),
+        output
+            .parser_output
+            .source
+            .requested_path
+            .to_string_lossy()
+            .into_owned(),
     )
     .unwrap_or_else(|_| CString::new("").unwrap());
-
-    let scan = Box::new(ApfsScan {
+    Box::into_raw(Box::new(ApfsScan {
         output,
         tree,
         correctness_claim: claim_c,
         source_kind: source_kind_c,
         source_requested_path: source_requested_path_c,
         allocated_available,
-    });
-    Box::into_raw(scan)
+    }))
 }
 
 /// Drop a scan handle. Idempotent on NULL.

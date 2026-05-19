@@ -35,6 +35,20 @@ struct NativeContentView: View {
     /// 10 ms so we don't bother caching across navigations.
     @State private var extSummary: Scan.ExtSummary?
 
+    // Live scan progress. While `scanning` is true the centered
+    // overlay shows `scanPhaseLabel` + the counters below. Phase
+    // labels flow:
+    //   "Scanning"   — receiving per-tick progress events
+    //   "Indexing"   — terminal event fired, tree-build in Rust
+    //                  still running (`apfs_scan_directory`
+    //                  returns once the tree is built)
+    //   "Rendering"  — scan returned; squarify/cells running on
+    //                  the main thread
+    @State private var scanPhaseLabel: String = "Scanning"
+    @State private var scanProgressScanned: UInt64 = 0
+    @State private var scanProgressSkipped: UInt64 = 0
+    @State private var scanProgressElapsedMs: UInt64 = 0
+
     var body: some View {
         VStack(spacing: 0) {
             toolbar
@@ -56,20 +70,25 @@ struct NativeContentView: View {
             VSplitView {
                 HSplitView {
                     treeListPanel
-                        .frame(minWidth: 220, idealWidth: 340, maxWidth: 600)
+                        .frame(minWidth: 220, idealWidth: 340, maxWidth: .infinity)
                     extListPanel
-                        .frame(minWidth: 200, idealWidth: 280, maxWidth: 600)
+                        .frame(minWidth: 200, idealWidth: 280, maxWidth: .infinity)
                 }
-                .frame(minHeight: 120, idealHeight: 220)
+                .frame(maxWidth: .infinity, minHeight: 120, idealHeight: 220)
                 GeometryReader { proxy in
                     ZStack {
                         VizPalette.bg
                         TreemapViewRepresentable(
+                            scan: scan,
                             layout: layout,
+                            metric: metric,
                             onClick: { nodeIndex in
                                 handleClick(nodeIndex: nodeIndex)
                             }
                         )
+                        if scanning {
+                            progressOverlay
+                        }
                     }
                     .onAppear { resize(to: proxy.size) }
                     .onChange(of: proxy.size) { newSize in resize(to: newSize) }
@@ -134,13 +153,34 @@ struct NativeContentView: View {
                 .padding(.vertical, 4)
                 .background(VizPalette.bg)
             Divider().background(VizPalette.border)
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(treeRows) { row in
-                        treeListRowView(row)
+            // ScrollViewReader so we can scroll-to-row when
+            // `currentNode` changes (treemap → tree-list sync).
+            // Each row gets `.id(row.id)` for the lookup.
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(treeRows) { row in
+                            treeListRowView(row)
+                                .id(row.id)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+                .onChange(of: currentNode) { newNode in
+                    // Find the visible row for the new
+                    // currentNode and bring it into view.
+                    // The treemap-click path also auto-
+                    // expands ancestors in `navigate(to:)` so
+                    // the row should always be visible (modulo
+                    // the overflow cap).
+                    if let id = treeRows.first(where: {
+                        !$0.isOverflow && $0.nodeIndex == newNode
+                    })?.id {
+                        withAnimation(.easeOut(duration: 0.18)) {
+                            proxy.scrollTo(id, anchor: .center)
+                        }
                     }
                 }
-                .padding(.vertical, 2)
             }
         }
         .background(VizPalette.panel)
@@ -575,17 +615,22 @@ struct NativeContentView: View {
             .disabled(scan?.allocatedAvailable == false)
             .onChange(of: metric) { _ in updateLayout() }
 
-            HStack(spacing: 4) {
+            HStack(spacing: 6) {
                 Text("Depth")
                     .font(.system(size: 11))
                     .foregroundStyle(VizPalette.muted)
-                Stepper(value: $depth, in: 0...20) {
-                    Text(depth == 0 ? "auto" : String(depth))
-                        .font(.system(size: 12, design: .monospaced))
-                        .frame(minWidth: 32)
-                }
-                .labelsHidden()
-                .onChange(of: depth) { _ in updateLayout() }
+                // Show the current value next to the stepper —
+                // the Stepper's own label sits inside its
+                // tracking area, which `.labelsHidden()` then
+                // squashes; pulling the value out keeps the
+                // arrows tight and the number visible.
+                Text(depth == 0 ? "auto" : String(depth))
+                    .font(.system(size: 12, design: .monospaced))
+                    .frame(minWidth: 34, alignment: .trailing)
+                    .foregroundStyle(VizPalette.text)
+                Stepper("", value: $depth, in: 0...20)
+                    .labelsHidden()
+                    .onChange(of: depth) { _ in updateLayout() }
             }
             .padding(.horizontal, 8)
 
@@ -758,6 +803,82 @@ struct NativeContentView: View {
         return "\(scan.entryCount.formatted()) entries · logical \(logical)\(allocatedPart)"
     }
 
+    // MARK: - Progress overlay
+
+    /// Centered card shown over the treemap while a scan is in
+    /// flight. Reads `scanPhaseLabel`, `scanProgressScanned`,
+    /// `scanProgressSkipped`, `scanProgressElapsedMs` — all
+    /// updated on the main queue from the FFI progress callback
+    /// (see `startScan()`).
+    private var progressOverlay: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 10) {
+                ProgressView()
+                    .controlSize(.small)
+                    .progressViewStyle(.circular)
+                    .tint(VizPalette.accent)
+                Text(scanPhaseLabel)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(VizPalette.text)
+            }
+            HStack(spacing: 18) {
+                metricCell(label: "Scanned",
+                           value: scanProgressScanned.formatted())
+                if scanProgressSkipped > 0 {
+                    metricCell(label: "Skipped",
+                               value: scanProgressSkipped.formatted())
+                }
+                metricCell(label: "Elapsed",
+                           value: formattedElapsed(ms: scanProgressElapsedMs))
+            }
+            if !pathInput.isEmpty {
+                Text(pathInput)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(VizPalette.muted)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: 360)
+            }
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 16)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(VizPalette.panel)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(VizPalette.border, lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.35), radius: 14, x: 0, y: 6)
+        )
+    }
+
+    @ViewBuilder
+    private func metricCell(label: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label.uppercased())
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(VizPalette.muted)
+                .tracking(0.4)
+            Text(value)
+                .font(.system(size: 13, design: .monospaced))
+                .foregroundStyle(VizPalette.text)
+        }
+    }
+
+    /// Stopwatch-style `H:MM:SS` (omitting the hour part when
+    /// elapsed is < 1 h, which is the common case).
+    private func formattedElapsed(ms: UInt64) -> String {
+        let totalSec = Int(ms / 1000)
+        let h = totalSec / 3600
+        let m = (totalSec % 3600) / 60
+        let s = totalSec % 60
+        if h > 0 {
+            return String(format: "%d:%02d:%02d", h, m, s)
+        }
+        return String(format: "%d:%02d", m, s)
+    }
+
     // MARK: - Scan + layout flow
 
     private func startScan() {
@@ -765,19 +886,44 @@ struct NativeContentView: View {
         guard !path.isEmpty else { return }
         scanError = nil
         scanning = true
+        scanPhaseLabel = "Scanning"
+        scanProgressScanned = 0
+        scanProgressSkipped = 0
+        scanProgressElapsedMs = 0
         DispatchQueue.global(qos: .userInitiated).async {
-            let result = Scan.fallback(path: path, threads: 0, crossMounts: false)
+            let result = Scan.fallbackWithProgress(
+                path: path,
+                threads: 0,
+                crossMounts: false,
+                onProgress: { snapshot in
+                    // Marshal off the Rust progress thread onto
+                    // the main queue before touching SwiftUI
+                    // state. The terminal event flips the phase
+                    // to "Indexing" (tree-build runs after the
+                    // walker terminates inside the same FFI call).
+                    DispatchQueue.main.async {
+                        scanProgressScanned = snapshot.scanned
+                        scanProgressSkipped = snapshot.skipped
+                        scanProgressElapsedMs = snapshot.elapsedMs
+                        if snapshot.terminal {
+                            scanPhaseLabel = "Indexing"
+                        }
+                    }
+                }
+            )
             DispatchQueue.main.async {
-                scanning = false
                 if let result {
+                    // Flip phase to "Rendering" *before* the
+                    // synchronous layout pass — for /-scale roots
+                    // squarify is fast enough that this is mostly
+                    // for symmetry, but it surfaces the post-
+                    // index gap rather than letting the spinner
+                    // disappear silently.
+                    scanPhaseLabel = "Rendering"
                     scan = result
                     currentNode = 0
                     lastClickedPath = ""
                     expandedNodes = [0]
-                    // If the scan's allocated column is missing,
-                    // force the picker back to "Logical" so the
-                    // user doesn't see an empty treemap on the
-                    // disabled metric.
                     if !result.allocatedAvailable && metric == .allocated {
                         metric = .logical
                     }
@@ -791,6 +937,7 @@ struct NativeContentView: View {
                     extSummary = nil
                     scanError = "scan failed for \(path)"
                 }
+                scanning = false
             }
         }
     }
@@ -820,12 +967,17 @@ struct NativeContentView: View {
 
     private func handleClick(nodeIndex: UInt32) {
         guard let scan else { return }
-        let path = scan.path(of: nodeIndex) ?? ""
-        lastClickedPath = path.isEmpty ? "/" : path
-        // Drill into directories; clicking a file just selects it.
         if scan.childCount(of: nodeIndex) > 0 {
-            currentNode = nodeIndex
-            updateLayout()
+            // Treemap → drill in. Reuse `navigate(to:)` so the
+            // tree-list sync (expand ancestors, scroll-to-row,
+            // highlight) is the same path the side-panel click
+            // takes.
+            navigate(to: nodeIndex)
+        } else {
+            // Leaf (file / symlink): surface the path but don't
+            // drill — the cell isn't a navigable container.
+            let path = scan.path(of: nodeIndex) ?? ""
+            lastClickedPath = path.isEmpty ? "/" : path
         }
     }
 
