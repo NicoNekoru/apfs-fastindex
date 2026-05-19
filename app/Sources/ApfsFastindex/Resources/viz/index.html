@@ -88,6 +88,57 @@
     cursor: not-allowed;
   }
   header button:disabled { opacity: 0.5; cursor: not-allowed; }
+  /* Depth picker. `−` / `+` step the value, the input lets the user
+     type any integer in 1-20. The viz progressively renders deeper
+     levels up to this cap; deeper subtrees collapse to a single
+     rectangle keyed off their aggregate size. Default 10 covers
+     virtually any real-world filesystem from one viewport. */
+  header .depth-control {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  header .depth-control label {
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    font-size: 11px;
+    margin-right: 2px;
+  }
+  header .depth-control button {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  header .depth-control button:hover {
+    background: var(--hover);
+    border-color: var(--accent);
+  }
+  header .depth-control input {
+    width: 44px;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 3px 6px;
+    font-size: 12px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+  /* Hide native number-spinner arrows; we provide our own +/−
+     buttons that hit a more practical hit target on dense
+     toolbars. */
+  header .depth-control input::-webkit-inner-spin-button,
+  header .depth-control input::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
   #drop-zone {
     flex: 1;
     display: flex;
@@ -538,6 +589,13 @@
             title="Size rectangles by allocated bytes (st_blocks*512)"
             disabled>Allocated</button>
   </div>
+  <div class="depth-control" title="Max depth to render below the current folder. Deeper levels collapse into a single rectangle.">
+    <label for="depth-input">Depth</label>
+    <button id="depth-dec" type="button" aria-label="Decrease depth">−</button>
+    <input id="depth-input" type="number" min="1" max="20" step="1" value="10"
+           inputmode="numeric">
+    <button id="depth-inc" type="button" aria-label="Increase depth">+</button>
+  </div>
   <button id="load-btn">Open JSON…</button>
   <button id="reset-btn" class="secondary" disabled>Reset zoom</button>
   <input type="file" id="file-input" accept=".json,application/json" hidden>
@@ -678,6 +736,19 @@ let activeMetric = "logical";
 /// Allocated toggle entirely.
 let allocatedAvailable = false;
 
+/// Max-depth cap exposed via the toolbar depth picker. Treemap
+/// renders progressively from depth 1 up to this; anything below
+/// collapses into a single rectangle keyed off the directory's
+/// aggregate. Declared up here (not next to the render function)
+/// because the depth-input wiring runs as the top-level script
+/// proceeds, before the render block is reached, and `let`
+/// declarations are TDZ-locked until that line executes.
+let maxDepth = 10;
+/// rAF handle for the in-flight progressive render. Cleared on
+/// completion or on a fresh `render()` call so we never paint into
+/// a navigated-away tree.
+let progressiveRafHandle = null;
+
 loadBtn.addEventListener("click", () => fileInput.click());
 fileInput.addEventListener("change", (ev) => {
   const f = ev.target.files[0];
@@ -701,6 +772,30 @@ resetBtn.addEventListener("click", () => {
 });
 metricLogicalBtn.addEventListener("click", () => setActiveMetric("logical"));
 metricAllocatedBtn.addEventListener("click", () => setActiveMetric("allocated"));
+
+const depthInput = document.getElementById("depth-input");
+const depthDec = document.getElementById("depth-dec");
+const depthInc = document.getElementById("depth-inc");
+maxDepth = clampDepth(parseInt(depthInput.value, 10));
+depthInput.value = String(maxDepth);
+function clampDepth(v) {
+  if (!Number.isFinite(v)) return 10;
+  return Math.max(1, Math.min(20, v | 0));
+}
+function setMaxDepth(v) {
+  const next = clampDepth(v);
+  if (next === maxDepth) {
+    depthInput.value = String(next);
+    return;
+  }
+  maxDepth = next;
+  depthInput.value = String(next);
+  if (currentNode) render(currentNode);
+}
+depthInput.addEventListener("change", () => setMaxDepth(parseInt(depthInput.value, 10)));
+depthInput.addEventListener("blur", () => { depthInput.value = String(maxDepth); });
+depthDec.addEventListener("click", () => setMaxDepth(maxDepth - 1));
+depthInc.addEventListener("click", () => setMaxDepth(maxDepth + 1));
 
 function setActiveMetric(metric) {
   if (metric === activeMetric) return;
@@ -1302,18 +1397,42 @@ function colorForExt(ext) {
   return hashColor(raw);
 }
 
-// Render the whole subtree at once (WizTree-style): every leaf gets its
-// own rectangle, every directory is a labeled container around its
-// children. d3.treemap lays the entire hierarchy in one pass; we then
-// walk descendants and skip rectangles whose pixel area is below a
-// threshold so SVG stays interactive on 100k+ entry scans.
-const DIR_LABEL_HEIGHT = 18;
-const MIN_PIXEL_AREA = 4; // px^2; drop slivers smaller than this
-const MIN_LEAF_LABEL_W = 50;
-const MIN_LEAF_LABEL_H = 16;
-const MIN_DIR_LABEL_W = 60;
+// Render the whole subtree at once (WizTree-style): every leaf gets
+// its own rectangle, every directory is a labeled container around
+// its children. d3.treemap lays the entire hierarchy in one pass;
+// we then walk descendants and skip rectangles whose pixel area is
+// below a threshold so SVG stays interactive on 100k+ entry scans.
+//
+// Padding constants were tuned down from the original layout: tight
+// padding closes the dir-bg "gutters" between children that
+// otherwise read as wasted space on a screen-filling treemap. The
+// label-height reservation is conditional on the parent being big
+// enough to actually fit the label (handled in `paddingTop` below)
+// so small directories don't bleed a label-strip-shaped hole into
+// the layout. `MIN_PIXEL_AREA` is 1 so every culled sliver becomes
+// at most one pixel of empty space instead of a four-pixel patch.
+const DIR_LABEL_HEIGHT = 14;
+const MIN_PIXEL_AREA = 1;
+const MIN_LEAF_LABEL_W = 40;
+const MIN_LEAF_LABEL_H = 14;
+const MIN_DIR_LABEL_W = 48;
+
+/// Progressive render state. The current treemap is built up in
+/// passes — pass 1 lays out depth-1 children of `currentNode`, pass
+/// 2 adds the second level, …, up to `maxDepth`. Each pass replaces
+/// the SVG (d3.treemap squarifies in one shot; partial-tree
+/// incremental layout would require a custom packer), but the
+/// outer rectangles' positions are stable between passes because
+/// d3 sizes them off subtree totals which don't change with depth.
+/// `maxDepth` and `progressiveRafHandle` are declared near the top
+/// of the script so the depth-input wiring above can assign to
+/// them without TDZ-tripping `let`.
 
 function render(node) {
+  if (progressiveRafHandle !== null) {
+    cancelAnimationFrame(progressiveRafHandle);
+    progressiveRafHandle = null;
+  }
   svg.selectAll("*").remove();
   const width = bottomPane.clientWidth;
   const height = bottomPane.clientHeight;
@@ -1327,23 +1446,69 @@ function render(node) {
     return;
   }
 
-  const treeRoot = d3.hierarchy(node, d => d.children)
-    .sum(d => d.children ? 0 : d.value)
+  // Progressive: start at depth 1 for fast first paint, then walk
+  // down to `maxDepth`. A small tree might finish at d < maxDepth
+  // when there's nothing left to subdivide.
+  const targetDepth = Math.max(1, Math.min(20, maxDepth | 0));
+  renderAtDepth(node, 1, width, height);
+  if (targetDepth > 1) scheduleNextDepth(node, 2, targetDepth, width, height);
+}
+
+function scheduleNextDepth(node, depth, targetDepth, width, height) {
+  progressiveRafHandle = requestAnimationFrame(() => {
+    renderAtDepth(node, depth, width, height);
+    if (depth < targetDepth) {
+      scheduleNextDepth(node, depth + 1, targetDepth, width, height);
+    } else {
+      progressiveRafHandle = null;
+    }
+  });
+}
+
+function renderAtDepth(node, depth, width, height) {
+  const data = truncatedHierarchy(node, depth);
+  // Empty subtree (extremely rare past depth>1 because we already
+  // bail at the top-level dir check, but defensive).
+  if (!data.children || data.children.length === 0) return;
+  svg.selectAll("*").remove();
+
+  const treeRoot = d3.hierarchy(data, d => d.children)
+    .sum(d => d.children ? 0 : (d.value || 0))
     .sort((a, b) => b.value - a.value);
   d3.treemap()
     .size([width, height])
-    .paddingInner(1)
-    .paddingOuter(2)
-    .paddingTop(d => (d.depth === 0 || (d.children && d.children.length > 0))
-      ? DIR_LABEL_HEIGHT
-      : 0)
-    .tile(d3.treemapSquarify)(treeRoot);
+    .paddingInner(0.5)
+    .paddingOuter(1)
+    // Only reserve label space inside directories that are going
+    // to be large enough to *use* it. A pre-layout estimate is
+    // impossible (paddingTop drives the layout), but we know the
+    // total area each subtree will get from .value; the heuristic
+    // is "reserve label height iff this subtree's area share is
+    // at least one row-height of pixels". That keeps tiny dirs
+    // from carving a 14px-tall band out of a 30×4 rectangle.
+    .paddingTop(d => {
+      if (!(d.children && d.children.length > 0)) return 0;
+      // The root's label is the breadcrumb above the treemap — no
+      // need to reserve a strip at y=0 for it. Reclaiming this row
+      // is the single biggest empty-space win at the top of the
+      // viewport.
+      if (d.depth === 0) return 0;
+      const total = treeRoot.value || 1;
+      const share = (d.value || 0) / total;
+      const approxArea = share * width * height;
+      return approxArea > (DIR_LABEL_HEIGHT * MIN_DIR_LABEL_W * 1.5)
+        ? DIR_LABEL_HEIGHT
+        : 0;
+    })
+    .tile(d3.treemapSquarify.ratio(1.4))(treeRoot);
 
   // Directory containers (every non-leaf node except root).
   const dirNodes = treeRoot.descendants().filter(d =>
     d.depth > 0 && d.children && d.children.length > 0 && pixelArea(d) >= MIN_PIXEL_AREA);
 
-  // Leaf rectangles (files/symlinks; size > 0 or shown anyway for tiny ones).
+  // Leaf rectangles (files/symlinks/truncated-dirs; size > 0 or
+  // shown anyway for tiny ones — the MIN_PIXEL_AREA=1 keeps every
+  // visible pixel filled instead of fading into the dir-bg).
   const leafNodes = treeRoot.leaves().filter(d => pixelArea(d) >= MIN_PIXEL_AREA);
 
   // Draw directories first so leaves sit on top.
@@ -1364,16 +1529,17 @@ function render(node) {
     .on("mousemove", (event, d) => showTooltip(event, d.data))
     .on("mouseleave", hideTooltip)
     .on("click", (_, d) => {
-      if (d.data.kind === "dir" && d.data.children && d.data.children.length > 0) {
-        navigate(d.data);
+      const original = d.data._original || d.data;
+      if (original.kind === "dir" && original.children && original.children.length > 0) {
+        navigate(original);
       }
     })
-    .on("contextmenu", (event, d) => emitContextMenu(event, d.data));
+    .on("contextmenu", (event, d) => emitContextMenu(event, d.data._original || d.data));
 
   dirCell.append("text")
     .attr("class", "dir-label")
     .attr("x", 4)
-    .attr("y", 12)
+    .attr("y", 11)
     .attr("fill", "#cfd6e4")
     .attr("font-size", 11)
     .text(d => dirLabel(d))
@@ -1396,13 +1562,23 @@ function render(node) {
     .attr("fill", d => leafColor(d.data))
     .on("mousemove", (event, d) => showTooltip(event, d.data))
     .on("mouseleave", hideTooltip)
-    .on("click", (_, d) => emitSelected(d.data))
-    .on("contextmenu", (event, d) => emitContextMenu(event, d.data));
+    .on("click", (_, d) => {
+      // A truncated directory leaf navigates instead of "selects" —
+      // clicking it means "drill in", which matches what a dir-bg
+      // click does for non-truncated dirs.
+      const original = d.data._original || d.data;
+      if (d.data._isTruncatedDir) {
+        navigate(original);
+      } else {
+        emitSelected(original);
+      }
+    })
+    .on("contextmenu", (event, d) => emitContextMenu(event, d.data._original || d.data));
 
   leafCell.append("text")
     .attr("x", 4)
-    .attr("y", 12)
-    .attr("fill", "#0b0d12")
+    .attr("y", 11)
+    .attr("fill", d => d.data._isTruncatedDir ? "#e4e7ee" : "#0b0d12")
     .attr("font-size", 10)
     .text(d => leafLabel(d))
     .each(function (d) {
@@ -1410,6 +1586,53 @@ function render(node) {
         d3.select(this).remove();
       }
     });
+}
+
+/// Walk `node`'s subtree and produce a shallow copy where any
+/// directory at depth >= `maxD` is rewritten into a leaf carrying
+/// the directory's full subtree value plus an `_isTruncatedDir`
+/// flag. The original node reference is stored on `_original` so
+/// click / context-menu handlers can navigate back into the
+/// uncopied data. Returned objects share `name` / `path` /
+/// `valueLogical` / `valueAllocated` / `kind` with the originals
+/// so existing label and tooltip helpers keep working.
+function truncatedHierarchy(node, maxD) {
+  function walk(n, depth) {
+    if (depth >= maxD || !n.children || n.children.length === 0) {
+      // Leaf or truncated dir: no children for d3.treemap to
+      // recurse into. `value` is already metric-adjusted by
+      // applyActiveMetric() so we can copy it verbatim.
+      return {
+        name: n.name,
+        kind: n.kind,
+        path: n.path,
+        value: n.value || 0,
+        valueLogical: n.valueLogical,
+        valueAllocated: n.valueAllocated,
+        logicalSize: n.logicalSize,
+        allocatedSize: n.allocatedSize,
+        symlinkTarget: n.symlinkTarget,
+        itemCount: n.itemCount,
+        _isTruncatedDir: n.kind === "dir" && n.children && n.children.length > 0,
+        _original: n,
+      };
+    }
+    return {
+      name: n.name,
+      kind: n.kind,
+      path: n.path,
+      value: n.value || 0,
+      valueLogical: n.valueLogical,
+      valueAllocated: n.valueAllocated,
+      logicalSize: n.logicalSize,
+      allocatedSize: n.allocatedSize,
+      symlinkTarget: n.symlinkTarget,
+      itemCount: n.itemCount,
+      _original: n,
+      children: n.children.map(c => walk(c, depth + 1)),
+    };
+  }
+  return walk(node, 0);
 }
 
 function pixelArea(d) {
@@ -1425,6 +1648,12 @@ function dirLabel(d) {
 }
 
 function leafLabel(d) {
+  if (d.data._isTruncatedDir) {
+    // Trailing slash + bytes is the visual cue that this rectangle
+    // is a *folded-up* directory; clicking it navigates instead of
+    // selecting a file.
+    return `${d.data.name}/ · ${formatBytes(d.value)}`;
+  }
   return d.data.name;
 }
 
@@ -1457,10 +1686,21 @@ function leafColor(data) {
   // A leaf with no allocated_size under the active "allocated" metric
   // is a SR-019 fail-closed row (sparse / decmpfs). Render it muted
   // so the user can see *where* the unclaimed rows are rather than
-  // wondering why their treemap shrank.
-  if (activeMetric === "allocated" && data.allocatedSize === null) {
-    return "#3b3f4a";
+  // wondering why their treemap shrank. Truncated-directory leaves
+  // check their aggregate (`valueAllocated`) instead of their own
+  // `allocatedSize` (which is always null for directories).
+  if (activeMetric === "allocated") {
+    if (data._isTruncatedDir) {
+      if (data.valueAllocated === null) return "#3b3f4a";
+    } else if (data.allocatedSize === null) {
+      return "#3b3f4a";
+    }
   }
+  // A truncated directory deserves its own swatch so the user can
+  // tell it apart from files at a glance. Slightly bluer than
+  // `dir-bg` (rgba(30, 35, 45, 0.55)) so it reads as "still a
+  // folder, just folded shut" rather than "background".
+  if (data._isTruncatedDir) return "#3e4a5e";
   if (data.kind === "symlink") return "#7d8a99";
   if (data.kind !== "file") return "#5b6779";
   const name = data.name || "";
