@@ -749,6 +749,36 @@ let maxDepth = 10;
 /// a navigated-away tree.
 let progressiveRafHandle = null;
 
+/// Cache d3 treemap layouts keyed on `(node.path, depth, metric,
+/// width × height)`. A hit lets renderAtDepth skip the
+/// truncate → d3.hierarchy → sum → sort → squarify pipeline (the
+/// expensive part on big trees) and jump straight to DOM build.
+/// LRU-evicted at the cap. Cleared in `ingest()` and on window
+/// resize so we don't accidentally serve stale dims after a layout
+/// change.
+const treemapLayoutCache = new Map();
+const TREEMAP_LAYOUT_CACHE_LIMIT = 8;
+
+/// Lightweight perf log so the user can inspect render costs from
+/// DevTools (`console.log(JSON.stringify(window.apfsPerf,null,2))`)
+/// or by toggling `window.apfsPerfVerbose = true` to mirror events
+/// to the console as they happen. Bounded ring buffer.
+const apfsPerfLog = [];
+const APFS_PERF_LOG_LIMIT = 200;
+window.apfsPerf = apfsPerfLog;
+window.apfsPerfVerbose = false;
+function pushPerf(event, ms, extra) {
+  const entry = { event, ms: Math.round(ms * 100) / 100, at: Date.now() };
+  if (extra) Object.assign(entry, extra);
+  apfsPerfLog.push(entry);
+  if (apfsPerfLog.length > APFS_PERF_LOG_LIMIT) apfsPerfLog.shift();
+  if (window.apfsPerfVerbose) {
+    // Use console.debug so the verbose stream stays out of the
+    // default console level — DevTools must opt in to see it.
+    console.debug(`[apfsPerf] ${event} ${entry.ms}ms`, extra || "");
+  }
+}
+
 loadBtn.addEventListener("click", () => fileInput.click());
 fileInput.addEventListener("change", (ev) => {
   const f = ev.target.files[0];
@@ -854,8 +884,14 @@ skipsClose.addEventListener("click", () => { skipsModal.style.display = "none"; 
 // Window resize re-lays out the treemap only. The tree-list and
 // ext-list use flex sizing and don't depend on viewport pixels, so
 // rebuilding their DOM on every resize tick (formerly via
-// `navigate(currentNode)`) was wasted work.
-window.addEventListener("resize", () => { if (currentNode) render(currentNode); });
+// `navigate(currentNode)`) was wasted work. Layout-cache entries
+// are keyed by viewport size; clear so we don't bloat the cache
+// with every pixel-different drag step.
+window.addEventListener("resize", () => {
+  if (!currentNode) return;
+  treemapLayoutCache.clear();
+  render(currentNode);
+});
 
 function loadFile(file) {
   const reader = new FileReader();
@@ -885,6 +921,13 @@ function loadFile(file) {
 }
 
 function ingest(doc, filename) {
+  // Fresh scan: every cached layout is keyed against a node from
+  // the previous tree, so wipe the layout cache before we replace
+  // `rootNode`. The truncated-hierarchy clones inside cached
+  // entries also hold strong refs to old nodes; clearing breaks
+  // those refs so the old tree is GC-able.
+  treemapLayoutCache.clear();
+  apfsPerfLog.length = 0;
   const parserOutput = doc.parser_output || doc;
   const entries = parserOutput.entries || [];
   const aggregates = parserOutput.aggregates || [];
@@ -1446,12 +1489,94 @@ function render(node) {
     return;
   }
 
-  // Progressive: start at depth 1 for fast first paint, then walk
-  // down to `maxDepth`. A small tree might finish at d < maxDepth
-  // when there's nothing left to subdivide.
   const targetDepth = Math.max(1, Math.min(20, maxDepth | 0));
+  // If the final-depth layout is already cached for this
+  // (node, depth, metric, dims), skip progressive entirely and
+  // just paint once. This is the common case for depth toggles
+  // and back-navigation: revisiting a layout we already computed
+  // costs only the DOM rebuild (~150ms for 100k rects vs
+  // ~330ms+ for a fresh layout).
+  const finalKey = layoutCacheKey(node, targetDepth, activeMetric, width, height);
+  if (treemapLayoutCache.has(finalKey)) {
+    renderAtDepth(node, targetDepth, width, height);
+    return;
+  }
+  // Cold cache: progressive render gives the user visible
+  // feedback while deeper layouts compute. The cache populates
+  // as each depth lands so a depth slider drag won't re-pay the
+  // layout cost.
   renderAtDepth(node, 1, width, height);
   if (targetDepth > 1) scheduleNextDepth(node, 2, targetDepth, width, height);
+}
+
+function layoutCacheKey(node, depth, metric, w, h) {
+  const path = node.path === "." ? "/" : node.path;
+  return `${metric}|d${depth}|${w}x${h}|${path}`;
+}
+
+/// Resolve a treemap layout for `(node, depth)` at the current
+/// viewport / metric, hitting the cache when possible and
+/// computing + caching on miss. Returned `treeRoot` is a d3
+/// hierarchy with positions already populated, ready for DOM
+/// build.
+function resolveLayout(node, depth, width, height) {
+  const key = layoutCacheKey(node, depth, activeMetric, width, height);
+  const cached = treemapLayoutCache.get(key);
+  if (cached) {
+    // LRU touch: move-to-end so the entry survives upcoming
+    // evictions. Map preserves insertion order, so re-setting
+    // re-positions it as the most recently used.
+    treemapLayoutCache.delete(key);
+    treemapLayoutCache.set(key, cached);
+    pushPerf("layout_cache_hit", 0, { depth, path: node.path });
+    return cached;
+  }
+
+  const t0 = performance.now();
+  const data = truncatedHierarchy(node, depth);
+  const t1 = performance.now();
+  const treeRoot = d3.hierarchy(data, d => d.children)
+    .sum(d => d.children ? 0 : (d.value || 0))
+    .sort((a, b) => b.value - a.value);
+  const t2 = performance.now();
+  d3.treemap()
+    .size([width, height])
+    .paddingInner(0.5)
+    .paddingOuter(1)
+    .paddingTop(d => {
+      if (!(d.children && d.children.length > 0)) return 0;
+      if (d.depth === 0) return 0;
+      const total = treeRoot.value || 1;
+      const share = (d.value || 0) / total;
+      const approxArea = share * width * height;
+      return approxArea > (DIR_LABEL_HEIGHT * MIN_DIR_LABEL_W * 1.5)
+        ? DIR_LABEL_HEIGHT
+        : 0;
+    })
+    .tile(d3.treemapSquarify.ratio(1.4))(treeRoot);
+  const t3 = performance.now();
+
+  const layout = {
+    treeRoot,
+    leafCount: treeRoot.leaves().length,
+    truncateMs: t1 - t0,
+    hierarchyMs: t2 - t1,
+    layoutMs: t3 - t2,
+  };
+  treemapLayoutCache.set(key, layout);
+  while (treemapLayoutCache.size > TREEMAP_LAYOUT_CACHE_LIMIT) {
+    const oldestKey = treemapLayoutCache.keys().next().value;
+    treemapLayoutCache.delete(oldestKey);
+  }
+  pushPerf("layout_cache_miss", t3 - t0, {
+    depth,
+    path: node.path,
+    leaves: layout.leafCount,
+    truncateMs: layout.truncateMs,
+    hierarchyMs: layout.hierarchyMs,
+    layoutMs: layout.layoutMs,
+  });
+  return layout;
 }
 
 function scheduleNextDepth(node, depth, targetDepth, width, height) {
@@ -1466,41 +1591,14 @@ function scheduleNextDepth(node, depth, targetDepth, width, height) {
 }
 
 function renderAtDepth(node, depth, width, height) {
-  const data = truncatedHierarchy(node, depth);
+  const layout = resolveLayout(node, depth, width, height);
+  const treeRoot = layout.treeRoot;
   // Empty subtree (extremely rare past depth>1 because we already
   // bail at the top-level dir check, but defensive).
-  if (!data.children || data.children.length === 0) return;
-  svg.selectAll("*").remove();
+  if (!treeRoot.children || treeRoot.children.length === 0) return;
 
-  const treeRoot = d3.hierarchy(data, d => d.children)
-    .sum(d => d.children ? 0 : (d.value || 0))
-    .sort((a, b) => b.value - a.value);
-  d3.treemap()
-    .size([width, height])
-    .paddingInner(0.5)
-    .paddingOuter(1)
-    // Only reserve label space inside directories that are going
-    // to be large enough to *use* it. A pre-layout estimate is
-    // impossible (paddingTop drives the layout), but we know the
-    // total area each subtree will get from .value; the heuristic
-    // is "reserve label height iff this subtree's area share is
-    // at least one row-height of pixels". That keeps tiny dirs
-    // from carving a 14px-tall band out of a 30×4 rectangle.
-    .paddingTop(d => {
-      if (!(d.children && d.children.length > 0)) return 0;
-      // The root's label is the breadcrumb above the treemap — no
-      // need to reserve a strip at y=0 for it. Reclaiming this row
-      // is the single biggest empty-space win at the top of the
-      // viewport.
-      if (d.depth === 0) return 0;
-      const total = treeRoot.value || 1;
-      const share = (d.value || 0) / total;
-      const approxArea = share * width * height;
-      return approxArea > (DIR_LABEL_HEIGHT * MIN_DIR_LABEL_W * 1.5)
-        ? DIR_LABEL_HEIGHT
-        : 0;
-    })
-    .tile(d3.treemapSquarify.ratio(1.4))(treeRoot);
+  const tDom0 = performance.now();
+  svg.selectAll("*").remove();
 
   // Directory containers (every non-leaf node except root).
   const dirNodes = treeRoot.descendants().filter(d =>
@@ -1586,6 +1684,13 @@ function renderAtDepth(node, depth, width, height) {
         d3.select(this).remove();
       }
     });
+
+  pushPerf("dom_build", performance.now() - tDom0, {
+    depth,
+    path: node.path,
+    dirCount: dirNodes.length,
+    leafCount: leafNodes.length,
+  });
 }
 
 /// Walk `node`'s subtree and produce a shallow copy where any
