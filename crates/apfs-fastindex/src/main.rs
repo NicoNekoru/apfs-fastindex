@@ -39,6 +39,16 @@ const USAGE: &str = "usage: apfs-fastindex-scan [--summary] [--pretty] [--slim] 
 enum OutputFormat {
     Json,
     Msgpack,
+    /// Sequence of msgpack 2-element arrays, one per record:
+    ///   `[header,  {mode, correctness_claim, source, not_claimed}]`
+    ///   `[entry,   {path, entry_kind, logical_size, allocated_size, …}]`
+    ///   …repeating one entry record per row…
+    ///   `[trailer, {done: true, entry_count: N}]`
+    /// The viz can start consuming records as bytes arrive — first
+    /// paint can land mid-stream once a few thousand entries have
+    /// been seen. Fallback mode only today; raw mode keeps the
+    /// bulk format. See `viz/index.html`'s streaming decoder.
+    MsgpackStream,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -239,14 +249,18 @@ fn main() -> ExitCode {
     }
 }
 
-/// Parse `--format json|msgpack` into the `OutputFormat` enum.
-/// Rejects anything else so the user doesn't accidentally get a
-/// silent JSON fallback after typoing the encoding name.
+/// Parse `--format json|msgpack|msgpack-stream` into the
+/// `OutputFormat` enum. Rejects anything else so the user doesn't
+/// accidentally get a silent JSON fallback after typoing the
+/// encoding name.
 fn parse_format(value: &str) -> Result<OutputFormat, String> {
     match value {
         "json" => Ok(OutputFormat::Json),
         "msgpack" => Ok(OutputFormat::Msgpack),
-        other => Err(format!("unknown value {other:?}; expected json or msgpack")),
+        "msgpack-stream" => Ok(OutputFormat::MsgpackStream),
+        other => Err(format!(
+            "unknown value {other:?}; expected json, msgpack, or msgpack-stream"
+        )),
     }
 }
 
@@ -419,6 +433,15 @@ fn emit_fallback_output(
     slim: bool,
     format: OutputFormat,
 ) -> ExitCode {
+    // The streaming format unbundles the envelope into a sequence
+    // of records (header → entries → trailer). The viz consumes
+    // those records as bytes arrive so the first paint can land
+    // mid-stream. Falls through the slim flag — slim drops the
+    // file_id / aggregate / walk_skips noise the streaming
+    // consumer doesn't need anyway.
+    if format == OutputFormat::MsgpackStream {
+        return emit_msgpack_stream(&output, slim);
+    }
     let envelope = if slim {
         slim_fallback_envelope(&output)
     } else {
@@ -433,6 +456,140 @@ fn emit_fallback_output(
         })
     };
     emit_output(&envelope, pretty, format)
+}
+
+/// Stream the fallback scan output as a sequence of msgpack
+/// 2-element arrays. Each top-level value is `[kind, payload]`;
+/// the viz reads them one at a time and inserts entries into a
+/// growing tree as they arrive.
+///
+/// Wire shape (msgpack pseudocode):
+///   `[ "header",  { mode, correctness_claim, source, not_claimed } ]`
+///   `[ "entry",   { path, entry_kind, logical_size, allocated_size?, symlink_target? } ]`
+///   …repeated…
+///   `[ "trailer", { done: true, entry_count: N } ]`
+///
+/// `slim` drops the `allocated_size`/`symlink_target` fields when
+/// they're null (matching the existing slim envelope shape) so
+/// the wire stays terse.
+fn emit_msgpack_stream(output: &FallbackScanOutput, slim: bool) -> ExitCode {
+    let parser = &output.parser_output;
+    let stdout_unlocked = std::io::stdout();
+    let mut stdout = stdout_unlocked.lock();
+
+    // Header record. The viz reads this first to set `mode`,
+    // `correctness_claim`, the source descriptor, and the
+    // `not_claimed` list (so the SR-019 "unclaimed" provenance
+    // shows up immediately, before any entry arrives).
+    let header_payload = serde_json::json!({
+        "mode": "fallback",
+        "correctness_claim": output.correctness_claim,
+        "not_claimed": output.not_claimed,
+        "source": parser.source,
+        "backend_name": parser.backend_name,
+    });
+    if let Err(err) = write_stream_record(&mut stdout, "header", &header_payload) {
+        eprintln!("apfs-fastindex-scan: stream header: {err}");
+        return ExitCode::from(1);
+    }
+    // Flush the header so the viz can start drawing the
+    // breadcrumb / status bar before any entries land.
+    if let Err(err) = stdout.flush() {
+        eprintln!("apfs-fastindex-scan: stream flush after header: {err}");
+        return ExitCode::from(1);
+    }
+
+    // Entry records. Slim payload matches `slim_entries` so the
+    // viz's existing entry shape works unchanged on the receiving
+    // side.
+    let mut emitted: u64 = 0;
+    for entry in &parser.entries {
+        let payload = if slim {
+            slim_stream_entry(entry)
+        } else {
+            full_stream_entry(entry)
+        };
+        if let Err(err) = write_stream_record(&mut stdout, "entry", &payload) {
+            eprintln!("apfs-fastindex-scan: stream entry {emitted}: {err}");
+            return ExitCode::from(1);
+        }
+        emitted += 1;
+        // Flush every ~4096 entries (≈ a 256 KB chunk at typical
+        // sizes) so the viz sees a steady byte stream instead of
+        // a stdout-pipe-buffered batch dump. The throughput cost
+        // of an explicit flush at this cadence is in the noise
+        // (~µs each), but the responsiveness win is real on a
+        // /-scale scan.
+        if emitted % 4096 == 0 {
+            let _ = stdout.flush();
+        }
+    }
+
+    // Trailer record. `done: true` lets the viz commit any final
+    // rendering and dismiss the loading spinner.
+    let trailer_payload = serde_json::json!({
+        "done": true,
+        "entry_count": emitted,
+    });
+    if let Err(err) = write_stream_record(&mut stdout, "trailer", &trailer_payload) {
+        eprintln!("apfs-fastindex-scan: stream trailer: {err}");
+        return ExitCode::from(1);
+    }
+    let _ = stdout.flush();
+    ExitCode::SUCCESS
+}
+
+/// Emit one `[kind, payload]` msgpack record to `writer`. The
+/// 2-element array framing is what the JS streaming decoder
+/// switches on to dispatch records to their handlers.
+fn write_stream_record<W: std::io::Write, P: serde::Serialize>(
+    writer: &mut W,
+    kind: &str,
+    payload: &P,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let record = (kind, payload);
+    rmp_serde::encode::write_named(writer, &record)?;
+    Ok(())
+}
+
+fn slim_stream_entry(entry: &apfs_fastindex::NamespaceEntry) -> serde_json::Value {
+    let mut obj = serde_json::Map::new();
+    obj.insert(
+        "path".to_string(),
+        serde_json::Value::String(entry.path.clone()),
+    );
+    obj.insert(
+        "entry_kind".to_string(),
+        serde_json::to_value(entry.entry_kind).unwrap(),
+    );
+    obj.insert(
+        "logical_size".to_string(),
+        serde_json::Value::Number(entry.logical_size.into()),
+    );
+    if let Some(alloc) = entry.allocated_size {
+        obj.insert(
+            "allocated_size".to_string(),
+            serde_json::Value::Number(alloc.into()),
+        );
+    } else {
+        // Explicit null so the viz's None-collapse logic
+        // (SR-019 / EX-22) sees the unclaimed marker.
+        obj.insert("allocated_size".to_string(), serde_json::Value::Null);
+    }
+    if let Some(target) = &entry.symlink_target {
+        obj.insert(
+            "symlink_target".to_string(),
+            serde_json::Value::String(target.clone()),
+        );
+    }
+    serde_json::Value::Object(obj)
+}
+
+fn full_stream_entry(entry: &apfs_fastindex::NamespaceEntry) -> serde_json::Value {
+    // For the non-slim case, serialise the entry verbatim. Cheaper
+    // than building the map by hand and stays in sync if the
+    // entry struct grows new fields.
+    serde_json::to_value(entry).unwrap_or(serde_json::Value::Null)
 }
 
 /// Build a viz-tuned envelope from a fallback scan: drop `file_id`,
@@ -504,6 +661,18 @@ fn emit_output<T: serde::Serialize>(
     match format {
         OutputFormat::Json => emit_json(value, pretty),
         OutputFormat::Msgpack => emit_msgpack(value),
+        OutputFormat::MsgpackStream => {
+            // Streaming is fallback-only today — raw scans go
+            // through the bulk path. Falling back to bulk msgpack
+            // keeps the wire compatible with the viz's
+            // Content-Type sniff, just not the streaming
+            // codepath.
+            eprintln!(
+                "apfs-fastindex-scan: warning: --format msgpack-stream is supported only in \
+                 fallback mode; falling back to --format msgpack for this raw scan"
+            );
+            emit_msgpack(value)
+        }
     }
 }
 
