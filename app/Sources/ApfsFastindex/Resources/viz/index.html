@@ -925,9 +925,13 @@ function ingest(doc, filename) {
   // the previous tree, so wipe the layout cache before we replace
   // `rootNode`. The truncated-hierarchy clones inside cached
   // entries also hold strong refs to old nodes; clearing breaks
-  // those refs so the old tree is GC-able.
+  // those refs so the old tree is GC-able. Also reset the
+  // `renderedKey` tracking so the visibility-toggle fast path
+  // doesn't fire against the previous scan's painted SVG.
   treemapLayoutCache.clear();
   apfsPerfLog.length = 0;
+  renderedKey = null;
+  renderedMaxDepth = 0;
   const parserOutput = doc.parser_output || doc;
   const entries = parserOutput.entries || [];
   const aggregates = parserOutput.aggregates || [];
@@ -1471,17 +1475,33 @@ const MIN_DIR_LABEL_W = 48;
 /// of the script so the depth-input wiring above can assign to
 /// them without TDZ-tripping `let`.
 
+/// `renderedKey` and `renderedMaxDepth` describe what is currently
+/// in the SVG. Together they let `render()` short-circuit to a
+/// pure visibility toggle when the target depth is shallower than
+/// (or equal to) what we have already painted for the same
+/// (node, metric, dims). On a hit, the entire layout + DOM-build
+/// pipeline is skipped — the change is one `style.display` flip
+/// per cell, which is sub-millisecond even at ~50k rects.
+let renderedKey = null;
+let renderedMaxDepth = 0;
+
+function renderContextKey(node, w, h) {
+  return `${activeMetric}|${w}x${h}|${node.path === "." ? "/" : node.path}`;
+}
+
 function render(node) {
   if (progressiveRafHandle !== null) {
     cancelAnimationFrame(progressiveRafHandle);
     progressiveRafHandle = null;
   }
-  svg.selectAll("*").remove();
   const width = bottomPane.clientWidth;
   const height = bottomPane.clientHeight;
   svg.attr("viewBox", `0 0 ${width} ${height}`);
 
   if (!node.children || node.children.length === 0) {
+    svg.selectAll("*").remove();
+    renderedKey = null;
+    renderedMaxDepth = 0;
     svg.append("text")
       .attr("x", width / 2).attr("y", height / 2)
       .attr("text-anchor", "middle").attr("fill", "var(--muted)")
@@ -1490,23 +1510,52 @@ function render(node) {
   }
 
   const targetDepth = Math.max(1, Math.min(20, maxDepth | 0));
-  // If the final-depth layout is already cached for this
-  // (node, depth, metric, dims), skip progressive entirely and
-  // just paint once. This is the common case for depth toggles
-  // and back-navigation: revisiting a layout we already computed
-  // costs only the DOM rebuild (~150ms for 100k rects vs
-  // ~330ms+ for a fresh layout).
+  const contextKey = renderContextKey(node, width, height);
+
+  // Pure visibility-toggle fast path. Triggered when the user
+  // lowers the depth picker, drills into a child and bounces
+  // back, or in general revisits a (node, metric, dims) context
+  // that we've already painted at this depth or deeper.
+  if (renderedKey === contextKey && targetDepth <= renderedMaxDepth && renderedMaxDepth > 0) {
+    const t0 = performance.now();
+    applyDepthVisibility(targetDepth);
+    pushPerf("visibility_toggle", performance.now() - t0, {
+      fromDepth: renderedMaxDepth,
+      toDepth: targetDepth,
+      path: node.path,
+    });
+    return;
+  }
+
+  // The context changed, OR the target depth is deeper than what
+  // is currently in the SVG. Either way, we have to lay out the
+  // tree at the new depth. Cache hits on the layout step skip
+  // the truncate → hierarchy → squarify chain; DOM build is the
+  // remaining cost.
   const finalKey = layoutCacheKey(node, targetDepth, activeMetric, width, height);
   if (treemapLayoutCache.has(finalKey)) {
     renderAtDepth(node, targetDepth, width, height);
     return;
   }
-  // Cold cache: progressive render gives the user visible
-  // feedback while deeper layouts compute. The cache populates
-  // as each depth lands so a depth slider drag won't re-pay the
-  // layout cost.
+  // Cold layout: progressive render gives the user visible
+  // feedback while deeper layouts compute. Each step populates
+  // the layout cache; the last step also updates
+  // `renderedMaxDepth` so subsequent depth-down toggles land on
+  // the visibility-only fast path.
   renderAtDepth(node, 1, width, height);
   if (targetDepth > 1) scheduleNextDepth(node, 2, targetDepth, width, height);
+}
+
+/// Toggle visibility on every painted cell so only those whose
+/// d3-hierarchy depth is ≤ `targetDepth` remain visible. The
+/// laid-out positions are stable across this call — directories
+/// at `targetDepth` keep their paddingTop strip and dir-bg fill,
+/// just with their children hidden — which is the intended
+/// "folder waiting to be drilled into" visual.
+function applyDepthVisibility(targetDepth) {
+  svg.selectAll(".cell").style("display", function(d) {
+    return d.depth <= targetDepth ? null : "none";
+  });
 }
 
 function layoutCacheKey(node, depth, metric, w, h) {
@@ -1600,24 +1649,31 @@ function renderAtDepth(node, depth, width, height) {
   const tDom0 = performance.now();
   svg.selectAll("*").remove();
 
-  // Directory containers (every non-leaf node except root).
-  const dirNodes = treeRoot.descendants().filter(d =>
-    d.depth > 0 && d.children && d.children.length > 0 && pixelArea(d) >= MIN_PIXEL_AREA);
+  // Partition every visible cell into directories vs files. We
+  // render *all* directories (including those at the depth
+  // boundary which d3 currently sees as leaves of the truncated
+  // hierarchy) with the same container styling — dir-bg fill,
+  // paddingTop strip, label — so a later depth-down toggle that
+  // hides deeper descendants leaves the boundary directory
+  // looking identical to a same-depth full render. The
+  // _isTruncatedDir flag is still set on the data for telemetry
+  // and click-target purposes but no longer drives a separate
+  // rendering path.
+  const visibleCells = treeRoot.descendants()
+    .filter(d => d.depth > 0 && pixelArea(d) >= MIN_PIXEL_AREA);
+  const dirCells = visibleCells.filter(d => d.data.kind === "dir");
+  const fileCells = visibleCells.filter(d => d.data.kind !== "dir");
 
-  // Leaf rectangles (files/symlinks/truncated-dirs; size > 0 or
-  // shown anyway for tiny ones — the MIN_PIXEL_AREA=1 keeps every
-  // visible pixel filled instead of fading into the dir-bg).
-  const leafNodes = treeRoot.leaves().filter(d => pixelArea(d) >= MIN_PIXEL_AREA);
-
-  // Draw directories first so leaves sit on top.
-  const dirCell = svg.selectAll("g.dir")
-    .data(dirNodes)
+  // Draw directories first so file leaves sit on top of any
+  // overlapping dir background.
+  const dirSel = svg.selectAll("g.dir")
+    .data(dirCells)
     .enter()
     .append("g")
     .attr("class", "dir cell")
     .attr("transform", d => `translate(${d.x0},${d.y0})`);
 
-  dirCell.append("rect")
+  dirSel.append("rect")
     .attr("class", "dir-bg")
     .attr("width", d => Math.max(0, d.x1 - d.x0))
     .attr("height", d => Math.max(0, d.y1 - d.y0))
@@ -1627,14 +1683,15 @@ function renderAtDepth(node, depth, width, height) {
     .on("mousemove", (event, d) => showTooltip(event, d.data))
     .on("mouseleave", hideTooltip)
     .on("click", (_, d) => {
+      // Either a true container (has children visible in the
+      // truncated hierarchy) or a truncated dir at the boundary
+      // — in both cases the click means "drill in".
       const original = d.data._original || d.data;
-      if (original.kind === "dir" && original.children && original.children.length > 0) {
-        navigate(original);
-      }
+      if (original.kind === "dir") navigate(original);
     })
     .on("contextmenu", (event, d) => emitContextMenu(event, d.data._original || d.data));
 
-  dirCell.append("text")
+  dirSel.append("text")
     .attr("class", "dir-label")
     .attr("x", 4)
     .attr("y", 11)
@@ -1647,36 +1704,26 @@ function renderAtDepth(node, depth, width, height) {
       }
     });
 
-  const leafCell = svg.selectAll("g.leaf")
-    .data(leafNodes)
+  const leafSel = svg.selectAll("g.leaf")
+    .data(fileCells)
     .enter()
     .append("g")
     .attr("class", "leaf cell")
     .attr("transform", d => `translate(${d.x0},${d.y0})`);
 
-  leafCell.append("rect")
+  leafSel.append("rect")
     .attr("width", d => Math.max(0, d.x1 - d.x0))
     .attr("height", d => Math.max(0, d.y1 - d.y0))
     .attr("fill", d => leafColor(d.data))
     .on("mousemove", (event, d) => showTooltip(event, d.data))
     .on("mouseleave", hideTooltip)
-    .on("click", (_, d) => {
-      // A truncated directory leaf navigates instead of "selects" —
-      // clicking it means "drill in", which matches what a dir-bg
-      // click does for non-truncated dirs.
-      const original = d.data._original || d.data;
-      if (d.data._isTruncatedDir) {
-        navigate(original);
-      } else {
-        emitSelected(original);
-      }
-    })
+    .on("click", (_, d) => emitSelected(d.data._original || d.data))
     .on("contextmenu", (event, d) => emitContextMenu(event, d.data._original || d.data));
 
-  leafCell.append("text")
+  leafSel.append("text")
     .attr("x", 4)
     .attr("y", 11)
-    .attr("fill", d => d.data._isTruncatedDir ? "#e4e7ee" : "#0b0d12")
+    .attr("fill", "#0b0d12")
     .attr("font-size", 10)
     .text(d => leafLabel(d))
     .each(function (d) {
@@ -1685,11 +1732,17 @@ function renderAtDepth(node, depth, width, height) {
       }
     });
 
+  // Record what is now in the SVG so a follow-up `render()` with
+  // a shallower target depth can short-circuit straight to
+  // visibility toggling.
+  renderedKey = renderContextKey(node, width, height);
+  renderedMaxDepth = depth;
+
   pushPerf("dom_build", performance.now() - tDom0, {
     depth,
     path: node.path,
-    dirCount: dirNodes.length,
-    leafCount: leafNodes.length,
+    dirCount: dirCells.length,
+    leafCount: fileCells.length,
   });
 }
 
@@ -1753,12 +1806,6 @@ function dirLabel(d) {
 }
 
 function leafLabel(d) {
-  if (d.data._isTruncatedDir) {
-    // Trailing slash + bytes is the visual cue that this rectangle
-    // is a *folded-up* directory; clicking it navigates instead of
-    // selecting a file.
-    return `${d.data.name}/ · ${formatBytes(d.value)}`;
-  }
   return d.data.name;
 }
 
@@ -1788,24 +1835,13 @@ const EXT_COLORS = {
 };
 
 function leafColor(data) {
-  // A leaf with no allocated_size under the active "allocated" metric
-  // is a SR-019 fail-closed row (sparse / decmpfs). Render it muted
-  // so the user can see *where* the unclaimed rows are rather than
-  // wondering why their treemap shrank. Truncated-directory leaves
-  // check their aggregate (`valueAllocated`) instead of their own
-  // `allocatedSize` (which is always null for directories).
-  if (activeMetric === "allocated") {
-    if (data._isTruncatedDir) {
-      if (data.valueAllocated === null) return "#3b3f4a";
-    } else if (data.allocatedSize === null) {
-      return "#3b3f4a";
-    }
+  // A leaf with no allocated_size under the active "allocated"
+  // metric is a SR-019 fail-closed row (sparse / decmpfs). Render
+  // it muted so the user can see *where* the unclaimed rows are
+  // rather than wondering why their treemap shrank.
+  if (activeMetric === "allocated" && data.allocatedSize === null) {
+    return "#3b3f4a";
   }
-  // A truncated directory deserves its own swatch so the user can
-  // tell it apart from files at a glance. Slightly bluer than
-  // `dir-bg` (rgba(30, 35, 45, 0.55)) so it reads as "still a
-  // folder, just folded shut" rather than "background".
-  if (data._isTruncatedDir) return "#3e4a5e";
   if (data.kind === "symlink") return "#7d8a99";
   if (data.kind !== "file") return "#5b6779";
   const name = data.name || "";
