@@ -405,6 +405,10 @@ fn run_fallback(
             None
         },
         threads,
+        // CLI emits aggregates in its JSON output; keep them
+        // computed. FFI / SwiftUI uses the tree's subtree
+        // totals directly and flips this to `true`.
+        skip_aggregates: false,
     };
     match fallback_scan_path_with_options(path, options) {
         Ok(output) => {

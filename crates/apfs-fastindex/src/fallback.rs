@@ -228,6 +228,17 @@ pub struct FallbackOptions<'a> {
     /// cost 9.3× T=1 sys-CPU for 1.38× throughput — see EX-25 for
     /// the contention shape).
     pub threads: usize,
+    /// Skip the per-directory aggregate build. The aggregates
+    /// pass walks every file's ancestor chain, accumulating
+    /// `(file_id → (logical, allocated))` per directory; on a
+    /// /-class scan that's ~90 ms (~17% of total scan wall).
+    /// FFI callers (the SwiftUI app) reconstruct subtree totals
+    /// from the indexed tree's `value_logical`/`value_allocated`
+    /// fields, so the legacy aggregate Vec is dead weight for
+    /// them. CLI emits aggregates in the JSON output, so the
+    /// CLI keeps the default (`false`); FFI flips this to
+    /// `true`.
+    pub skip_aggregates: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -358,7 +369,11 @@ pub fn fallback_scan_path_with_options<P: AsRef<Path>>(
     entries.sort_unstable_by(|a, b| a.path.cmp(&b.path));
     walk_skips.sort_unstable_by(|a, b| a.path.cmp(&b.path));
     let sort_done = Instant::now();
-    let aggregates = build_aggregates(&entries);
+    let aggregates = if options.skip_aggregates {
+        Vec::new()
+    } else {
+        build_aggregates(&entries)
+    };
     let aggregates_done = Instant::now();
 
     // Optional per-phase timing dump for the perf_probe ablation
@@ -1304,6 +1319,7 @@ mod tests {
                 cross_mounts: false,
                 progress: None,
                 threads: 4,
+                skip_aggregates: false,
             },
         )
         .expect("parallel walks");

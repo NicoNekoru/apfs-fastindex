@@ -206,6 +206,10 @@ pub extern "C" fn apfs_scan_directory_with_progress(
         cross_mounts,
         progress: progress_ref,
         threads: if threads == 0 { 4 } else { threads as usize },
+        // FFI consumers (the SwiftUI app) read subtree totals
+        // from the indexed `Tree`, not from the legacy
+        // `aggregates` Vec — skip the ~90 ms aggregate pass.
+        skip_aggregates: true,
     };
     let output = match fallback_scan_path_with_options(path_str, options) {
         Ok(o) => o,

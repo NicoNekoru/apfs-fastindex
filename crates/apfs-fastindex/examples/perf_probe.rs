@@ -80,6 +80,9 @@ fn main() {
         cross_mounts: false,
         threads,
         progress: None,
+        // Match the FFI scan path — SwiftUI's main consumer
+        // skips the legacy aggregates pass.
+        skip_aggregates: true,
     };
 
     let pre_scan = snap();
