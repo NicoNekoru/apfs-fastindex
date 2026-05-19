@@ -27,6 +27,7 @@ use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::ptr;
 
+use crate::tree::{Tree, NODE_INVALID};
 use crate::{fallback_scan_path_with_options, FallbackOptions};
 
 // ─────────────────────────────────────────────────────────────
@@ -61,10 +62,15 @@ pub extern "C" fn apfs_version() -> *const c_char {
 // ─────────────────────────────────────────────────────────────
 
 /// Opaque handle representing a completed fallback scan. Owns
-/// the entry buffer + supporting strings. Swift sees a
-/// `*mut ApfsScan` and must call `apfs_scan_free` when done.
+/// the entry buffer, the indexed tree, and supporting strings.
+/// Swift sees a `*mut ApfsScan` and must call `apfs_scan_free`
+/// when done.
 pub struct ApfsScan {
     pub(crate) output: crate::FallbackScanOutput,
+    /// Indexed tree over `output.parser_output.entries`.
+    /// Phase 3 builds this at scan time so the renderer can
+    /// query it by path without re-scanning the entry list.
+    pub(crate) tree: Tree,
     // CStrings keep the NUL-terminated bytes alive for the
     // lifetime of the scan. Pointers handed to Swift point
     // into these — Swift must not free them; they go away
@@ -72,13 +78,6 @@ pub struct ApfsScan {
     correctness_claim: CString,
     source_kind: CString,
     source_requested_path: CString,
-    // Cached totals so Swift's status-bar updates don't
-    // re-walk the entry buffer.
-    logical_total: u64,
-    /// Cached allocated-size total, with the `Option<u64>` shape
-    /// preserved (`None` = SR-019 / EX-22 None-collapse: at
-    /// least one row's allocated_size is unclaimed).
-    allocated_total: Option<u64>,
     /// True iff *any* entry has `allocated_size = Some(_)`.
     /// The Swift UI toggles the "Allocated" metric chip off
     /// when this is false.
@@ -124,21 +123,22 @@ pub extern "C" fn apfs_scan_directory(
         Err(_) => return ptr::null_mut(),
     };
 
-    // Walk entries once to compute cached totals + the
-    // allocated-available flag.
-    let mut logical: u64 = 0;
-    let mut allocated: Option<u64> = Some(0);
+    // Build the indexed tree. `Tree::build` walks the entries
+    // and aggregates value_logical / value_allocated /
+    // item_count up the tree in one post-order pass — the root's
+    // aggregates are the totals Swift used to read off the cached
+    // `logical_total` / `allocated_total` fields, so those are
+    // gone now.
+    let tree = Tree::build(&output.parser_output.entries);
+
+    // The "allocated-available" flag is still cheap to compute
+    // off the flat entry list; doing so during tree-build would
+    // mean a second branch in the hot loop.
     let mut allocated_available = false;
     for entry in &output.parser_output.entries {
-        logical = logical.saturating_add(entry.logical_size);
         if entry.allocated_size.is_some() {
             allocated_available = true;
-        }
-        if let Some(a) = allocated {
-            allocated = match entry.allocated_size {
-                Some(n) => Some(a.saturating_add(n)),
-                None => None,
-            };
+            break;
         }
     }
 
@@ -153,11 +153,10 @@ pub extern "C" fn apfs_scan_directory(
 
     let scan = Box::new(ApfsScan {
         output,
+        tree,
         correctness_claim: claim_c,
         source_kind: source_kind_c,
         source_requested_path: source_requested_path_c,
-        logical_total: logical,
-        allocated_total: allocated,
         allocated_available,
     });
     Box::into_raw(scan)
@@ -183,22 +182,159 @@ pub extern "C" fn apfs_scan_entry_count(scan: *const ApfsScan) -> u64 {
     s.output.parser_output.entries.len() as u64
 }
 
-/// Sum of `entry.logical_size` across the whole scan. Cached at
-/// scan-construction time; this is a single field read.
+/// Sum of `entry.logical_size` across the whole scan. Reads off
+/// the tree root's pre-computed aggregate.
 #[no_mangle]
 pub extern "C" fn apfs_scan_logical_total(scan: *const ApfsScan) -> u64 {
     let Some(s) = (unsafe { scan.as_ref() }) else { return 0; };
-    s.logical_total
+    s.tree.nodes.first().map(|r| r.value_logical).unwrap_or(0)
 }
 
 /// Sum of `entry.allocated_size` across the whole scan, or
 /// `APFS_ALLOCATED_TOTAL_UNCLAIMED` (`u64::MAX`) when *any* row
-/// had `allocated_size = None` (SR-019 None-collapse). Swift
-/// maps the sentinel back to `nil`.
+/// had `allocated_size = None` (SR-019 None-collapse). Reads off
+/// the tree root's pre-computed aggregate.
 #[no_mangle]
 pub extern "C" fn apfs_scan_allocated_total(scan: *const ApfsScan) -> u64 {
     let Some(s) = (unsafe { scan.as_ref() }) else { return APFS_ALLOCATED_TOTAL_UNCLAIMED; };
-    s.allocated_total.unwrap_or(APFS_ALLOCATED_TOTAL_UNCLAIMED)
+    s.tree
+        .nodes
+        .first()
+        .and_then(|r| r.value_allocated)
+        .unwrap_or(APFS_ALLOCATED_TOTAL_UNCLAIMED)
+}
+
+// ─────────────────────────────────────────────────────────────
+// Phase 3a: tree query FFI
+// ─────────────────────────────────────────────────────────────
+
+/// Total number of nodes in the tree (root + every directory +
+/// every leaf). Differs from `apfs_scan_entry_count` because the
+/// tree also has synthesized intermediate directories.
+#[no_mangle]
+pub extern "C" fn apfs_scan_node_count(scan: *const ApfsScan) -> u32 {
+    let Some(s) = (unsafe { scan.as_ref() }) else { return 0; };
+    s.tree.nodes.len() as u32
+}
+
+/// Sentinel returned by `apfs_scan_node_index_for_path` (and
+/// future phase-3 hit-test FFIs) when no node matches. Matches
+/// `crate::tree::NODE_INVALID == u32::MAX`.
+pub const APFS_NODE_INVALID: u32 = u32::MAX;
+
+/// Look up a node by its absolute logical path. The empty string
+/// (and `"/"`) maps to the synthesised root (index 0). Returns
+/// `APFS_NODE_INVALID` if no such node exists.
+#[no_mangle]
+pub extern "C" fn apfs_scan_node_index_for_path(
+    scan: *const ApfsScan,
+    path: *const c_char,
+) -> u32 {
+    if path.is_null() {
+        return APFS_NODE_INVALID;
+    }
+    let Some(s) = (unsafe { scan.as_ref() }) else { return APFS_NODE_INVALID; };
+    let cstr = unsafe { CStr::from_ptr(path) };
+    let p = match cstr.to_str() {
+        Ok(p) => p,
+        Err(_) => return APFS_NODE_INVALID,
+    };
+    let idx = s.tree.node_index_for_path(p);
+    if idx == NODE_INVALID {
+        APFS_NODE_INVALID
+    } else {
+        idx
+    }
+}
+
+/// Number of immediate children of the given node.
+/// `apfs_scan_node_child_count(s, root) == top-level dir/file
+/// count`. Returns 0 for invalid indices.
+#[no_mangle]
+pub extern "C" fn apfs_scan_node_child_count(scan: *const ApfsScan, idx: u32) -> u32 {
+    let Some(s) = (unsafe { scan.as_ref() }) else { return 0; };
+    if (idx as usize) >= s.tree.nodes.len() {
+        return 0;
+    }
+    s.tree.nodes[idx as usize].children.len() as u32
+}
+
+/// Per-node aggregate read by Swift's status bar. Pre-computed
+/// post-order at `Tree::build` time; constant-time lookup.
+#[no_mangle]
+pub extern "C" fn apfs_scan_node_value_logical(scan: *const ApfsScan, idx: u32) -> u64 {
+    let Some(s) = (unsafe { scan.as_ref() }) else { return 0; };
+    if (idx as usize) >= s.tree.nodes.len() {
+        return 0;
+    }
+    s.tree.nodes[idx as usize].value_logical
+}
+
+/// `value_allocated` for the node, or
+/// `APFS_ALLOCATED_TOTAL_UNCLAIMED` (`u64::MAX`) when SR-019
+/// None-collapse fired anywhere in this subtree.
+#[no_mangle]
+pub extern "C" fn apfs_scan_node_value_allocated(scan: *const ApfsScan, idx: u32) -> u64 {
+    let Some(s) = (unsafe { scan.as_ref() }) else { return APFS_ALLOCATED_TOTAL_UNCLAIMED; };
+    if (idx as usize) >= s.tree.nodes.len() {
+        return APFS_ALLOCATED_TOTAL_UNCLAIMED;
+    }
+    s.tree.nodes[idx as usize]
+        .value_allocated
+        .unwrap_or(APFS_ALLOCATED_TOTAL_UNCLAIMED)
+}
+
+/// Item count for the node — number of non-directory descendants.
+/// `apfs_scan_node_item_count(s, root) == files+symlinks total`.
+#[no_mangle]
+pub extern "C" fn apfs_scan_node_item_count(scan: *const ApfsScan, idx: u32) -> u64 {
+    let Some(s) = (unsafe { scan.as_ref() }) else { return 0; };
+    if (idx as usize) >= s.tree.nodes.len() {
+        return 0;
+    }
+    s.tree.nodes[idx as usize].item_count
+}
+
+/// Borrowed (ptr, len) pair pointing into a `Tree`-owned UTF-8
+/// string. Valid for the lifetime of the enclosing `ApfsScan`.
+/// `bytes` is *not* NUL-terminated — Swift constructs `String`
+/// via `Data(bytes:count:)` + `String(data:encoding:)`.
+///
+/// We don't pay for CString-style NUL-terminated copies for
+/// every node because at /-scale that's ~150 MB of duplicate
+/// path storage; the borrowed pointer trades one extra Swift
+/// API call for zero allocation.
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct ApfsPathRef {
+    pub bytes: *const u8,
+    pub len: u64,
+}
+
+/// Borrow the node's absolute logical path. Returns a null
+/// pointer + zero length for invalid indices.
+#[no_mangle]
+pub extern "C" fn apfs_scan_node_path(scan: *const ApfsScan, idx: u32) -> ApfsPathRef {
+    let null_ref = ApfsPathRef { bytes: ptr::null(), len: 0 };
+    let Some(s) = (unsafe { scan.as_ref() }) else { return null_ref; };
+    if (idx as usize) >= s.tree.nodes.len() {
+        return null_ref;
+    }
+    let p = &s.tree.nodes[idx as usize].path;
+    ApfsPathRef { bytes: p.as_ptr(), len: p.len() as u64 }
+}
+
+/// Borrow the node's last path component (display name). Like
+/// `apfs_scan_node_path` but returns just the leaf basename.
+#[no_mangle]
+pub extern "C" fn apfs_scan_node_name(scan: *const ApfsScan, idx: u32) -> ApfsPathRef {
+    let null_ref = ApfsPathRef { bytes: ptr::null(), len: 0 };
+    let Some(s) = (unsafe { scan.as_ref() }) else { return null_ref; };
+    if (idx as usize) >= s.tree.nodes.len() {
+        return null_ref;
+    }
+    let n = &s.tree.nodes[idx as usize].name;
+    ApfsPathRef { bytes: n.as_ptr(), len: n.len() as u64 }
 }
 
 /// `true` iff at least one entry has `allocated_size = Some(_)`.

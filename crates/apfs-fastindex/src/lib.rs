@@ -19,6 +19,10 @@ mod namespace;
 mod object;
 mod omap;
 mod volume;
+/// Indexed tree built from a flat `Vec<NamespaceEntry>`. Drives
+/// the native renderer's navigation, breadcrumb, tree-list,
+/// layout, and hit-test paths. Used internally by `ffi::ApfsScan`.
+pub mod tree;
 /// C ABI surface for the native (Swift) renderer. See
 /// `docs/implementation/viz-perf-study.md` for the architecture
 /// sketch. The `#[no_mangle] extern "C"` symbols defined here are

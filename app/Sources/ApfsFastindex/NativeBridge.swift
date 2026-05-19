@@ -60,6 +60,30 @@ enum NativeBridge {
                     scan.logicalTotal,
                     scan.allocatedTotal.map(String.init) ?? "unclaimed"
                 )
+                // Phase-3a probe: exercise the tree-query FFI.
+                // The root's aggregates must equal the scan-wide
+                // totals; that's the easy invariant to assert.
+                let nodes = scan.nodeCount
+                let rootKids = scan.childCount(of: 0)
+                let rootLogical = scan.valueLogical(of: 0)
+                let rootItems = scan.itemCount(of: 0)
+                NSLog(
+                    "[native phase3a probe] tree: %u nodes, root children=%u, root logical=%llu, items=%llu",
+                    nodes, rootKids, rootLogical, rootItems
+                )
+                // Round-trip a path: nil for a missing one, and
+                // a non-nil index for one we know exists. We also
+                // dump the first child's path to confirm the
+                // wire shape (entries are scan-root-relative).
+                let firstChildPath = scan.path(of: 1) ?? "(none)"
+                let lsIdx = scan.nodeIndex(forPath: "ls")
+                let nonsenseIdx = scan.nodeIndex(forPath: "definitely-not-there")
+                NSLog(
+                    "[native phase3a probe] first child path=%@, ls=%@, nonsense=%@",
+                    firstChildPath,
+                    lsIdx.map(String.init) ?? "nil",
+                    nonsenseIdx.map(String.init) ?? "nil"
+                )
             } else {
                 NSLog("[native phase2 probe] \(probePath): FAILED")
             }
@@ -147,5 +171,80 @@ final class Scan {
     var sourceRequestedPath: String {
         guard let ptr = apfs_scan_source_requested_path(handle) else { return "" }
         return String(cString: ptr)
+    }
+
+    // MARK: - Phase 3 tree queries
+
+    /// Sentinel matching `APFS_NODE_INVALID` (`u32::MAX`) on the
+    /// Rust side — "no such node".
+    static let nodeInvalid: UInt32 = UInt32.max
+
+    /// Total node count in the indexed tree (root + every
+    /// synthesised directory + every leaf). Larger than
+    /// `entryCount` because directories at intermediate path
+    /// components also become nodes even if no entry directly
+    /// names them.
+    var nodeCount: UInt32 {
+        apfs_scan_node_count(handle)
+    }
+
+    /// Find a node by its absolute logical path. Empty string
+    /// and `"/"` both map to the root. Returns `nil` for missing
+    /// paths.
+    func nodeIndex(forPath path: String) -> UInt32? {
+        let idx = path.withCString { apfs_scan_node_index_for_path(handle, $0) }
+        return idx == Scan.nodeInvalid ? nil : idx
+    }
+
+    /// Immediate-child count for a node.
+    func childCount(of nodeIndex: UInt32) -> UInt32 {
+        apfs_scan_node_child_count(handle, nodeIndex)
+    }
+
+    /// Subtree `value_logical` for the node. Pre-computed during
+    /// scan-time tree finalize.
+    func valueLogical(of nodeIndex: UInt32) -> UInt64 {
+        apfs_scan_node_value_logical(handle, nodeIndex)
+    }
+
+    /// Subtree `value_allocated` for the node, or `nil` when
+    /// SR-019 None-collapse fired in this subtree.
+    func valueAllocated(of nodeIndex: UInt32) -> UInt64? {
+        let raw = apfs_scan_node_value_allocated(handle, nodeIndex)
+        return raw == Scan.allocatedTotalUnclaimed ? nil : raw
+    }
+
+    /// File / symlink / other count beneath this node.
+    /// `itemCount(of: root)` is the total non-directory entries
+    /// in the scan.
+    func itemCount(of nodeIndex: UInt32) -> UInt64 {
+        apfs_scan_node_item_count(handle, nodeIndex)
+    }
+
+    /// Absolute logical path of the node, e.g.
+    /// `"Library/Application Support"`. Empty string for the
+    /// root. Returns nil for invalid indices.
+    func path(of nodeIndex: UInt32) -> String? {
+        let ref = apfs_scan_node_path(handle, nodeIndex)
+        return Scan.stringFrom(ref)
+    }
+
+    /// Last path component (display name).
+    func name(of nodeIndex: UInt32) -> String? {
+        let ref = apfs_scan_node_name(handle, nodeIndex)
+        return Scan.stringFrom(ref)
+    }
+
+    /// Helper: turn a borrowed Rust `(bytes, len)` pair into a
+    /// Swift `String`. Copies because `Data(bytesNoCopy:)` would
+    /// alias Rust-owned memory beyond Swift's tracking and ARC
+    /// can't reason about that.
+    private static func stringFrom(_ ref: ApfsPathRef) -> String? {
+        guard let bytes = ref.bytes, ref.len > 0 else {
+            // Zero-length and root path both decode to "".
+            return ref.bytes != nil ? "" : nil
+        }
+        let data = Data(bytes: bytes, count: Int(ref.len))
+        return String(data: data, encoding: .utf8)
     }
 }
