@@ -141,23 +141,60 @@ fn read_firmlink_overlays(scan_root: &Path) -> FirmlinkOverlaySet {
 /// is a single `HashSet::insert` under a lock, which at ~200k
 /// directories on a `/`-scan totals well under 50 ms of overhead — far
 /// less than even one missed `lstat`.
+/// Number of mutex-shards on `VisitedDirs`. With T=4 workers and
+/// 16 shards we expect 4× under-utilisation per shard — i.e. the
+/// odds of two workers colliding on the same shard at the same
+/// moment are ~1/16. EX-25 measured the mutex as the second-
+/// largest single-point contention behind the work queue; this
+/// drops the wait-on-mutex term by ~16× on /-class scans.
+///
+/// Power-of-two so the shard pick is a bit-mask instead of a mod.
+const VISITED_SHARDS: usize = 16;
+const VISITED_SHARD_MASK: usize = VISITED_SHARDS - 1;
+
 struct VisitedDirs {
-    inner: Mutex<HashSet<(u64, u64)>>,
+    /// Sharded `(dev, ino)` dedup set. Each visit hashes into one
+    /// of `VISITED_SHARDS` independent buckets; under the EX-25
+    /// walk profile (~200k dirs on /, evenly inode-distributed)
+    /// each shard holds ~12.5k entries — small enough that
+    /// rehashing on the FxHashSet is amortised cheaply. Shards
+    /// use fxhash (already a dep) since the keys are kernel
+    /// inode pairs, non-adversarial.
+    shards: [Mutex<rustc_hash::FxHashSet<(u64, u64)>>; VISITED_SHARDS],
 }
 
 impl VisitedDirs {
     fn new() -> Self {
+        // `Default::default()` for the array isn't const, and
+        // `[Mutex::new(...); 16]` requires the inner be `Copy`,
+        // which Mutex isn't. Use `from_fn` to construct each
+        // shard individually.
         Self {
-            inner: Mutex::new(HashSet::new()),
+            shards: std::array::from_fn(|_| Mutex::new(rustc_hash::FxHashSet::default())),
         }
     }
 
+    /// Pick a shard for `(dev, ino)`. Mixes the two u64s into a
+    /// single hash via fxhash-style multiply-shift; APFS inodes
+    /// for a single volume share a `dev`, so the `ino` term has
+    /// to carry the mixing. Bitwise-masked to `VISITED_SHARDS`.
+    #[inline]
+    fn shard_idx(dev: u64, ino: u64) -> usize {
+        // Cheap two-step mix — multiply ino by a 64-bit odd
+        // constant (the fxhash multiplier) and XOR dev's high
+        // bits. Good distribution for non-adversarial inode pairs.
+        let h = ino.wrapping_mul(0x517c_c1b7_2722_0a95).wrapping_add(dev);
+        (h as usize) & VISITED_SHARD_MASK
+    }
+
     fn mark_root(&self, dev: u64, ino: u64) {
-        self.inner.lock().unwrap().insert((dev, ino));
+        let s = Self::shard_idx(dev, ino);
+        self.shards[s].lock().unwrap().insert((dev, ino));
     }
 
     fn check_and_mark(&self, dev: u64, ino: u64) -> bool {
-        self.inner.lock().unwrap().insert((dev, ino))
+        let s = Self::shard_idx(dev, ino);
+        self.shards[s].lock().unwrap().insert((dev, ino))
     }
 }
 

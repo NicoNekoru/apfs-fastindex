@@ -163,7 +163,12 @@ impl Tree {
             value_allocated: None,
             item_count: 0,
         });
-        child_lists.push(Vec::new());
+        // Pre-size dir child Vecs to 8 — most dirs on a macOS
+        // volume have 1-32 children (median ~8). Skips the first
+        // three Vec doublings (1→2→4→8) for the median, trimming
+        // allocator pressure during the entries loop. Leaves get
+        // a `Vec::new()` so they don't allocate (see below).
+        child_lists.push(Vec::with_capacity(8));
         child_maps.push(Some(FxChildMap::default()));
 
         for entry in entries {
@@ -223,7 +228,9 @@ impl Tree {
                                     value_allocated: None,
                                     item_count: 0,
                                 });
-                                child_lists.push(Vec::new());
+                                // Pre-sized dir child Vec (see
+                                // root-push comment for rationale).
+                                child_lists.push(Vec::with_capacity(8));
                                 child_maps.push(Some(FxChildMap::default()));
                                 child_lists[cursor as usize].push(new_idx);
                                 if let Some(cm_mut) = &mut child_maps[cursor as usize] {
@@ -253,6 +260,11 @@ impl Tree {
                                 value_allocated: entry.allocated_size,
                                 item_count: 1,
                             });
+                            // Leaves never push into their own
+                            // child slot — keep the Vec empty
+                            // so it doesn't allocate a heap
+                            // backing. Pre-sizing here would
+                            // waste 32 B × ~3M leaves on /.
                             child_lists.push(Vec::new());
                             child_maps.push(None);
                             child_lists[cursor as usize].push(new_idx);
@@ -280,7 +292,9 @@ impl Tree {
                                 value_allocated: None,
                                 item_count: 0,
                             });
-                            child_lists.push(Vec::new());
+                            // Pre-sized dir child Vec (see
+                            // root-push comment for rationale).
+                            child_lists.push(Vec::with_capacity(8));
                             child_maps.push(Some(FxChildMap::default()));
                             child_lists[cursor as usize].push(new_idx);
                             if let Some(cm_mut) = &mut child_maps[cursor as usize] {
