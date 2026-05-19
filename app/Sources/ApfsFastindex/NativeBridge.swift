@@ -84,6 +84,35 @@ enum NativeBridge {
                     lsIdx.map(String.init) ?? "nil",
                     nonsenseIdx.map(String.init) ?? "nil"
                 )
+                // Phase-3b probe: lay out the scan into a
+                // 1000×1000 viewport and report cell stats.
+                let tLayout0 = Date()
+                let layout = scan.renderCells(
+                    rootedAt: 0,
+                    maxDepth: 0,
+                    metric: .logical,
+                    width: 1000,
+                    height: 1000
+                )
+                let layoutMs = Date().timeIntervalSince(tLayout0) * 1000.0
+                if let layout {
+                    var dirCount = 0
+                    var leafCount = 0
+                    var minArea: Float = .infinity
+                    var maxArea: Float = 0
+                    for c in layout.cells {
+                        let area = (c.x1 - c.x0) * (c.y1 - c.y0)
+                        if area < minArea { minArea = area }
+                        if area > maxArea { maxArea = area }
+                        if c.flags & 1 != 0 { dirCount += 1 } else { leafCount += 1 }
+                    }
+                    NSLog(
+                        "[native phase3b probe] %d cells (%d dirs, %d leaves) in %.1f ms; area range %.2f-%.2f px²",
+                        layout.count, dirCount, leafCount, layoutMs, minArea, maxArea
+                    )
+                } else {
+                    NSLog("[native phase3b probe] renderCells returned nil")
+                }
             } else {
                 NSLog("[native phase2 probe] \(probePath): FAILED")
             }
@@ -246,5 +275,59 @@ final class Scan {
         }
         let data = Data(bytes: bytes, count: Int(ref.len))
         return String(data: data, encoding: .utf8)
+    }
+
+    // MARK: - Phase 3b render
+
+    /// Treemap metric the renderer should size cells by.
+    /// `0 = logical`, `1 = allocated` (matches the Rust enum
+    /// discriminants in `apfs_render_cells`).
+    enum Metric: UInt32 {
+        case logical = 0
+        case allocated = 1
+    }
+
+    /// Owning wrapper around a `Vec<ApfsCell>` produced by
+    /// `apfs_render_cells`. `deinit` calls `apfs_render_cells_free`
+    /// so Swift can hold the slice for as long as the NSView
+    /// needs it without leaking.
+    final class CellLayout {
+        fileprivate let slice: ApfsCellSlice
+        var count: Int { Int(slice.count) }
+
+        /// Read access to the cells as a Swift
+        /// `UnsafeBufferPointer<ApfsCell>` — `forEach`, `for…in`,
+        /// random indexing all work. Pointer + count come
+        /// straight from the Rust slice with no copy.
+        var cells: UnsafeBufferPointer<ApfsCell> {
+            UnsafeBufferPointer(start: slice.cells, count: Int(slice.count))
+        }
+
+        fileprivate init(slice: ApfsCellSlice) {
+            self.slice = slice
+        }
+
+        deinit {
+            apfs_render_cells_free(slice)
+        }
+    }
+
+    /// Lay out the subtree rooted at `nodeIndex` into a viewport
+    /// of CSS-pixel `width × height`. `maxDepth = 0` is the
+    /// unlimited sentinel (matches the depth-picker behaviour).
+    /// Returns nil when the slice is empty (e.g. the subtree
+    /// has no children with positive value).
+    func renderCells(
+        rootedAt nodeIndex: UInt32,
+        maxDepth: UInt32,
+        metric: Metric,
+        width: Float,
+        height: Float
+    ) -> CellLayout? {
+        let slice = apfs_render_cells(handle, nodeIndex, maxDepth, metric.rawValue, width, height)
+        guard slice.cells != nil, slice.count > 0 else {
+            return nil
+        }
+        return CellLayout(slice: slice)
     }
 }

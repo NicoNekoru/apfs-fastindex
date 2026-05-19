@@ -27,6 +27,7 @@ use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::ptr;
 
+use crate::render::{render_cells, ApfsCell, Metric};
 use crate::tree::{Tree, NODE_INVALID};
 use crate::{fallback_scan_path_with_options, FallbackOptions};
 
@@ -335,6 +336,87 @@ pub extern "C" fn apfs_scan_node_name(scan: *const ApfsScan, idx: u32) -> ApfsPa
     }
     let n = &s.tree.nodes[idx as usize].name;
     ApfsPathRef { bytes: n.as_ptr(), len: n.len() as u64 }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Phase 3b: treemap render — laid-out cell slice
+// ─────────────────────────────────────────────────────────────
+
+// Re-export the cell record under the C ABI so cbindgen picks
+// up the symbol. The actual struct lives in `crate::render`.
+pub use crate::render::ApfsCell as ApfsCellRecord;
+
+/// Borrowed slice of laid-out cells. Lifetime is tied to the
+/// `ApfsCellSlice` itself — the underlying `Box<[ApfsCell]>` is
+/// reclaimed when Swift calls `apfs_render_cells_free` with
+/// this slice. Swift reads via
+/// `UnsafeBufferPointer<ApfsCellRecord>(start: cells, count: count)`.
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct ApfsCellSlice {
+    pub cells: *const ApfsCell,
+    pub count: u64,
+}
+
+/// Lay out the subtree rooted at `node_idx` inside a viewport of
+/// (`width`, `height`) CSS pixels. `max_depth = 0` is the
+/// no-truncation sentinel (matches the JS depth picker — render
+/// every descendant, cull only by min pixel area).
+///
+/// `metric`:
+///   - `0` → logical
+///   - `1` → allocated
+///
+/// The returned slice owns its memory. Pair every successful
+/// call with `apfs_render_cells_free(slice)` once the Swift
+/// renderer has drawn from it.
+#[no_mangle]
+pub extern "C" fn apfs_render_cells(
+    scan: *const ApfsScan,
+    node_idx: u32,
+    max_depth: u32,
+    metric: u32,
+    width: f32,
+    height: f32,
+) -> ApfsCellSlice {
+    let empty = ApfsCellSlice { cells: ptr::null(), count: 0 };
+    let Some(s) = (unsafe { scan.as_ref() }) else { return empty; };
+    let metric_enum = if metric == 1 { Metric::Allocated } else { Metric::Logical };
+    let cells = render_cells(
+        &s.tree,
+        node_idx,
+        max_depth,
+        metric_enum,
+        width as f64,
+        height as f64,
+    );
+    if cells.is_empty() {
+        return empty;
+    }
+    // Move the Vec into a fixed-size boxed slice so the pointer
+    // stays stable while Swift reads it. Free path reconstructs
+    // the box from `(cells, count)`.
+    let boxed: Box<[ApfsCell]> = cells.into_boxed_slice();
+    let count = boxed.len() as u64;
+    let ptr = Box::into_raw(boxed) as *mut ApfsCell;
+    ApfsCellSlice { cells: ptr, count }
+}
+
+/// Reclaim a slice previously returned by `apfs_render_cells`.
+/// Idempotent on NULL.
+#[no_mangle]
+pub extern "C" fn apfs_render_cells_free(slice: ApfsCellSlice) {
+    if slice.cells.is_null() || slice.count == 0 {
+        return;
+    }
+    // SAFETY: `cells` came from `Box::into_raw` over a slice
+    // of length `count`; reconstruct + drop.
+    unsafe {
+        drop(Box::from_raw(std::slice::from_raw_parts_mut(
+            slice.cells as *mut ApfsCell,
+            slice.count as usize,
+        )));
+    }
 }
 
 /// `true` iff at least one entry has `allocated_size = Some(_)`.

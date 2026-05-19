@@ -23,6 +23,11 @@ mod volume;
 /// the native renderer's navigation, breadcrumb, tree-list,
 /// layout, and hit-test paths. Used internally by `ffi::ApfsScan`.
 pub mod tree;
+/// Treemap layout + cell flattening. Produces the
+/// `Vec<ApfsCell>` Swift's NSView reads via
+/// `UnsafeBufferPointer<ApfsCell>`. Squarify algorithm ported
+/// from d3-hierarchy.
+pub mod render;
 /// C ABI surface for the native (Swift) renderer. See
 /// `docs/implementation/viz-perf-study.md` for the architecture
 /// sketch. The `#[no_mangle] extern "C"` symbols defined here are
