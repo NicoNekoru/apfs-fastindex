@@ -599,10 +599,10 @@
             title="Size rectangles by allocated bytes (st_blocks*512)"
             disabled>Allocated</button>
   </div>
-  <div class="depth-control" title="Max depth to render below the current folder. Deeper levels collapse into a single rectangle.">
+  <div class="depth-control" title="Max depth to render below the current folder. 0 = unlimited (the original behaviour: lay out everything, cull only by pixel area). 1-20 collapses deeper levels into a single rectangle.">
     <label for="depth-input">Depth</label>
     <button id="depth-dec" type="button" aria-label="Decrease depth">−</button>
-    <input id="depth-input" type="number" min="1" max="20" step="1" value="10"
+    <input id="depth-input" type="number" min="0" max="20" step="1" value="0"
            inputmode="numeric">
     <button id="depth-inc" type="button" aria-label="Increase depth">+</button>
   </div>
@@ -759,14 +759,18 @@ let activeMetric = "logical";
 /// Allocated toggle entirely.
 let allocatedAvailable = false;
 
-/// Max-depth cap exposed via the toolbar depth picker. Treemap
-/// renders progressively from depth 1 up to this; anything below
-/// collapses into a single rectangle keyed off the directory's
-/// aggregate. Declared up here (not next to the render function)
-/// because the depth-input wiring runs as the top-level script
-/// proceeds, before the render block is reached, and `let`
-/// declarations are TDZ-locked until that line executes.
-let maxDepth = 10;
+/// Max-depth cap exposed via the toolbar depth picker. Sentinel
+/// value `0` means *unlimited* — lay out the full subtree of the
+/// current node and let `MIN_PIXEL_AREA` decide what's visible.
+/// That matches the renderer's original behaviour before the
+/// depth picker landed. Any positive integer truncates the tree
+/// at that depth, collapsing deeper subtrees into a single
+/// rectangle keyed off the directory's aggregate. Declared up
+/// here (not next to the render function) because the
+/// depth-input wiring runs as the top-level script proceeds,
+/// before the render block is reached, and `let` declarations
+/// are TDZ-locked until that line executes.
+let maxDepth = 0;
 
 /// Cache d3 treemap layouts keyed on `(node.path, depth, metric,
 /// width × height)`. A hit lets renderAtDepth skip the
@@ -828,8 +832,10 @@ const depthInc = document.getElementById("depth-inc");
 maxDepth = clampDepth(parseInt(depthInput.value, 10));
 depthInput.value = String(maxDepth);
 function clampDepth(v) {
-  if (!Number.isFinite(v)) return 10;
-  return Math.max(1, Math.min(20, v | 0));
+  // 0 is a valid value (sentinel for "unlimited"); only NaN / out
+  // of range falls back to the default.
+  if (!Number.isFinite(v)) return 0;
+  return Math.max(0, Math.min(20, v | 0));
 }
 function setMaxDepth(v) {
   const next = clampDepth(v);
@@ -1772,20 +1778,27 @@ function render(node, opts) {
     return Promise.resolve();
   }
 
-  const targetDepth = Math.max(1, Math.min(20, maxDepth | 0));
+  // `targetDepth` is the user-facing depth picker value (0 = no
+  // truncation; 1-20 = collapse below that level). Internally the
+  // truncate/draw/hit paths see `Infinity` for the 0-sentinel so
+  // their `depth > N` comparisons fall through every cell.
+  const targetDepth = Math.max(0, Math.min(20, maxDepth | 0));
+  const effectiveDepth = targetDepth === 0 ? Infinity : targetDepth;
   const contextKey = renderContextKey(node, width, height);
 
   // Fast path: cells already cover the target depth. Just flip
   // `currentDepthFilter` and redraw. Synchronous because at <50 ms
   // the cost is below one frame anyway — yielding would add a
-  // visible delay where there wasn't one.
-  if (cellsContextKey === contextKey && targetDepth <= cellsMaxDepth && cellsMaxDepth > 0) {
-    currentDepthFilter = targetDepth;
+  // visible delay where there wasn't one. `cellsMaxDepth ===
+  // Infinity` (the unlimited bucket) compares correctly against
+  // any finite target.
+  if (cellsContextKey === contextKey && effectiveDepth <= cellsMaxDepth && cellsMaxDepth > 0) {
+    currentDepthFilter = effectiveDepth;
     const t0 = performance.now();
     drawCells();
     pushPerf("redraw_depth_change", performance.now() - t0, {
       fromDepth: cellsMaxDepth,
-      toDepth: targetDepth,
+      toDepth: effectiveDepth,
       path: node.path,
     });
     return Promise.resolve();
@@ -1795,7 +1808,7 @@ function render(node, opts) {
   // ingest-success post fires the moment the canvas is painted —
   // no extra rAF frame between scanner-exit and viz-visible.
   if (immediate) {
-    renderAtDepth(node, targetDepth, width, height);
+    renderAtDepth(node, effectiveDepth, width, height);
     return Promise.resolve();
   }
 
@@ -1806,7 +1819,7 @@ function render(node, opts) {
     pendingRenderResolve = resolve;
     pendingRenderHandle = requestAnimationFrame(() => {
       pendingRenderHandle = null;
-      renderAtDepth(node, targetDepth, width, height);
+      renderAtDepth(node, effectiveDepth, width, height);
       const r = pendingRenderResolve;
       pendingRenderResolve = null;
       if (r) r();
@@ -2267,6 +2280,11 @@ function canvasPoint(e) {
 /// uncopied data. Returned objects share `name` / `path` /
 /// `valueLogical` / `valueAllocated` / `kind` with the originals
 /// so existing label and tooltip helpers keep working.
+///
+/// Pass `Infinity` for `maxD` to disable truncation entirely
+/// (i.e. lay out the full subtree). That's the depth-picker-=-0
+/// path: the renderer falls back to its pre-depth-picker
+/// behaviour of "render everything, cull only by pixel area".
 function truncatedHierarchy(node, maxD) {
   function walk(n, depth) {
     if (depth >= maxD || !n.children || n.children.length === 0) {
