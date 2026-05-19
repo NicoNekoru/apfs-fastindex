@@ -345,7 +345,7 @@ pub extern "C" fn apfs_scan_node_child_count(scan: *const ApfsScan, idx: u32) ->
     if (idx as usize) >= s.tree.nodes.len() {
         return 0;
     }
-    s.tree.nodes[idx as usize].children.len() as u32
+    s.tree.nodes[idx as usize].children_count
 }
 
 /// Per-node aggregate read by Swift's status bar. Pre-computed
@@ -496,7 +496,7 @@ pub extern "C" fn apfs_scan_node_children(
     if (idx as usize) >= s.tree.nodes.len() {
         return null_slice;
     }
-    let children = &s.tree.nodes[idx as usize].children;
+    let children = s.tree.children_of(idx);
     if children.is_empty() {
         return null_slice;
     }

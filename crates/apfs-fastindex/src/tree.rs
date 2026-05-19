@@ -74,7 +74,17 @@ pub struct TreeNode {
     pub name: Box<str>,
     pub kind: EntryKind,
     pub parent: Option<u32>,
-    pub children: Vec<u32>,
+    /// Children of this node live contiguously in
+    /// `Tree::children_arena[children_start..children_start +
+    /// children_count]`. The flat-arena layout replaces a
+    /// `Vec<u32>` per node (24 B) with two `u32`s (8 B) — saves
+    /// 16 B / node, ~53 MiB on a /-scale tree — plus eliminates
+    /// the per-dir Vec heap allocations (one alloc per non-leaf
+    /// directory, ~200k on /). Use `Tree::children_of(idx)` to
+    /// get a borrowed slice; the FFI exposes the same pair as
+    /// `apfs_scan_node_children`.
+    pub children_start: u32,
+    pub children_count: u32,
     pub logical_size: u64,
     pub allocated_size: Option<u64>,
     pub symlink_target: Option<Box<str>>,
@@ -91,6 +101,11 @@ pub struct TreeNode {
 #[derive(Debug)]
 pub struct Tree {
     pub nodes: Vec<TreeNode>,
+    /// Flat children arena — `Tree::children_of` slices into
+    /// this. Stored on `Tree` rather than per-node so the bytes
+    /// are contiguous and dense (one big allocation instead of
+    /// one Vec per dir).
+    pub children_arena: Vec<u32>,
 }
 
 impl Tree {
@@ -111,7 +126,18 @@ impl Tree {
         // count a bit larger but the over-allocation cost is
         // tiny vs. the savings from skipping Vec growth.
         let cap = entries.len() + 1;
+        // Build directly into the final `TreeNode` shape with
+        // `(children_start, children_count) = (0, 0)` as a
+        // placeholder; a parallel `child_lists: Vec<Vec<u32>>`
+        // captures the per-dir children-as-we-find-them. Once
+        // the entries loop is done we flatten `child_lists` into
+        // `Tree::children_arena` and patch the placeholders.
+        //
+        // This keeps the peak working set down: there's never a
+        // moment where two full-sized node Vecs coexist. The
+        // side-car `Vec<Vec<u32>>` is freed at flatten time.
         let mut nodes: Vec<TreeNode> = Vec::with_capacity(cap);
+        let mut child_lists: Vec<Vec<u32>> = Vec::with_capacity(cap);
         // Sparse: only directories need a child_map for the
         // duplicate-detection during build. Indexed by node_idx,
         // `None` for leaves. Saves ~5× the HashMap allocations
@@ -128,7 +154,8 @@ impl Tree {
             name: Box::<str>::from(""),
             kind: EntryKind::Dir,
             parent: None,
-            children: Vec::new(),
+            children_start: 0,
+            children_count: 0,
             logical_size: 0,
             allocated_size: None,
             symlink_target: None,
@@ -136,6 +163,7 @@ impl Tree {
             value_allocated: None,
             item_count: 0,
         });
+        child_lists.push(Vec::new());
         child_maps.push(Some(FxChildMap::default()));
 
         for entry in entries {
@@ -186,7 +214,8 @@ impl Tree {
                                     name: name_box.clone(),
                                     kind: EntryKind::Dir,
                                     parent: Some(cursor),
-                                    children: Vec::new(),
+                                    children_start: 0,
+                                    children_count: 0,
                                     logical_size: 0,
                                     allocated_size: None,
                                     symlink_target: None,
@@ -194,8 +223,9 @@ impl Tree {
                                     value_allocated: None,
                                     item_count: 0,
                                 });
+                                child_lists.push(Vec::new());
                                 child_maps.push(Some(FxChildMap::default()));
-                                nodes[cursor as usize].children.push(new_idx);
+                                child_lists[cursor as usize].push(new_idx);
                                 if let Some(cm_mut) = &mut child_maps[cursor as usize] {
                                     cm_mut.insert(name_box, new_idx);
                                 }
@@ -211,7 +241,8 @@ impl Tree {
                                 name: Box::from(name),
                                 kind: entry.entry_kind,
                                 parent: Some(cursor),
-                                children: Vec::new(),
+                                children_start: 0,
+                                children_count: 0,
                                 logical_size: entry.logical_size,
                                 allocated_size: entry.allocated_size,
                                 symlink_target: entry
@@ -222,8 +253,9 @@ impl Tree {
                                 value_allocated: entry.allocated_size,
                                 item_count: 1,
                             });
+                            child_lists.push(Vec::new());
                             child_maps.push(None);
-                            nodes[cursor as usize].children.push(new_idx);
+                            child_lists[cursor as usize].push(new_idx);
                         }
                     }
                 } else {
@@ -239,7 +271,8 @@ impl Tree {
                                 name: name_box.clone(),
                                 kind: EntryKind::Dir,
                                 parent: Some(cursor),
-                                children: Vec::new(),
+                                children_start: 0,
+                                children_count: 0,
                                 logical_size: 0,
                                 allocated_size: None,
                                 symlink_target: None,
@@ -247,8 +280,9 @@ impl Tree {
                                 value_allocated: None,
                                 item_count: 0,
                             });
+                            child_lists.push(Vec::new());
                             child_maps.push(Some(FxChildMap::default()));
-                            nodes[cursor as usize].children.push(new_idx);
+                            child_lists[cursor as usize].push(new_idx);
                             if let Some(cm_mut) = &mut child_maps[cursor as usize] {
                                 cm_mut.insert(name_box, new_idx);
                             }
@@ -272,10 +306,41 @@ impl Tree {
         // tree via `node_index_for_path` instead — O(depth) +
         // O(siblings) per lookup, which is fine at the rates
         // those callers run.
-        let mut tree = Tree { nodes };
-        tree.finalize();
         drop(child_maps);
+
+        // Phase 2 — flatten the side-car `child_lists` into one
+        // contiguous `children_arena` and patch each TreeNode's
+        // placeholder `(children_start, children_count)` in
+        // place. Exactly `nodes.len() - 1` u32s total (every
+        // non-root node is a child of exactly one parent).
+        let total_children = nodes.len().saturating_sub(1);
+        let mut children_arena: Vec<u32> = Vec::with_capacity(total_children);
+        for (i, cl) in child_lists.iter().enumerate() {
+            nodes[i].children_start = children_arena.len() as u32;
+            nodes[i].children_count = cl.len() as u32;
+            children_arena.extend_from_slice(cl);
+        }
+        drop(child_lists);
+
+        let mut tree = Tree {
+            nodes,
+            children_arena,
+        };
+        tree.finalize();
         tree
+    }
+
+    /// Borrow this node's immediate-children indices. O(1) — a
+    /// pointer + length pair into `children_arena`. Returns an
+    /// empty slice for leaves and for out-of-range indices.
+    #[inline]
+    pub fn children_of(&self, idx: u32) -> &[u32] {
+        let Some(node) = self.nodes.get(idx as usize) else {
+            return &[];
+        };
+        let start = node.children_start as usize;
+        let end = start + node.children_count as usize;
+        &self.children_arena[start..end]
     }
 
     /// Compute `value_logical`, `value_allocated`, `item_count`
@@ -300,10 +365,11 @@ impl Tree {
             // Children pushed in order — `Vec::pop` pulls the
             // last one first, so reverse-iterate to keep the
             // left-to-right traversal stable.
-            let child_count = self.nodes[idx as usize].children.len();
-            for k in (0..child_count).rev() {
-                let c = self.nodes[idx as usize].children[k];
-                stack.push((c, false));
+            let node = &self.nodes[idx as usize];
+            let start = node.children_start as usize;
+            let end = start + node.children_count as usize;
+            for k in (start..end).rev() {
+                stack.push((self.children_arena[k], false));
             }
         }
 
@@ -320,11 +386,13 @@ impl Tree {
                 if is_dir { Some(0) } else { self.nodes[ni].allocated_size };
             let mut sum_items: u64 = if is_dir { 0 } else { 1 };
 
-            // Sum children. Re-borrow per-child to keep the
-            // borrow checker happy.
-            let child_count = self.nodes[ni].children.len();
-            for k in 0..child_count {
-                let child_idx = self.nodes[ni].children[k] as usize;
+            // Sum children. Walk the arena slice directly —
+            // contiguous u32s are cache-friendly, and we already
+            // know the range from the parent node's metadata.
+            let start = self.nodes[ni].children_start as usize;
+            let end = start + self.nodes[ni].children_count as usize;
+            for k in start..end {
+                let child_idx = self.children_arena[k] as usize;
                 let c = &self.nodes[child_idx];
                 sum_logical = sum_logical.saturating_add(c.value_logical);
                 sum_allocated = match (sum_allocated, c.value_allocated) {
@@ -377,9 +445,8 @@ impl Tree {
             // SAFETY: caller passes a UTF-8 path; ASCII '/'
             // boundaries leave each segment UTF-8-valid.
             let name = unsafe { std::str::from_utf8_unchecked(&bytes[seg_start..i]) };
-            let children = &self.nodes[cursor as usize].children;
             let mut found: Option<u32> = None;
-            for &child_idx in children {
+            for &child_idx in self.children_of(cursor) {
                 if &*self.nodes[child_idx as usize].name == name {
                     found = Some(child_idx);
                     break;

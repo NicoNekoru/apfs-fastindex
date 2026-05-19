@@ -66,7 +66,7 @@ impl ExtSummary {
         while let Some(idx) = stack.pop() {
             let n = &tree.nodes[idx as usize];
             if matches!(n.kind, EntryKind::Dir) {
-                for &c in &n.children {
+                for &c in tree.children_of(idx) {
                     stack.push(c);
                 }
                 continue;
