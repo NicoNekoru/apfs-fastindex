@@ -9,7 +9,8 @@ struct ApfsFastindexApp: App {
     /// policy to `.regular` at the earliest possible moment (App.init
     /// runs before the run loop starts) and also re-issue it in the
     /// delegate as belt-and-suspenders. The proper Phase-4 fix is a
-    /// real `.app` bundle (see `make-app.sh`); these calls become
+    /// real `.app` bundle (see `make-release.sh` in the repo root,
+    /// which assembles `app/ApfsFastindex.app`); these calls become
     /// no-ops there.
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
