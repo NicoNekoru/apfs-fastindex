@@ -201,8 +201,8 @@ final class TreemapView: NSView {
     /// NSString path stays within budget at typical view
     /// sizes.
     private func drawLabels(cells: UnsafeBufferPointer<ApfsCell>, scan: Scan) {
-        let dirFont = NSFont.systemFont(ofSize: 11, weight: .semibold)
-        let leafFont = NSFont.systemFont(ofSize: 10)
+        let dirFont = AppFont.ns(11, bold: true)
+        let leafFont = AppFont.ns(10)
         let dirColor = NSColor(
             red: 0xcf / 255.0, green: 0xd6 / 255.0,
             blue: 0xe4 / 255.0, alpha: 1.0
@@ -467,8 +467,8 @@ final class TreemapView: NSView {
         let sizeText = byteFormatter.string(fromByteCount: Int64(value))
         let titleText = "\(name) · \(sizeText)"
 
-        let titleFont = NSFont.systemFont(ofSize: 12, weight: .semibold)
-        let pathFont = NSFont.systemFont(ofSize: 10)
+        let titleFont = AppFont.ns(12, bold: true)
+        let pathFont = AppFont.ns(10)
         let titleColor = NSColor(white: 0.92, alpha: 1.0)
         let pathColor = NSColor(white: 0.60, alpha: 1.0)
         let para = NSMutableParagraphStyle()

@@ -242,6 +242,9 @@ final class Scan {
     struct ProgressSnapshot {
         let scanned: UInt64
         let skipped: UInt64
+        /// Cumulative logical bytes seen so far — used as the
+        /// numerator of the determinate progress bar.
+        let bytes: UInt64
         let elapsedMs: UInt64
         let terminal: Bool
     }
@@ -274,13 +277,14 @@ final class Scan {
         // Trampoline must be a non-capturing `@convention(c)`
         // function pointer; we recover the box via the
         // `userdata` arg and forward to `box.cb`.
-        let trampoline: @convention(c) (UInt64, UInt64, UInt64, Bool, UnsafeMutableRawPointer?) -> Void = {
-            scanned, skipped, elapsedMs, terminal, ud in
+        let trampoline: @convention(c) (UInt64, UInt64, UInt64, UInt64, Bool, UnsafeMutableRawPointer?) -> Void = {
+            scanned, skipped, bytes, elapsedMs, terminal, ud in
             guard let ud else { return }
             let b = Unmanaged<Box>.fromOpaque(ud).takeUnretainedValue()
             b.cb(ProgressSnapshot(
                 scanned: scanned,
                 skipped: skipped,
+                bytes: bytes,
                 elapsedMs: elapsedMs,
                 terminal: terminal
             ))

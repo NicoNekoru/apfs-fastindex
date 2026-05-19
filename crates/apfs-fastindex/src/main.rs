@@ -389,9 +389,10 @@ fn run_fallback(
         let mut stderr = std::io::stderr().lock();
         let _ = writeln!(
             stderr,
-            "{{\"scanned\":{},\"skipped\":{},\"elapsed_ms\":{},\"terminal\":{}}}",
+            "{{\"scanned\":{},\"skipped\":{},\"bytes\":{},\"elapsed_ms\":{},\"terminal\":{}}}",
             event.scanned,
             event.skipped,
+            event.bytes,
             event.elapsed.as_millis(),
             event.terminal
         );

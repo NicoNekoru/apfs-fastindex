@@ -197,6 +197,10 @@ pub struct FallbackOptions<'a> {
 pub struct ProgressEvent {
     pub scanned: u64,
     pub skipped: u64,
+    /// Sum of `entry.logical_size` for every entry scanned so far —
+    /// lets a UI render a determinate-style progress bar with the
+    /// volume's used-bytes as the denominator.
+    pub bytes: u64,
     pub elapsed: Duration,
     /// `true` for the final event emitted at the end of the walk so a
     /// consumer can render the last line without waiting for the
@@ -414,14 +418,24 @@ fn scan_serial(
 
     let progress_interval = Duration::from_millis(250);
     let mut next_progress_tick = scan_start + progress_interval;
+    // Running sum of `entry.logical_size`. Updated at each
+    // progress tick from `entries[bytes_cursor..]` so the
+    // per-entry path stays untouched.
+    let mut bytes_total: u64 = 0;
+    let mut bytes_cursor: usize = 0;
 
     while let Some(frame) = stack.pop() {
         if let Some(cb) = progress.as_mut() {
             let now = Instant::now();
             if now >= next_progress_tick {
+                for e in &entries[bytes_cursor..] {
+                    bytes_total = bytes_total.saturating_add(e.logical_size);
+                }
+                bytes_cursor = entries.len();
                 cb(ProgressEvent {
                     scanned: entries.len() as u64,
                     skipped: walk_skips.len() as u64,
+                    bytes: bytes_total,
                     elapsed: now.duration_since(scan_start),
                     terminal: false,
                 });
@@ -449,9 +463,13 @@ fn scan_serial(
     }
 
     if let Some(cb) = progress.as_mut() {
+        for e in &entries[bytes_cursor..] {
+            bytes_total = bytes_total.saturating_add(e.logical_size);
+        }
         cb(ProgressEvent {
             scanned: entries.len() as u64,
             skipped: walk_skips.len() as u64,
+            bytes: bytes_total,
             elapsed: scan_start.elapsed(),
             terminal: true,
         });
@@ -499,6 +517,7 @@ fn scan_parallel(
     // doesn't change the totals).
     let scanned_count = Arc::new(AtomicU64::new(0));
     let skipped_count = Arc::new(AtomicU64::new(0));
+    let bytes_count = Arc::new(AtomicU64::new(0));
     let progress_done = Arc::new(AtomicBool::new(false));
 
     std::thread::scope(
@@ -511,6 +530,7 @@ fn scan_parallel(
             let progress_handle = progress.map(|callback| {
                 let scanned = Arc::clone(&scanned_count);
                 let skipped = Arc::clone(&skipped_count);
+                let bytes = Arc::clone(&bytes_count);
                 let done = Arc::clone(&progress_done);
                 scope.spawn(move || {
                     let interval = Duration::from_millis(250);
@@ -528,6 +548,7 @@ fn scan_parallel(
                             callback(ProgressEvent {
                                 scanned: scanned.load(Ordering::Relaxed),
                                 skipped: skipped.load(Ordering::Relaxed),
+                                bytes: bytes.load(Ordering::Relaxed),
                                 elapsed: now.duration_since(scan_start),
                                 terminal: false,
                             });
@@ -539,6 +560,7 @@ fn scan_parallel(
                     callback(ProgressEvent {
                         scanned: scanned.load(Ordering::Relaxed),
                         skipped: skipped.load(Ordering::Relaxed),
+                        bytes: bytes.load(Ordering::Relaxed),
                         elapsed: scan_start.elapsed(),
                         terminal: true,
                     });
@@ -555,6 +577,7 @@ fn scan_parallel(
                 let q = Arc::clone(&queue);
                 let scanned = Arc::clone(&scanned_count);
                 let skipped = Arc::clone(&skipped_count);
+                let bytes = Arc::clone(&bytes_count);
                 let visited = Arc::clone(visited_dirs);
                 let overlays = Arc::clone(firmlink_overlays);
                 handles.push(scope.spawn(move || {
@@ -583,6 +606,17 @@ fn scan_parallel(
                         let added_skips = (local_skips.len() - prev_skips) as u64;
                         if added_entries > 0 {
                             scanned.fetch_add(added_entries, Ordering::Relaxed);
+                            // Sum logical bytes for the newly-added
+                            // entries and roll into the shared atomic.
+                            // Bounded by per-frame entries (~1-100),
+                            // not by total scan size.
+                            let mut added_bytes: u64 = 0;
+                            for e in &local_entries[prev_entries..] {
+                                added_bytes = added_bytes.saturating_add(e.logical_size);
+                            }
+                            if added_bytes > 0 {
+                                bytes.fetch_add(added_bytes, Ordering::Relaxed);
+                            }
                         }
                         if added_skips > 0 {
                             skipped.fetch_add(added_skips, Ordering::Relaxed);

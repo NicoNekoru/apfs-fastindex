@@ -14,7 +14,13 @@ struct NativeContentView: View {
     @State private var layout: Scan.Layout?
     @State private var scanError: String?
     @State private var scanning: Bool = false
-    @State private var depth: UInt32 = 0
+    /// Treemap depth + worker count live in `Settings` (⌘,). The
+    /// `@AppStorage` binding here keeps them reactive: editing
+    /// the value in the settings panel re-fires the depth
+    /// `onChange` below and re-lays the visible cells without a
+    /// rescan.
+    @AppStorage(AppPrefs.depthKey) private var depth: Int = 0
+    @AppStorage(AppPrefs.threadsKey) private var threads: Int = 0
     @State private var metric: Scan.Metric = .logical
     @State private var lastSize: CGSize = .zero
     @State private var currentNode: UInt32 = 0
@@ -47,7 +53,13 @@ struct NativeContentView: View {
     @State private var scanPhaseLabel: String = "Scanning"
     @State private var scanProgressScanned: UInt64 = 0
     @State private var scanProgressSkipped: UInt64 = 0
+    @State private var scanProgressBytes: UInt64 = 0
     @State private var scanProgressElapsedMs: UInt64 = 0
+    /// Volume's used-bytes captured at scan start — the
+    /// denominator for the determinate progress fraction
+    /// (`scanProgressBytes / scanProgressBytesTotal`). When this
+    /// is 0 (no volume info) the bar falls back to indeterminate.
+    @State private var scanProgressBytesTotal: UInt64 = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -86,6 +98,9 @@ struct NativeContentView: View {
                                 handleClick(nodeIndex: nodeIndex)
                             }
                         )
+                        if scan == nil && !scanning {
+                            initialStatsCard
+                        }
                         if scanning {
                             progressOverlay
                         }
@@ -117,6 +132,10 @@ struct NativeContentView: View {
             rebuildExtSummary()
         }
         .onChange(of: expandedNodes) { _ in rebuildTreeRows() }
+        // Settings panel writes both of these; depth re-fires the
+        // layout pass without a rescan, threads picks up on the
+        // *next* scan.
+        .onChange(of: depth) { _ in updateLayout() }
     }
 
     // MARK: - Tree-list panel
@@ -190,7 +209,7 @@ struct NativeContentView: View {
     private func paneHeader(_ title: String) -> some View {
         HStack {
             Text(title.uppercased())
-                .font(.system(size: 10, weight: .semibold))
+                .font(AppFont.ui(10, weight: .semibold))
                 .foregroundStyle(VizPalette.muted)
                 .tracking(0.4)
             Spacer()
@@ -202,16 +221,16 @@ struct NativeContentView: View {
             // 22 pt indent column for the disclosure triangle.
             Spacer().frame(width: 22)
             Text("Name")
-                .font(.system(size: 9, weight: .semibold))
+                .font(AppFont.ui(9, weight: .semibold))
                 .foregroundStyle(VizPalette.muted)
                 .tracking(0.4)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Text("% / parent")
-                .font(.system(size: 9, weight: .semibold))
+                .font(AppFont.ui(9, weight: .semibold))
                 .foregroundStyle(VizPalette.muted)
                 .frame(width: 80, alignment: .trailing)
             Text("Size")
-                .font(.system(size: 9, weight: .semibold))
+                .font(AppFont.ui(9, weight: .semibold))
                 .foregroundStyle(VizPalette.muted)
                 .frame(width: 70, alignment: .trailing)
                 .padding(.leading, 4)
@@ -224,7 +243,7 @@ struct NativeContentView: View {
             HStack {
                 Spacer().frame(width: CGFloat(14 * (row.depth + 1) + 8))
                 Text("… and \(row.overflowCount) more")
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(AppFont.ui(11)).monospacedDigit()
                     .foregroundStyle(VizPalette.muted)
                 Spacer()
             }
@@ -240,7 +259,7 @@ struct NativeContentView: View {
                     toggleExpansion(of: row.nodeIndex)
                 } label: {
                     Image(systemName: row.isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 9))
+                        .font(AppFont.ui(9))
                         .foregroundStyle(row.hasChildren ? VizPalette.muted : .clear)
                         .frame(width: 14, height: 14, alignment: .center)
                 }
@@ -251,7 +270,7 @@ struct NativeContentView: View {
                 // symlinks, dirs apart.
                 let kind = scan?.kind(of: row.nodeIndex) ?? .invalid
                 Image(systemName: rowIconName(kind: kind))
-                    .font(.system(size: 11))
+                    .font(AppFont.ui(11))
                     .foregroundStyle(rowIconColor(kind: kind))
                     .frame(width: 14)
                     .padding(.trailing, 4)
@@ -269,16 +288,16 @@ struct NativeContentView: View {
                     }()
                     HStack(spacing: 0) {
                         Text(name)
-                            .font(.system(size: 12, design: .monospaced))
+                            .font(AppFont.ui(12)).monospacedDigit()
                             .lineLimit(1)
                             .truncationMode(.middle)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         Text(percentText(for: row))
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(AppFont.ui(10)).monospacedDigit()
                             .foregroundStyle(VizPalette.muted)
                             .frame(width: 80, alignment: .trailing)
                         Text(sizeText(for: row))
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(AppFont.ui(10)).monospacedDigit()
                             .foregroundStyle(VizPalette.text)
                             .frame(width: 70, alignment: .trailing)
                             .padding(.leading, 4)
@@ -368,12 +387,12 @@ struct NativeContentView: View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
                 Text("BY EXTENSION")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(AppFont.ui(10, weight: .semibold))
                     .foregroundStyle(VizPalette.muted)
                     .tracking(0.4)
                 if let summary = extSummary, summary.count > 0 {
                     Text(extSubtitle(summary: summary))
-                        .font(.system(size: 11))
+                        .font(AppFont.ui(11))
                         .foregroundStyle(VizPalette.muted)
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -386,21 +405,21 @@ struct NativeContentView: View {
             HStack(spacing: 0) {
                 Spacer().frame(width: 18)
                 Text("Extension")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(AppFont.ui(9, weight: .semibold))
                     .foregroundStyle(VizPalette.muted)
                     .tracking(0.4)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Text("% / view")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(AppFont.ui(9, weight: .semibold))
                     .foregroundStyle(VizPalette.muted)
                     .frame(width: 70, alignment: .trailing)
                 Text("Size")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(AppFont.ui(9, weight: .semibold))
                     .foregroundStyle(VizPalette.muted)
                     .frame(width: 70, alignment: .trailing)
                     .padding(.leading, 4)
                 Text("Files")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(AppFont.ui(9, weight: .semibold))
                     .foregroundStyle(VizPalette.muted)
                     .frame(width: 50, alignment: .trailing)
                     .padding(.leading, 4)
@@ -421,7 +440,7 @@ struct NativeContentView: View {
             } else {
                 Spacer()
                 Text("(scan a folder to see breakdown)")
-                    .font(.system(size: 11))
+                    .font(AppFont.ui(11))
                     .foregroundStyle(VizPalette.muted)
                     .frame(maxWidth: .infinity)
                     .padding()
@@ -454,21 +473,21 @@ struct NativeContentView: View {
                 .padding(.leading, 6)
                 .padding(.trailing, 6)
             Text(row.ext)
-                .font(.system(size: 11, design: .monospaced))
+                .font(AppFont.ui(11)).monospacedDigit()
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Text(extPercentText(row: row, total: total))
-                .font(.system(size: 10, design: .monospaced))
+                .font(AppFont.ui(10)).monospacedDigit()
                 .foregroundStyle(VizPalette.muted)
                 .frame(width: 70, alignment: .trailing)
             Text(extSizeText(row: row))
-                .font(.system(size: 10, design: .monospaced))
+                .font(AppFont.ui(10)).monospacedDigit()
                 .foregroundStyle(VizPalette.text)
                 .frame(width: 70, alignment: .trailing)
                 .padding(.leading, 4)
             Text(row.fileCount.formatted())
-                .font(.system(size: 10, design: .monospaced))
+                .font(AppFont.ui(10)).monospacedDigit()
                 .foregroundStyle(VizPalette.muted)
                 .frame(width: 50, alignment: .trailing)
                 .padding(.leading, 4)
@@ -584,7 +603,7 @@ struct NativeContentView: View {
                 browseForFolder()
             } label: {
                 Image(systemName: "folder")
-                    .font(.system(size: 14))
+                    .font(AppFont.ui(14))
                     .foregroundStyle(VizPalette.muted)
                     .padding(.horizontal, 4)
                     .padding(.vertical, 4)
@@ -615,33 +634,7 @@ struct NativeContentView: View {
             .disabled(scan?.allocatedAvailable == false)
             .onChange(of: metric) { _ in updateLayout() }
 
-            HStack(spacing: 6) {
-                Text("Depth")
-                    .font(.system(size: 11))
-                    .foregroundStyle(VizPalette.muted)
-                // Show the current value next to the stepper —
-                // the Stepper's own label sits inside its
-                // tracking area, which `.labelsHidden()` then
-                // squashes; pulling the value out keeps the
-                // arrows tight and the number visible.
-                Text(depth == 0 ? "auto" : String(depth))
-                    .font(.system(size: 12, design: .monospaced))
-                    .frame(minWidth: 34, alignment: .trailing)
-                    .foregroundStyle(VizPalette.text)
-                Stepper("", value: $depth, in: 0...20)
-                    .labelsHidden()
-                    .onChange(of: depth) { _ in updateLayout() }
-            }
-            .padding(.horizontal, 8)
-
             Spacer(minLength: 12)
-
-            if scanning {
-                ProgressView()
-                    .controlSize(.small)
-                    .progressViewStyle(.circular)
-                    .tint(VizPalette.accent)
-            }
 
             Button {
                 startScan()
@@ -665,7 +658,7 @@ struct NativeContentView: View {
         HStack(spacing: 0) {
             if scan == nil {
                 Text("(no scan loaded)")
-                    .font(.system(size: 12))
+                    .font(AppFont.ui(12))
                     .foregroundStyle(VizPalette.muted)
             } else {
                 let chain = breadcrumbChain
@@ -677,7 +670,7 @@ struct NativeContentView: View {
                         updateLayout()
                     } label: {
                         Text(node.label)
-                            .font(.system(size: 12, design: .monospaced))
+                            .font(AppFont.ui(12)).monospacedDigit()
                             .foregroundStyle(
                                 node.index == currentNode
                                     ? VizPalette.text
@@ -747,18 +740,18 @@ struct NativeContentView: View {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(.red)
                 Text("error: \(err)")
-                    .font(.system(size: 11))
+                    .font(AppFont.ui(11))
                     .foregroundStyle(.red)
             } else if let scan {
                 statusPill(scan.sourceKind.isEmpty ? "fallback" : scan.sourceKind,
                            tint: VizPalette.accent)
                 Text(totalsText(for: scan))
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(AppFont.ui(12)).monospacedDigit()
                     .foregroundStyle(VizPalette.muted)
                 if !lastClickedPath.isEmpty {
                     Spacer()
                     Text(lastClickedPath)
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(AppFont.ui(12)).monospacedDigit()
                         .foregroundStyle(VizPalette.text)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -769,7 +762,7 @@ struct NativeContentView: View {
                 }
             } else {
                 Text("no scan loaded")
-                    .font(.system(size: 11))
+                    .font(AppFont.ui(11))
                     .foregroundStyle(VizPalette.muted)
                 Spacer()
             }
@@ -779,7 +772,7 @@ struct NativeContentView: View {
     @ViewBuilder
     private func statusPill(_ text: String, tint: Color) -> some View {
         Text(text)
-            .font(.system(size: 11))
+            .font(AppFont.ui(11))
             .padding(.horizontal, 6)
             .padding(.vertical, 1)
             .overlay(
@@ -810,38 +803,168 @@ struct NativeContentView: View {
     /// `scanProgressSkipped`, `scanProgressElapsedMs` — all
     /// updated on the main queue from the FFI progress callback
     /// (see `startScan()`).
+    /// Fixed island width — the card is centered in the
+    /// available rect (the parent ZStack's default alignment is
+    /// `.center`) and never reflows as counters scale. The
+    /// per-row layout below uses fixed-width columns for the
+    /// same reason — digits growing from 1 to 1,000,000 no
+    /// longer push the island around.
+    private static let progressIslandWidth: CGFloat = 380
+
     private var progressOverlay: some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 10) {
-                ProgressView()
-                    .controlSize(.small)
-                    .progressViewStyle(.circular)
+        // Determinate fraction when we have a denominator;
+        // capped at 1.0 because subdir scans can occasionally
+        // overshoot used-bytes (sparse files, hard-linked clones
+        // counted twice — both rare but possible).
+        let fraction: Double? = {
+            guard scanProgressBytesTotal > 0 else { return nil }
+            let f = Double(scanProgressBytes) / Double(scanProgressBytesTotal)
+            return min(max(f, 0), 1)
+        }()
+
+        return VStack(spacing: 12) {
+            Text(scanPhaseLabel)
+                .font(AppFont.ui(14, weight: .semibold))
+                .foregroundStyle(VizPalette.text)
+            Text(formattedElapsed(ms: scanProgressElapsedMs))
+                .font(AppFont.ui(12)).monospacedDigit()
+                .foregroundStyle(VizPalette.muted)
+
+            // Determinate / indeterminate bar — same height
+            // either way so the island doesn't reflow.
+            if let fraction {
+                ProgressView(value: fraction)
+                    .progressViewStyle(.linear)
                     .tint(VizPalette.accent)
-                Text(scanPhaseLabel)
-                    .font(.system(size: 14, weight: .semibold))
+            } else {
+                ProgressView()
+                    .progressViewStyle(.linear)
+                    .tint(VizPalette.accent)
+            }
+
+            // Single line of "X / Y bytes (NN%)" — explicit
+            // numbers so the user can see real progress beyond
+            // the bar. Hidden when we have no denominator.
+            if let fraction {
+                Text(
+                    "\(formattedBytes(scanProgressBytes)) / \(formattedBytes(scanProgressBytesTotal)) "
+                    + "· \(Int(fraction * 100))%"
+                )
+                .font(AppFont.ui(11)).monospacedDigit()
+                .foregroundStyle(VizPalette.text)
+            } else {
+                Text(formattedBytes(scanProgressBytes))
+                    .font(AppFont.ui(11)).monospacedDigit()
                     .foregroundStyle(VizPalette.text)
             }
-            HStack(spacing: 18) {
-                metricCell(label: "Scanned",
-                           value: scanProgressScanned.formatted())
-                if scanProgressSkipped > 0 {
-                    metricCell(label: "Skipped",
-                               value: scanProgressSkipped.formatted())
-                }
-                metricCell(label: "Elapsed",
-                           value: formattedElapsed(ms: scanProgressElapsedMs))
+
+            // Items / skipped row. `Skipped` is rendered with
+            // value "0" when none have skipped yet, so the row
+            // height is stable across the whole scan — the user
+            // doesn't get a layout-shift the first time a
+            // permission-denied directory appears.
+            HStack(spacing: 0) {
+                Spacer(minLength: 0)
+                fixedMetricCell(label: "Scanned",
+                                value: scanProgressScanned.formatted(),
+                                width: 130)
+                fixedMetricCell(label: "Skipped",
+                                value: scanProgressSkipped.formatted(),
+                                width: 130)
+                Spacer(minLength: 0)
             }
-            if !pathInput.isEmpty {
-                Text(pathInput)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(VizPalette.muted)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .frame(maxWidth: 360)
-            }
+
+            // Truncated path — fixed width matches the card so
+            // the long-path case doesn't widen anything.
+            Text(pathInput.isEmpty ? " " : pathInput)
+                .font(AppFont.ui(10))
+                .foregroundStyle(VizPalette.muted)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .center)
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 16)
+        .frame(width: NativeContentView.progressIslandWidth)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(VizPalette.panel)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(VizPalette.border, lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.35), radius: 14, x: 0, y: 6)
+        )
+    }
+
+    /// Stable-width variant of `metricCell` — pins the column to
+    /// `width` so a 1-digit count and a 7-digit count occupy the
+    /// same footprint. Used inside the centered progress island
+    /// where any width shift is visible as a layout jitter.
+    @ViewBuilder
+    private func fixedMetricCell(label: String, value: String, width: CGFloat) -> some View {
+        VStack(spacing: 1) {
+            Text(label.uppercased())
+                .font(AppFont.ui(9, weight: .semibold))
+                .foregroundStyle(VizPalette.muted)
+                .tracking(0.4)
+            Text(value)
+                .font(AppFont.ui(13)).monospacedDigit()
+                .foregroundStyle(VizPalette.text)
+        }
+        .frame(width: width)
+    }
+
+    // MARK: - Initial-view stats card
+
+    /// Pre-scan welcome card. Shows the volume's total / used /
+    /// free capacity (and a placeholder item count if the
+    /// filesystem reports `f_files`, which APFS doesn't but HFS+
+    /// / FAT-mounted images would). Helps the user calibrate
+    /// "how big a scan am I about to run".
+    private var initialStatsCard: some View {
+        let stats = volumeStats(for: pathInput)
+        return VStack(alignment: .leading, spacing: 14) {
+            Text("Ready to scan")
+                .font(AppFont.ui(15, weight: .semibold))
+                .foregroundStyle(VizPalette.text)
+            if let stats {
+                HStack(spacing: 24) {
+                    statColumn(label: "Volume",
+                               value: stats.volumeName.isEmpty ? "—" : stats.volumeName)
+                    statColumn(label: "Total",
+                               value: formattedBytes(stats.total))
+                    statColumn(label: "Used",
+                               value: formattedBytes(stats.used))
+                    statColumn(label: "Free",
+                               value: formattedBytes(stats.free))
+                    statColumn(label: "Items",
+                               value: stats.files.map { $0.formatted() } ?? "—")
+                }
+                if stats.total > 0 {
+                    GeometryReader { geom in
+                        ZStack(alignment: .leading) {
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(VizPalette.border)
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(VizPalette.accent.opacity(0.85))
+                                .frame(width: geom.size.width * CGFloat(Double(stats.used) / Double(stats.total)))
+                        }
+                    }
+                    .frame(height: 6)
+                }
+            } else {
+                Text("(no volume info available for this path)")
+                    .font(AppFont.ui(11))
+                    .foregroundStyle(VizPalette.muted)
+            }
+            Text("Press ⌘↩ or click Scan to index this directory.")
+                .font(AppFont.ui(11))
+                .foregroundStyle(VizPalette.muted)
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 18)
+        .frame(maxWidth: 640)
         .background(
             RoundedRectangle(cornerRadius: 10)
                 .fill(VizPalette.panel)
@@ -854,14 +977,70 @@ struct NativeContentView: View {
     }
 
     @ViewBuilder
-    private func metricCell(label: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
+    private func statColumn(label: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
             Text(label.uppercased())
-                .font(.system(size: 9, weight: .semibold))
+                .font(AppFont.ui(9, weight: .semibold))
                 .foregroundStyle(VizPalette.muted)
                 .tracking(0.4)
             Text(value)
-                .font(.system(size: 13, design: .monospaced))
+                .font(AppFont.ui(13)).monospacedDigit()
+                .foregroundStyle(VizPalette.text)
+        }
+    }
+
+    private func formattedBytes(_ n: UInt64) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(n), countStyle: .binary)
+    }
+
+    /// Result of `volumeStats(for:)` — `total/used/free` are byte
+    /// counts; `files` is the filesystem's reported node count
+    /// (often 0 on APFS — present here for HFS+ / FAT volumes).
+    private struct VolumeStats {
+        let volumeName: String
+        let total: UInt64
+        let used: UInt64
+        let free: UInt64
+        let files: UInt64?
+    }
+
+    private func volumeStats(for path: String) -> VolumeStats? {
+        let p = path.isEmpty ? NSHomeDirectory() : path
+        guard let attrs = try? FileManager.default.attributesOfFileSystem(forPath: p) else {
+            return nil
+        }
+        let total = (attrs[.systemSize] as? NSNumber)?.uint64Value ?? 0
+        let free = (attrs[.systemFreeSize] as? NSNumber)?.uint64Value ?? 0
+        let used = total > free ? total - free : 0
+        // `.systemNodes` is `statvfs::f_files`. APFS reports 0
+        // (variable inode count); treat 0 as "unknown" upstream.
+        let filesRaw = (attrs[.systemNodes] as? NSNumber)?.uint64Value ?? 0
+        let files: UInt64? = filesRaw > 0 ? filesRaw : nil
+
+        // Resolve the human-readable volume name via the URL
+        // resource keys (the FileManager attributes don't expose
+        // it directly).
+        let url = URL(fileURLWithPath: p)
+        var volumeName = ""
+        if let values = try? url.resourceValues(forKeys: [.volumeLocalizedNameKey]),
+           let name = values.volumeLocalizedName {
+            volumeName = name
+        }
+        return VolumeStats(
+            volumeName: volumeName,
+            total: total, used: used, free: free, files: files
+        )
+    }
+
+    @ViewBuilder
+    private func metricCell(label: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label.uppercased())
+                .font(AppFont.ui(9, weight: .semibold))
+                .foregroundStyle(VizPalette.muted)
+                .tracking(0.4)
+            Text(value)
+                .font(AppFont.ui(13)).monospacedDigit()
                 .foregroundStyle(VizPalette.text)
         }
     }
@@ -889,11 +1068,18 @@ struct NativeContentView: View {
         scanPhaseLabel = "Scanning"
         scanProgressScanned = 0
         scanProgressSkipped = 0
+        scanProgressBytes = 0
         scanProgressElapsedMs = 0
+        // Snapshot the volume's used bytes as the progress
+        // denominator. Whole-volume scans land near 100%; subdir
+        // scans terminate before the bar fills (the bar
+        // disappears when `scanning` flips false, so an
+        // under-100% finish is invisible).
+        scanProgressBytesTotal = volumeStats(for: path)?.used ?? 0
         DispatchQueue.global(qos: .userInitiated).async {
             let result = Scan.fallbackWithProgress(
                 path: path,
-                threads: 0,
+                threads: UInt32(threads),
                 crossMounts: false,
                 onProgress: { snapshot in
                     // Marshal off the Rust progress thread onto
@@ -904,6 +1090,7 @@ struct NativeContentView: View {
                     DispatchQueue.main.async {
                         scanProgressScanned = snapshot.scanned
                         scanProgressSkipped = snapshot.skipped
+                        scanProgressBytes = snapshot.bytes
                         scanProgressElapsedMs = snapshot.elapsedMs
                         if snapshot.terminal {
                             scanPhaseLabel = "Indexing"
@@ -958,7 +1145,7 @@ struct NativeContentView: View {
         }
         layout = scan.layout(
             rootedAt: currentNode,
-            maxDepth: depth,
+            maxDepth: UInt32(depth),
             metric: metric,
             width: Float(lastSize.width),
             height: Float(lastSize.height)

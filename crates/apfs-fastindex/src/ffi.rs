@@ -124,10 +124,14 @@ pub extern "C" fn apfs_scan_directory(
 /// nullable function pointer); cbindgen collapses
 /// `Option<extern "C" fn>` to a plain function-pointer typedef
 /// when written this way.
+// `bytes` is the cumulative `logical_size` sum for entries
+// scanned so far — drives a determinate progress bar (numerator)
+// against a volume-capacity denominator on the Swift side.
 pub type ApfsProgressCallback = Option<
     extern "C" fn(
         scanned: u64,
         skipped: u64,
+        bytes: u64,
         elapsed_ms: u64,
         terminal: bool,
         userdata: *mut std::os::raw::c_void,
@@ -175,6 +179,7 @@ pub extern "C" fn apfs_scan_directory_with_progress(
             cb(
                 event.scanned,
                 event.skipped,
+                event.bytes,
                 event.elapsed.as_millis() as u64,
                 event.terminal,
                 user.0,
