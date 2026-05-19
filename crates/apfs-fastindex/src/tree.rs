@@ -56,15 +56,22 @@ pub const NODE_INVALID: u32 = u32::MAX;
 /// One tree node. Holds the data the renderer needs in
 /// directly-indexable form. `parent == None` only at the root
 /// (index 0); every other node has a parent.
-/// `name`, `path`, and `symlink_target` are stored as `Box<str>`
-/// (16 bytes vs 24 for `String`) since `TreeNode` is built once
-/// at scan-finalize and never mutated afterwards. On a /-scale
-/// scan with ~3M nodes that's a ~24 MiB drop in the tree vec
-/// alone, plus tighter cache lines per node walk.
+/// `name` and `symlink_target` are stored as `Box<str>` (16
+/// bytes vs 24 for `String`) since `TreeNode` is built once at
+/// scan-finalize and never mutated afterwards.
+///
+/// `path` is deliberately *not* stored — the full absolute path
+/// is `parent.path + "/" + self.name`, and the only consumer
+/// that materialises it is the FFI (`apfs_scan_node_path`),
+/// which is called O(visible-cells) per UI session, not
+/// O(nodes). Computing on demand and caching the result on
+/// `ApfsScan` saves 16 bytes per node (~50 MiB on a /-scale
+/// scan) and eliminates the `join_path` allocation that
+/// happened once per node during build (~3M allocations).
+/// Callers that need the path call `Tree::compute_path`.
 #[derive(Debug)]
 pub struct TreeNode {
     pub name: Box<str>,
-    pub path: Box<str>,
     pub kind: EntryKind,
     pub parent: Option<u32>,
     pub children: Vec<u32>,
@@ -119,7 +126,6 @@ impl Tree {
         // as "/" in the breadcrumb.
         nodes.push(TreeNode {
             name: Box::<str>::from(""),
-            path: Box::<str>::from(""),
             kind: EntryKind::Dir,
             parent: None,
             children: Vec::new(),
@@ -171,18 +177,13 @@ impl Tree {
                                 .expect("dir cursor must have a child_map");
                             if !cm.contains_key(name) {
                                 let new_idx = nodes.len() as u32;
-                                let parent_path = nodes[cursor as usize].path.as_ref();
-                                let full_path = join_path(parent_path, name);
                                 // Allocate `name` as Box<str>
                                 // once; we share the allocation
                                 // between the TreeNode and the
-                                // child_map via Box::clone (one
-                                // additional alloc, same as the
-                                // old `name.to_string()` clone).
+                                // child_map via Box::clone.
                                 let name_box: Box<str> = Box::from(name);
                                 nodes.push(TreeNode {
                                     name: name_box.clone(),
-                                    path: full_path,
                                     kind: EntryKind::Dir,
                                     parent: Some(cursor),
                                     children: Vec::new(),
@@ -206,11 +207,8 @@ impl Tree {
                             // and they have no children of
                             // their own).
                             let new_idx = nodes.len() as u32;
-                            let parent_path = nodes[cursor as usize].path.as_ref();
-                            let full_path = join_path(parent_path, name);
                             nodes.push(TreeNode {
                                 name: Box::from(name),
-                                path: full_path,
                                 kind: entry.entry_kind,
                                 parent: Some(cursor),
                                 children: Vec::new(),
@@ -236,12 +234,9 @@ impl Tree {
                         Some(idx) => idx,
                         None => {
                             let new_idx = nodes.len() as u32;
-                            let parent_path = nodes[cursor as usize].path.as_ref();
-                            let full_path = join_path(parent_path, name);
                             let name_box: Box<str> = Box::from(name);
                             nodes.push(TreeNode {
                                 name: name_box.clone(),
-                                path: full_path,
                                 kind: EntryKind::Dir,
                                 parent: Some(cursor),
                                 children: Vec::new(),
@@ -401,20 +396,58 @@ impl Tree {
     }
 }
 
-/// Build `parent/name` (or just `name` if parent is empty) into
-/// a `Box<str>` with exactly the right capacity reserved. The
-/// returned box is built from a `String` with a sized buffer (no
-/// realloc, no growth slack) so we never carry unused capacity
-/// past the build phase.
-fn join_path(parent: &str, name: &str) -> Box<str> {
-    if parent.is_empty() {
-        return Box::from(name);
+impl Tree {
+    /// Materialise the absolute path for `idx` by walking the
+    /// parent chain. Returns `""` for the root (idx 0) and for
+    /// out-of-range indices.
+    ///
+    /// O(depth) in tree depth + path bytes. Typical paths on a
+    /// macOS volume are < 50 bytes and depth < 12, so each call
+    /// is a few hundred cycles. The FFI wraps this with a cache
+    /// keyed on `idx` so repeated queries (hover, click,
+    /// breadcrumb) don't repeat the walk.
+    pub fn compute_path(&self, idx: u32) -> Box<str> {
+        if (idx as usize) >= self.nodes.len() || idx == 0 {
+            return Box::from("");
+        }
+        // First pass: walk to root, summing byte length.
+        let mut total: usize = 0;
+        let mut cur = idx;
+        loop {
+            let node = &self.nodes[cur as usize];
+            total += node.name.len();
+            match node.parent {
+                // Add a separator for every step *between* names.
+                // Skip the leading slash for direct root children
+                // (parent == 0): the root's path is "", not "/".
+                Some(p) if p != 0 => total += 1,
+                _ => break,
+            }
+            cur = node.parent.unwrap();
+        }
+        // Second pass: build front-to-back into a sized String.
+        let mut s = String::with_capacity(total);
+        write_path_into(&self.nodes, idx, &mut s);
+        s.into_boxed_str()
     }
-    let mut s = String::with_capacity(parent.len() + 1 + name.len());
-    s.push_str(parent);
-    s.push('/');
-    s.push_str(name);
-    s.into_boxed_str()
+}
+
+/// Recursively appends `nodes[idx]`'s ancestor path (excluding
+/// the synthetic root at index 0) into `out`. Recursion depth
+/// is bounded by the filesystem path depth (< 32 on real
+/// volumes), so stack use is fine.
+fn write_path_into(nodes: &[TreeNode], idx: u32, out: &mut String) {
+    if idx == 0 {
+        return;
+    }
+    let node = &nodes[idx as usize];
+    if let Some(p) = node.parent {
+        if p != 0 {
+            write_path_into(nodes, p, out);
+            out.push('/');
+        }
+    }
+    out.push_str(&node.name);
 }
 
 #[cfg(test)]
