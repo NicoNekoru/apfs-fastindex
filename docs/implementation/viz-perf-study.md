@@ -116,27 +116,54 @@ build steps, no API surface changes.
 
 This is the recommended next step.
 
-### Lever B — binary scan format (parse-time + memory)
+### Lever B — binary scan format (negative result on parse speed)
 
-Switch the scan output from JSON to MessagePack or CBOR. The
-`NamespaceEntry` schema is already typed in
-`crates/apfs-fastindex/src/lib.rs`; serialisation via `rmp-serde`
-or `ciborium` is one trait swap. The viz side parses with
-`@msgpack/msgpack` or `cbor-x` (~100 KB libraries).
+The v1 study predicted MessagePack would be ~3-6× faster on
+ingest than JSON. The implementation landed (rmp-serde on the
+Rust side, hand-rolled msgpack decoder + content-type sniffing
+on the JS side) and the measurements **falsified the
+prediction**. Recording the negative finding here so future
+work doesn't re-tread it.
 
-Expected effect on a `/`-scan:
+Measured on `/Applications` (~164 k entries, `--slim`):
 
-- Payload size ~150 MB → ~40-60 MB (2.5-4×).
-- Parse + ingest ~3-4.5 s → ~700 ms - 1.5 s (3-6×).
-- Memory: peak ~1.4 GB → ~600 MB (no UTF-8 decode buffer, no
-  intermediate string).
-- The standalone HTML viz (drop a JSON file into a browser)
-  stops working unless we also keep a JSON mode behind a flag.
+| encoding | wire size | client-side decode (Node V8) |
+|----------|-----------|-------------------------------|
+| JSON     | 27.2 MB   | ~30 ms                        |
+| msgpack  | 25.3 MB   | ~90 ms                        |
 
-Engineering cost: ~1 day Rust + ~½ day JS. The bigger cost is
-the standalone-viz UX — we'd either ship `apfs-fastindex-scan`
-with `--format=msgpack|json` (default json for compat) or accept
-that the in-browser file-drop demo handles a smaller scan size.
+Wire savings are modest (~7%) because path strings dominate
+the payload and neither encoding compresses them. The bigger
+surprise is decode speed: V8's `JSON.parse` is a heavily
+optimised native C++ path with adaptive shape inference and
+SIMD UTF-8 scanning; a pure-JS msgpack decoder, even keeping
+the hot loop tight (no closures, cached TextDecoder, direct
+DataView reads), is interpreted bytecode and lands ~3× slower
+on this shape of payload. WebKit's JSC has comparable
+JSON.parse optimisations; the same gap is expected there.
+
+The plumbing remains end-to-end so a future WASM-backed msgpack
+library (or a streaming JSON parser, see Lever C) can pick the
+faster encoding at the URL-scheme-handler boundary without
+touching either side of the bridge:
+
+- `apfs-fastindex-scan --format json|msgpack` (default json).
+- `WKURLSchemeHandler` sets `Content-Type` based on the byte
+  signature of the served scan file.
+- The viz shim now XHRs an `ArrayBuffer` regardless of encoding
+  (skips WebKit's UTF-16 intermediate for `xhr.responseText`)
+  and routes to `JSON.parse` or `decodeMsgpack` via
+  `window.ingestRawBytes()`.
+
+The arraybuffer-XHR change is a small standalone win — it
+trims the peak ingest memory by ~150 MB on a `/`-scan
+(no intermediate UTF-16 string) — and keeps the door open for
+streaming.
+
+**Take-away**: don't pursue msgpack-as-default. The parse-speed
+ceiling is set by `JSON.parse`'s native implementation; beating
+it requires native code (WASM, Rust → Swift FFI). The wire-size
+~7% delta isn't enough to justify a slower JS path on its own.
 
 ### Lever C — streaming ingest
 
@@ -159,13 +186,21 @@ treemap" window.
 
 The user explicitly asked again: should we get out of WKWebView?
 
-The honest read **with the v2 changes landed**: still not yet.
-The remaining cost we can attack inside WKWebView is ~5-10× on
-both render and ingest with options A + B. That covers the
-performance gap on `/`-class scans on Apple silicon. Going fully
-native buys another 2-3× on render and removes the JSON round
-trip entirely, but the engineering bill is 1-2 weeks vs. 2-3
-days for A + B, and the user-facing benefit overlaps heavily.
+The honest read **with the canvas migration landed and the
+msgpack hypothesis falsified**: the remaining JS-side ingest
+cost (~30 ms / 10 MB for `JSON.parse`, scaling linearly) is
+hard to attack without leaving JavaScript. Canvas already
+took render off the critical path. Going native buys roughly:
+
+- another 2-3× on render (vs. canvas)
+- the JSON round trip goes away (Rust hands a `Vec` directly to
+  Swift)
+- the literal "twice in memory" complaint is gone (Rust process
+  hands the `Vec` to Swift via FFI or memory map; one buffer)
+- ~150 ms saved on each `/`-class ingest (no JSON parse)
+
+The engineering bill is 1-2 weeks; the user-visible payoff is
+the ~150 ms ingest win plus the architectural cleanup.
 
 **The case for going native** is honestly narrower than "perf":
 
@@ -193,38 +228,35 @@ days for A + B, and the user-facing benefit overlaps heavily.
 
 Recommendation order:
 
-1. Land canvas rendering (Lever A). **~1-2 days; biggest single
-   win.**
-2. Land the binary scan format (Lever B). **~1.5 days; biggest
-   ingest win.**
-3. Measure. If end-to-end on `/`-scan is still painful, then go
-   native. Otherwise, stop here — we've moved the perf ceiling
-   ~10× without rewriting the renderer.
+1. ✅ **Land canvas rendering (Lever A)**. Done. ~10× on
+   render at the cost of ~50 ms per redraw instead of sub-ms
+   visibility toggles. Both directions (depth-up, depth-down,
+   navigation back) collapse to canvas-draw time.
+2. ✅ **Land the binary scan format (Lever B)**. Done as
+   end-to-end plumbing; default flipped back to JSON after
+   measurements falsified the parse-speed hypothesis (see § 3
+   Lever B). msgpack ships as an opt-in encoding via
+   `--format msgpack`.
+3. **Measure on a real `/`-scan**. The numbers above are
+   estimates; live `window.apfsPerf` capture is the next step
+   before deciding whether anything else is worth doing.
+4. **If end-to-end on `/`-scan is still painful**, go native.
+   The remaining JS-side cost is `JSON.parse`-floor; leaving JS
+   is the only way down from there.
 
-## 5. Action: what to do in the *next* session
+Optional follow-ups that are cheaper than going native:
 
-In priority order, with concrete entry points:
+- **Drop the temp file.** Pipe the scanner's stdout through the
+  URL-scheme handler directly. Saves the disk write/read round
+  trip (~200-600 ms) and one filesystem allocation.
+- **Streaming ingest** (Lever C). Build the tree incrementally
+  as entries stream in. Only worth doing if the "blank screen
+  between scan-exit and first treemap" is the next reported
+  pain.
 
-1. **Canvas migration of `renderAtDepth()`**. Replace `dirSel` /
-   `leafSel` SVG-building with a `<canvas>` `2d` context that
-   draws rects + labels. Build a flat array of laid-out cells
-   (already produced by d3) and a quad-tree for hit-testing.
-   Replace `mousemove` / `click` / `contextmenu` on SVG cells
-   with single listeners on the canvas that look up via the
-   quad-tree. The layout cache, depth picker, navigation,
-   breadcrumb, tree-list, and ext-list stay as-is.
-2. **Binary scan format**. Add a `--format msgpack` flag to
-   `apfs-fastindex-scan`. Default to `json` so the standalone
-   HTML viz keeps working. Swift defaults to `--format msgpack`
-   when invoking the scanner; the URL-scheme handler reports the
-   `Content-Type`, and the viz dispatches to `@msgpack/msgpack`
-   instead of `JSON.parse`.
-3. **Drop the temp file**. Pipe the scanner's stdout through the
-   URL-scheme handler directly. Saves the disk write/read round
-   trip (~200-600 ms) and one filesystem allocation.
-
-Each lands independently. Cumulative effect on `/`-scan time-to-first-paint:
-~12 s → ~2-3 s. Steady-state render-on-depth-up: ~3 s → ~80 ms.
+Cumulative effect on `/`-scan time-to-first-paint after canvas
+landed: ~12 s → ~6-7 s (estimate; real measurement needed).
+Steady-state render after a depth change: ~3 s → ~50-100 ms.
 
 ## 6. Live perf inspection
 
@@ -245,10 +277,15 @@ Events emitted today:
 - `layout_cache_hit` / `layout_cache_miss` — layout-cache result
   per `(node, depth, metric, dims)`. Misses carry
   `truncateMs`, `hierarchyMs`, `layoutMs`.
-- `dom_build` — wall-time of the SVG build phase for the most
-  recent render. Carries `dirCount`, `leafCount`.
-- `visibility_toggle` — the depth-down fast path. Carries
-  `fromDepth`, `toDepth`. Should read sub-millisecond.
+- `render_full` — full-rebuild render (cold cache or new context).
+  Carries `flattenMs`, `gridMs`, `drawMs`, `cellCount`.
+- `draw` — canvas draw pass (filter-only redraw). `ms` field
+  is -1 because the cost is bounded by `drawn` cell count;
+  read `drawn` and `total` instead.
+- `redraw_depth_change` — depth toggle on the same view. Both
+  directions land here; cost = one `drawCells()` pass.
+- `ingest_decode` — bytes-to-doc decode wall time. Carries
+  `bytes`, `contentType`, and `encoding` (`json` or `msgpack`).
 
 A useful summary query in the console:
 
