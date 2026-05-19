@@ -38,6 +38,18 @@ final class ScanController: ObservableObject {
     /// without a spinner the UI looks frozen because `isScanning`
     /// has already flipped to false.
     @Published var isIngesting: Bool = false
+    /// True from the moment the scanner emits its final
+    /// `terminal: true` progress event to the moment the
+    /// subprocess actually exits (and `isIngesting` flips on).
+    /// Covers the JSON-serialise + stdout-transfer gap on big
+    /// scans: the user has stopped seeing the count tick up, the
+    /// scanner is still running, but there's nothing to show
+    /// progress for. The spinner overlay reads
+    /// `isFinalizingScan || isIngesting` so the visual
+    /// continuity from "scan progressing" → "viz loading" is
+    /// unbroken on `/`-class scans where the gap is multiple
+    /// seconds.
+    @Published var isFinalizingScan: Bool = false
     @Published var scannedCount: UInt64 = 0
     @Published var skippedCount: UInt64 = 0
     @Published var elapsedMs: UInt64 = 0
@@ -299,6 +311,7 @@ final class ScanController: ObservableObject {
         // isIngesting true if the previous ingest hasn't reported back
         // yet. Reset here so the spinner only ever reflects this scan.
         isIngesting = false
+        isFinalizingScan = false
         scanCancelled = false
 
         // Format defaults to JSON. The Rust scanner can also emit
@@ -412,12 +425,27 @@ final class ScanController: ObservableObject {
                 elapsedMs = update.elapsedMs
                 pendingProgress = update
                 evaluateSetProgress(update)
+                // The scanner emits `terminal: true` once at the
+                // very end — right before it starts serialising
+                // the scan output and writing it to stdout. From
+                // here on the count won't tick anymore but the
+                // subprocess still has seconds of work to do. Flip
+                // the finalizing flag so the loading spinner can
+                // come up immediately rather than waiting for the
+                // subprocess to exit.
+                if update.terminal {
+                    isFinalizingScan = true
+                }
             }
         }
     }
 
     private func finishScan(process: Process, stdout: Data) {
         isScanning = false
+        // Hand off from the finalizing flag to the ingesting flag.
+        // Both feed into the same spinner overlay condition, so
+        // the user never sees a flicker between them.
+        isFinalizingScan = false
         scanProcess = nil
 
         if scanCancelled {

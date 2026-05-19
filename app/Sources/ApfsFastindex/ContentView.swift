@@ -30,7 +30,7 @@ struct ContentView: View {
                     onDeliverScanFileURL: controller.pendingScanFileURL,
                     onDeliverProgress: controller.pendingProgress
                 )
-                if controller.isIngesting {
+                if controller.isFinalizingScan || controller.isIngesting {
                     ingestSpinnerOverlay
                         .transition(.opacity)
                 }
@@ -39,8 +39,12 @@ struct ContentView: View {
             // Animate the overlay's appear/disappear so the spinner
             // doesn't snap in and out — at the boundaries the user
             // already sees a state change in the toolbar, and the
-            // fade keeps the eye on the right region.
-            .animation(.easeOut(duration: 0.18), value: controller.isIngesting)
+            // fade keeps the eye on the right region. Both finalize
+            // (post-`terminal:true`, pre-subprocess-exit) and ingest
+            // (subprocess-exit through canvas first-paint) drive the
+            // overlay; the spinner stays up unbroken across the
+            // hand-off.
+            .animation(.easeOut(duration: 0.18), value: controller.isFinalizingScan || controller.isIngesting)
             Divider().background(VizPalette.border)
             statusBar
         }

@@ -331,45 +331,60 @@ private let vizBridgeShim: String = """
           postToSwift({ type: 'ingest_failed', message: msg });
           return;
         }
-        const ok2 = window.ingestRawBytes(buffer, contentType, 'native://current-scan');
-        if (!ok2) {
-          postToSwift({ type: 'ingest_failed', message: 'ingestRawBytes returned false; see console_error' });
-          return;
-        }
-        // The viz already cached the totals we need on `window`
-        // when `ingest()` ran. `window.rootNode.itemCount` is the
-        // descendant count (matches `entries.length` because
-        // `buildHierarchy` runs through every row);
-        // `window.scanSource` carries the SourceDescriptor the
-        // native shell uses to enable/disable file ops; the
-        // logical / allocated totals come from the rootNode's
-        // value-* fields. Pulling them from window means we
-        // never have to keep the parsed entries array alive past
-        // the ingest call.
-        const totalEntries = (window.rootNode && window.rootNode.itemCount) || 0;
-        const rootPath = '';
-        const sourceKind = (window.scanSource && window.scanSource.source_kind) || '';
-        const sourceRequestedPath = (window.scanSource && window.scanSource.requested_path) || '';
-        let logicalTotal = 0;
-        let allocatedTotal = null;
-        let allocatedAvailable = false;
-        try {
-          if (window.rootNode) {
-            logicalTotal = window.rootNode.valueLogical || 0;
-            allocatedTotal = window.rootNode.valueAllocated;
+        // `ingestRawBytes` returns a Promise that resolves after
+        // the canvas has actually been painted (not just after the
+        // bytes were decoded). Awaiting it before posting
+        // `ingest_succeeded` keeps the loading spinner up until
+        // the user can see the treemap — without this hop, a
+        // multi-second slow-path render would happen between
+        // spinner-clear and first-paint.
+        const ingestPromise = window.ingestRawBytes(buffer, contentType, 'native://current-scan');
+        const onIngestDone = function(ok) {
+          if (!ok) {
+            postToSwift({ type: 'ingest_failed', message: 'ingestRawBytes returned false; see console_error' });
+            return;
           }
-          allocatedAvailable = !!window.allocatedAvailable;
-        } catch (_ignored) { /* the viz still rendered fine */ }
-        postToSwift({
-          type: 'ingest_succeeded',
-          rootPath: rootPath,
-          totalEntries: totalEntries,
-          logicalTotal: logicalTotal,
-          allocatedTotal: allocatedTotal,
-          allocatedAvailable: allocatedAvailable,
-          sourceKind: sourceKind,
-          sourceRequestedPath: sourceRequestedPath
-        });
+          // `window.rootNode.itemCount` is the descendant count
+          // (matches `entries.length` because `buildHierarchy`
+          // walked every row); `window.scanSource` carries the
+          // SourceDescriptor the native shell uses to enable /
+          // disable file ops; logical / allocated totals come
+          // from the rootNode value-* fields. Pulling them off
+          // `window` means we never have to keep the parsed
+          // entries array alive past the ingest call.
+          const totalEntries = (window.rootNode && window.rootNode.itemCount) || 0;
+          const rootPath = '';
+          const sourceKind = (window.scanSource && window.scanSource.source_kind) || '';
+          const sourceRequestedPath = (window.scanSource && window.scanSource.requested_path) || '';
+          let logicalTotal = 0;
+          let allocatedTotal = null;
+          let allocatedAvailable = false;
+          try {
+            if (window.rootNode) {
+              logicalTotal = window.rootNode.valueLogical || 0;
+              allocatedTotal = window.rootNode.valueAllocated;
+            }
+            allocatedAvailable = !!window.allocatedAvailable;
+          } catch (_ignored) { /* the viz still rendered fine */ }
+          postToSwift({
+            type: 'ingest_succeeded',
+            rootPath: rootPath,
+            totalEntries: totalEntries,
+            logicalTotal: logicalTotal,
+            allocatedTotal: allocatedTotal,
+            allocatedAvailable: allocatedAvailable,
+            sourceKind: sourceKind,
+            sourceRequestedPath: sourceRequestedPath
+          });
+        };
+        if (ingestPromise && typeof ingestPromise.then === 'function') {
+          ingestPromise.then(onIngestDone, function(err) {
+            console.error('ingestRawBytes rejected: ' + (err && err.message ? err.message : err));
+            postToSwift({ type: 'ingest_failed', message: 'ingestRawBytes rejected; see console_error' });
+          });
+        } else {
+          onIngestDone(!!ingestPromise);
+        }
       };
       xhr.onerror = function() {
         const msg = 'scan fetch transport error';
