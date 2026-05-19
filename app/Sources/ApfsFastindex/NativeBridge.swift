@@ -351,6 +351,33 @@ final class Scan {
         return Scan.stringFrom(ref)
     }
 
+    /// Parent node index, or nil for the root / invalid index.
+    /// Used by the breadcrumb (walk root-ward from `currentNode`).
+    func parent(of nodeIndex: UInt32) -> UInt32? {
+        let p = apfs_scan_node_parent(handle, nodeIndex)
+        return p == Scan.nodeInvalid ? nil : p
+    }
+
+    /// Entry kind for the node.
+    enum NodeKind: UInt32 {
+        case dir = 0
+        case file = 1
+        case symlink = 2
+        case other = 3
+        case invalid = 0xff
+    }
+    func kind(of nodeIndex: UInt32) -> NodeKind {
+        NodeKind(rawValue: apfs_scan_node_kind(handle, nodeIndex)) ?? .invalid
+    }
+
+    /// Immediate-children indices for the node. Returns an empty
+    /// buffer for invalid indices or leaves. Lifetime is tied to
+    /// this `Scan` — Swift must not retain the buffer past it.
+    func children(of nodeIndex: UInt32) -> UnsafeBufferPointer<UInt32> {
+        let slice = apfs_scan_node_children(handle, nodeIndex)
+        return UnsafeBufferPointer(start: slice.items, count: Int(slice.count))
+    }
+
     /// Helper: turn a borrowed Rust `(bytes, len)` pair into a
     /// Swift `String`. Copies because `Data(bytesNoCopy:)` would
     /// alias Rust-owned memory beyond Swift's tracking and ARC

@@ -338,6 +338,69 @@ pub extern "C" fn apfs_scan_node_name(scan: *const ApfsScan, idx: u32) -> ApfsPa
     ApfsPathRef { bytes: n.as_ptr(), len: n.len() as u64 }
 }
 
+/// Parent index for `idx`, or `APFS_NODE_INVALID` for the root
+/// (no parent) or an invalid `idx`. Used by Swift's breadcrumb
+/// construction (walk parent chain from `currentNode` to root).
+#[no_mangle]
+pub extern "C" fn apfs_scan_node_parent(scan: *const ApfsScan, idx: u32) -> u32 {
+    let Some(s) = (unsafe { scan.as_ref() }) else { return APFS_NODE_INVALID; };
+    if (idx as usize) >= s.tree.nodes.len() {
+        return APFS_NODE_INVALID;
+    }
+    s.tree.nodes[idx as usize]
+        .parent
+        .unwrap_or(APFS_NODE_INVALID)
+}
+
+/// Returns the node's `EntryKind` as a u32 discriminant:
+///   0 = dir, 1 = file, 2 = symlink, 3 = other, 0xff = invalid
+/// Swift maps back to a `Scan.NodeKind` enum.
+#[no_mangle]
+pub extern "C" fn apfs_scan_node_kind(scan: *const ApfsScan, idx: u32) -> u32 {
+    let Some(s) = (unsafe { scan.as_ref() }) else { return 0xff; };
+    if (idx as usize) >= s.tree.nodes.len() {
+        return 0xff;
+    }
+    match s.tree.nodes[idx as usize].kind {
+        crate::EntryKind::Dir => 0,
+        crate::EntryKind::File => 1,
+        crate::EntryKind::Symlink => 2,
+        crate::EntryKind::Other => 3,
+    }
+}
+
+/// Borrowed (ptr, count) slice of child node indices. Lifetime
+/// is tied to the enclosing `ApfsScan`; Swift reads as
+/// `UnsafeBufferPointer<UInt32>` with no copy.
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct ApfsU32Slice {
+    pub items: *const u32,
+    pub count: u64,
+}
+
+/// Borrow the slice of immediate-child node indices for `idx`.
+/// Returns an empty slice for invalid indices or leaves.
+#[no_mangle]
+pub extern "C" fn apfs_scan_node_children(
+    scan: *const ApfsScan,
+    idx: u32,
+) -> ApfsU32Slice {
+    let null_slice = ApfsU32Slice { items: ptr::null(), count: 0 };
+    let Some(s) = (unsafe { scan.as_ref() }) else { return null_slice; };
+    if (idx as usize) >= s.tree.nodes.len() {
+        return null_slice;
+    }
+    let children = &s.tree.nodes[idx as usize].children;
+    if children.is_empty() {
+        return null_slice;
+    }
+    ApfsU32Slice {
+        items: children.as_ptr(),
+        count: children.len() as u64,
+    }
+}
+
 // ─────────────────────────────────────────────────────────────
 // Phase 3b/c: treemap layout — opaque handle + hit-test
 // ─────────────────────────────────────────────────────────────
