@@ -1030,6 +1030,147 @@ function ingest(doc, filename) {
 // the contract obvious for embedders.
 window.ingest = ingest;
 
+/// Bytes-aware ingest entry point. The native shell hands us
+/// `ArrayBuffer` + `Content-Type` from the `apfs-scan://` URL-scheme
+/// handler; this routes to the right decoder so the shim doesn't
+/// have to know msgpack vs. JSON. The shim used to do
+/// `JSON.parse(xhr.responseText)`; now it XHRs an arraybuffer and
+/// calls this. Returns true on success, false (and posts a
+/// console error) on a malformed payload.
+window.ingestRawBytes = function(buffer, contentType, filename) {
+  if (!buffer || buffer.byteLength === 0) {
+    console.error("ingestRawBytes: empty payload");
+    return false;
+  }
+  const t0 = performance.now();
+  let doc;
+  try {
+    if (contentType && contentType.indexOf("msgpack") !== -1) {
+      doc = decodeMsgpack(buffer);
+    } else {
+      // Default to JSON: UTF-8 decode then parse. TextDecoder is
+      // ~2× faster than `xhr.responseText` because we avoid an
+      // intermediate JS string the engine then has to UTF-16-up.
+      const text = new TextDecoder("utf-8").decode(buffer);
+      doc = JSON.parse(text);
+    }
+  } catch (err) {
+    console.error("ingestRawBytes parse failed: " + (err && err.message ? err.message : err));
+    return false;
+  }
+  const t1 = performance.now();
+  pushPerf("ingest_decode", t1 - t0, {
+    bytes: buffer.byteLength,
+    contentType: contentType || "(none)",
+    encoding: (contentType && contentType.indexOf("msgpack") !== -1) ? "msgpack" : "json",
+  });
+  try {
+    ingest(doc, filename || "native://current-scan");
+  } catch (err) {
+    console.error("ingestRawBytes: ingest threw: " + (err && err.stack ? err.stack : err));
+    return false;
+  }
+  return true;
+};
+
+/// Inline MessagePack decoder. Handles the subset rmp-serde
+/// emits for our schema: nil/bool, int (fixint + uint/int 8-64),
+/// float32/64, fixstr/str8/str16/str32, fixarray/array16/array32,
+/// fixmap/map16/map32. No ext, no timestamps, no bin (the scan
+/// crate doesn't emit those). uint64 / int64 above 2^53 lose
+/// precision via Number — our `logical_size` / `allocated_size`
+/// values are well below that ceiling so this is fine in
+/// practice. ~70 LOC; faster + smaller than pulling in
+/// @msgpack/msgpack.
+function decodeMsgpack(buffer) {
+  const view = new DataView(buffer);
+  const decoder = new TextDecoder("utf-8");
+  let pos = 0;
+  const len = buffer.byteLength;
+
+  function readBytes(n) {
+    const out = new Uint8Array(buffer, pos, n);
+    pos += n;
+    return out;
+  }
+  function readString(n) {
+    const out = decoder.decode(new Uint8Array(buffer, pos, n));
+    pos += n;
+    return out;
+  }
+  function readUint16() { const v = view.getUint16(pos, false); pos += 2; return v; }
+  function readUint32() { const v = view.getUint32(pos, false); pos += 4; return v; }
+  function readUint64() {
+    const hi = view.getUint32(pos, false); pos += 4;
+    const lo = view.getUint32(pos, false); pos += 4;
+    return hi * 4294967296 + lo;
+  }
+  function readInt8()  { const v = view.getInt8(pos); pos += 1; return v; }
+  function readInt16() { const v = view.getInt16(pos, false); pos += 2; return v; }
+  function readInt32() { const v = view.getInt32(pos, false); pos += 4; return v; }
+  function readInt64() {
+    const hi = view.getInt32(pos, false); pos += 4;
+    const lo = view.getUint32(pos, false); pos += 4;
+    return hi * 4294967296 + lo;
+  }
+  function readFloat32() { const v = view.getFloat32(pos, false); pos += 4; return v; }
+  function readFloat64() { const v = view.getFloat64(pos, false); pos += 8; return v; }
+
+  function readArray(n) {
+    const out = new Array(n);
+    for (let i = 0; i < n; i++) out[i] = decode();
+    return out;
+  }
+  function readMap(n) {
+    const out = {};
+    for (let i = 0; i < n; i++) {
+      const k = decode();
+      out[k] = decode();
+    }
+    return out;
+  }
+
+  function decode() {
+    if (pos >= len) throw new Error("msgpack: unexpected end at " + pos);
+    const c = view.getUint8(pos++);
+    if (c < 0x80) return c;            // positive fixint
+    if (c < 0x90) return readMap(c & 0x0f);   // fixmap
+    if (c < 0xa0) return readArray(c & 0x0f); // fixarray
+    if (c < 0xc0) return readString(c & 0x1f); // fixstr
+    if (c >= 0xe0) return c - 0x100;   // negative fixint
+    switch (c) {
+      case 0xc0: return null;
+      case 0xc2: return false;
+      case 0xc3: return true;
+      case 0xc4: return readBytes(view.getUint8(pos++));
+      case 0xc5: return readBytes(readUint16());
+      case 0xc6: return readBytes(readUint32());
+      case 0xca: return readFloat32();
+      case 0xcb: return readFloat64();
+      case 0xcc: return view.getUint8(pos++);
+      case 0xcd: return readUint16();
+      case 0xce: return readUint32();
+      case 0xcf: return readUint64();
+      case 0xd0: return readInt8();
+      case 0xd1: return readInt16();
+      case 0xd2: return readInt32();
+      case 0xd3: return readInt64();
+      case 0xd9: return readString(view.getUint8(pos++));
+      case 0xda: return readString(readUint16());
+      case 0xdb: return readString(readUint32());
+      case 0xdc: return readArray(readUint16());
+      case 0xdd: return readArray(readUint32());
+      case 0xde: return readMap(readUint16());
+      case 0xdf: return readMap(readUint32());
+      default:
+        throw new Error("msgpack: unsupported tag 0x" + c.toString(16) + " at " + (pos - 1));
+    }
+  }
+
+  return decode();
+}
+window.decodeMsgpack = decodeMsgpack;
+
 function buildHierarchy(entries, aggregates) {
   // Build a tree keyed by path components. Files contribute leaves with
   // both their `logical_size` (always present) and `allocated_size`

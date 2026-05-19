@@ -144,6 +144,21 @@ struct VizWebView: NSViewRepresentable {
             DispatchQueue.global(qos: .userInitiated).async {
                 do {
                     let data = try Data(contentsOf: scanURL, options: .mappedIfSafe)
+                    // Sniff the first byte to pick the right
+                    // Content-Type. JSON output starts with `{`
+                    // (0x7b); MessagePack output starts with a
+                    // fixmap (0x80-0x8f) or map16/map32
+                    // (0xde/0xdf). Anything else is fail-closed
+                    // — we'd rather the page show a parse error
+                    // than mis-label the payload.
+                    let firstByte = data.first ?? 0
+                    let isJson = firstByte == 0x7b // '{'
+                    let mime = isJson
+                        ? "application/json"
+                        : "application/x-msgpack"
+                    let contentType = isJson
+                        ? "application/json; charset=utf-8"
+                        : "application/x-msgpack"
                     // **CORS matters here.** The viz is loaded from a
                     // `file://` URL (the SwiftPM resource bundle) and
                     // is XHR'ing to `apfs-scan://`. Different schemes
@@ -158,16 +173,16 @@ struct VizWebView: NSViewRepresentable {
                         statusCode: 200,
                         httpVersion: "HTTP/1.1",
                         headerFields: [
-                            "Content-Type": "application/json; charset=utf-8",
+                            "Content-Type": contentType,
                             "Content-Length": "\(data.count)",
                             "Access-Control-Allow-Origin": "*",
                             "Cache-Control": "no-store"
                         ]
                     ) ?? URLResponse(
                         url: requestURL,
-                        mimeType: "application/json",
+                        mimeType: mime,
                         expectedContentLength: data.count,
-                        textEncodingName: "utf-8"
+                        textEncodingName: isJson ? "utf-8" : nil
                     )
                     DispatchQueue.main.async {
                         urlSchemeTask.didReceive(response)
@@ -282,15 +297,18 @@ private let vizBridgeShim: String = """
   // Swift signals "a new scan result is available"; the page fetches
   // it via the apfs-scan:// custom scheme. The Swift-side
   // `WKURLSchemeHandler` serves the bytes from the latest scan temp
-  // file.
+  // file, with a Content-Type that distinguishes json / msgpack.
+  // We pull the body as an ArrayBuffer (avoids WebKit's
+  // UTF-8 → JS-string intermediate that `xhr.responseText` would
+  // create), hand it to `window.ingestRawBytes` which dispatches to
+  // the right decoder, then read the populated `window.rootNode`
+  // for the ingest_succeeded payload.
   window.__apfs_ingest_file__ = function(_pathHint) {
     postToSwift({ type: 'ingest_started' });
     try {
       const xhr = new XMLHttpRequest();
       xhr.open('GET', 'apfs-scan://current', true);
-      // Pull the bytes as text first so a malformed-JSON failure
-      // surfaces with a real message instead of `responseType:
-      // 'json'` silently delivering `null`.
+      xhr.responseType = 'arraybuffer';
       xhr.onload = function() {
         const ok = xhr.status === 0 || (xhr.status >= 200 && xhr.status < 300);
         if (!ok) {
@@ -299,54 +317,39 @@ private let vizBridgeShim: String = """
           postToSwift({ type: 'ingest_failed', message: msg });
           return;
         }
-        const text = xhr.responseText || '';
-        if (!text.length) {
+        const buffer = xhr.response;
+        if (!buffer || buffer.byteLength === 0) {
           const msg = 'scan fetch returned empty body';
           console.error(msg);
           postToSwift({ type: 'ingest_failed', message: msg });
           return;
         }
-        let doc;
-        try {
-          doc = JSON.parse(text);
-        } catch (parseErr) {
-          const msg = 'scan parse failed: ' + (parseErr && parseErr.message ? parseErr.message : parseErr);
+        const contentType = xhr.getResponseHeader('Content-Type') || '';
+        if (typeof window.ingestRawBytes !== 'function') {
+          const msg = 'viz ingestRawBytes() function missing';
           console.error(msg);
           postToSwift({ type: 'ingest_failed', message: msg });
           return;
         }
-        if (typeof window.ingest !== 'function') {
-          const msg = 'viz ingest() function missing';
-          console.error(msg);
-          postToSwift({ type: 'ingest_failed', message: msg });
-          window.__apfs_pending_scan__ = doc;
+        const ok2 = window.ingestRawBytes(buffer, contentType, 'native://current-scan');
+        if (!ok2) {
+          postToSwift({ type: 'ingest_failed', message: 'ingestRawBytes returned false; see console_error' });
           return;
         }
-        try {
-          window.ingest(doc, 'native://current-scan');
-        } catch (ingestErr) {
-          const msg = 'viz ingest threw: ' + (ingestErr && ingestErr.stack ? ingestErr.stack : ingestErr);
-          console.error(msg);
-          postToSwift({ type: 'ingest_failed', message: msg });
-          return;
-        }
-        const parserOutput = (doc && (doc.parser_output || doc)) || {};
-        const entries = parserOutput.entries || [];
-        const rootPath = (entries[0] && entries[0].path) || '';
-        const source = parserOutput.source || {};
-        // SourceDescriptor.source_kind tells the host which class of
-        // scan produced these entries: 'mounted_directory' (fallback,
-        // on-disk paths reachable from the shell), 'dmg_image'
-        // (detached image; paths NOT reachable; file ops are
-        // disabled), 'raw_device' (likewise). The shell uses this to
-        // grey out Reveal in Finder / Move to Trash for unreachable
-        // scans.
-        const sourceKind = source.source_kind || '';
-        const sourceRequestedPath = source.requested_path || '';
-        // `window.ingest(doc)` already populated rootNode with both
-        // metrics; reuse those totals so Swift doesn't have to
-        // re-sum the tree. `allocatedTotal === null` is the SR-019 /
-        // EX-22 unclaimed marker and is preserved as JSON null.
+        // The viz already cached the totals we need on `window`
+        // when `ingest()` ran. `window.rootNode.itemCount` is the
+        // descendant count (matches `entries.length` because
+        // `buildHierarchy` runs through every row);
+        // `window.scanSource` carries the SourceDescriptor the
+        // native shell uses to enable/disable file ops; the
+        // logical / allocated totals come from the rootNode's
+        // value-* fields. Pulling them from window means we
+        // never have to keep the parsed entries array alive past
+        // the ingest call.
+        const totalEntries = (window.rootNode && window.rootNode.itemCount) || 0;
+        const rootPath = '';
+        const sourceKind = (window.scanSource && window.scanSource.source_kind) || '';
+        const sourceRequestedPath = (window.scanSource && window.scanSource.requested_path) || '';
         let logicalTotal = 0;
         let allocatedTotal = null;
         let allocatedAvailable = false;
@@ -360,7 +363,7 @@ private let vizBridgeShim: String = """
         postToSwift({
           type: 'ingest_succeeded',
           rootPath: rootPath,
-          totalEntries: entries.length,
+          totalEntries: totalEntries,
           logicalTotal: logicalTotal,
           allocatedTotal: allocatedTotal,
           allocatedAvailable: allocatedAvailable,

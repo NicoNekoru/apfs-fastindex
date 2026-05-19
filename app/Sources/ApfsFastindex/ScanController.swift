@@ -301,6 +301,17 @@ final class ScanController: ObservableObject {
         isIngesting = false
         scanCancelled = false
 
+        // Format defaults to JSON. The Rust scanner can also emit
+        // MessagePack via `--format msgpack`, and the viz shim
+        // sniffs the URL-scheme handler's Content-Type and routes
+        // to a hand-rolled decoder when it sees one; but in
+        // practice on V8/JSC, native `JSON.parse` (C++) beats the
+        // pure-JS msgpack decoder by ~3× on /Applications-class
+        // scans (~30 ms json vs ~90 ms msgpack on 27 MB / 25 MB
+        // payloads). Wire savings are also modest (~7%) because
+        // path strings dominate. The plumbing stays in case a
+        // future WASM decoder closes the parse gap; until then,
+        // JSON is the faster end-to-end default.
         var args: [String] = ["--slim", "--progress"]
         if mode != .auto {
             args.append(contentsOf: ["--mode", mode.cliValue])
