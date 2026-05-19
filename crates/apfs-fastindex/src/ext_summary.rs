@@ -157,7 +157,7 @@ mod tests {
 
     fn entry(path: &str, kind: EntryKind, logical: u64) -> NamespaceEntry {
         NamespaceEntry {
-            path: path.to_string(),
+            path: path.into(),
             entry_kind: kind,
             file_id: 0,
             logical_size: logical,

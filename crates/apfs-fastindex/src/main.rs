@@ -557,7 +557,7 @@ fn slim_stream_entry(entry: &apfs_fastindex::NamespaceEntry) -> serde_json::Valu
     let mut obj = serde_json::Map::new();
     obj.insert(
         "path".to_string(),
-        serde_json::Value::String(entry.path.clone()),
+        serde_json::Value::String(entry.path.to_string()),
     );
     obj.insert(
         "entry_kind".to_string(),
@@ -580,7 +580,7 @@ fn slim_stream_entry(entry: &apfs_fastindex::NamespaceEntry) -> serde_json::Valu
     if let Some(target) = &entry.symlink_target {
         obj.insert(
             "symlink_target".to_string(),
-            serde_json::Value::String(target.clone()),
+            serde_json::Value::String(target.to_string()),
         );
     }
     serde_json::Value::Object(obj)
@@ -633,7 +633,7 @@ fn slim_entries(entries: &[apfs_fastindex::NamespaceEntry]) -> Vec<serde_json::V
             let mut obj = serde_json::Map::new();
             obj.insert(
                 "path".to_string(),
-                serde_json::Value::String(entry.path.clone()),
+                serde_json::Value::String(entry.path.to_string()),
             );
             obj.insert(
                 "entry_kind".to_string(),
@@ -646,7 +646,7 @@ fn slim_entries(entries: &[apfs_fastindex::NamespaceEntry]) -> Vec<serde_json::V
             if let Some(target) = &entry.symlink_target {
                 obj.insert(
                     "symlink_target".to_string(),
-                    serde_json::Value::String(target.clone()),
+                    serde_json::Value::String(target.to_string()),
                 );
             }
             serde_json::Value::Object(obj)

@@ -175,11 +175,11 @@ impl<'a> NamespaceIndex<'a> {
                 self.walk_dir(child.file_id, &path, out, visited);
             }
             out.push(NamespaceEntry {
-                path,
+                path: path.into_boxed_str(),
                 entry_kind,
                 file_id: child.file_id,
                 logical_size,
-                symlink_target,
+                symlink_target: symlink_target.map(String::into_boxed_str),
                 allocated_size,
             });
         }
@@ -332,14 +332,14 @@ fn build_aggregates(entries: &[NamespaceEntry]) -> Vec<DirectoryAggregate> {
     contributors.insert(".", HashMap::new());
     for entry in entries {
         if matches!(entry.entry_kind, EntryKind::Dir) {
-            contributors.entry(entry.path.as_str()).or_default();
+            contributors.entry(&*entry.path).or_default();
         }
     }
     for entry in entries {
         if !matches!(entry.entry_kind, EntryKind::File) {
             continue;
         }
-        let mut current: &str = entry.path.as_str();
+        let mut current: &str = &*entry.path;
         loop {
             match current.rfind('/') {
                 Some(idx) => {
@@ -449,7 +449,7 @@ mod tests {
     fn aggregate_collapses_when_any_inode_has_none_allocated() {
         let entries = vec![
             NamespaceEntry {
-                path: "ordinary.txt".to_string(),
+                path: "ordinary.txt".into(),
                 entry_kind: EntryKind::File,
                 file_id: 10,
                 logical_size: 100,
@@ -457,7 +457,7 @@ mod tests {
                 allocated_size: Some(4096),
             },
             NamespaceEntry {
-                path: "sparse.bin".to_string(),
+                path: "sparse.bin".into(),
                 entry_kind: EntryKind::File,
                 file_id: 11,
                 logical_size: 200,
@@ -480,7 +480,7 @@ mod tests {
     fn aggregate_sums_allocated_when_all_inodes_present() {
         let entries = vec![
             NamespaceEntry {
-                path: "a.txt".to_string(),
+                path: "a.txt".into(),
                 entry_kind: EntryKind::File,
                 file_id: 20,
                 logical_size: 100,
@@ -488,7 +488,7 @@ mod tests {
                 allocated_size: Some(4096),
             },
             NamespaceEntry {
-                path: "b.txt".to_string(),
+                path: "b.txt".into(),
                 entry_kind: EntryKind::File,
                 file_id: 21,
                 logical_size: 200,
@@ -511,7 +511,7 @@ mod tests {
     fn aggregate_counts_hard_linked_inode_once_for_allocation() {
         let entries = vec![
             NamespaceEntry {
-                path: "ordinary.txt".to_string(),
+                path: "ordinary.txt".into(),
                 entry_kind: EntryKind::File,
                 file_id: 30,
                 logical_size: 29,
@@ -519,7 +519,7 @@ mod tests {
                 allocated_size: Some(4096),
             },
             NamespaceEntry {
-                path: "hard.txt".to_string(),
+                path: "hard.txt".into(),
                 entry_kind: EntryKind::File,
                 file_id: 30,
                 logical_size: 29,

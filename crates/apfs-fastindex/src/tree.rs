@@ -122,7 +122,7 @@ impl Tree {
         child_maps.push(Some(HashMap::new()));
 
         for entry in entries {
-            let path = entry.path.as_str();
+            let path = &*entry.path;
             let bytes = path.as_bytes();
             let path_len = bytes.len();
 
@@ -413,7 +413,7 @@ mod tests {
 
     fn entry(path: &str, kind: EntryKind, logical: u64, allocated: Option<u64>) -> NamespaceEntry {
         NamespaceEntry {
-            path: path.to_string(),
+            path: path.into(),
             entry_kind: kind,
             file_id: 0,
             logical_size: logical,

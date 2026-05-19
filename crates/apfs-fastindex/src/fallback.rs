@@ -820,7 +820,14 @@ fn walk_one_directory(
         let (logical_size, symlink_target) = match kind {
             EntryKind::Symlink => match fs::read_link(&absolute) {
                 Ok(target_path) => {
-                    let target = target_path.to_string_lossy().into_owned();
+                    // `Box<str>` (16B) instead of `String` (24B) —
+                    // symlink_target is set once and never grown,
+                    // so the spare capacity slot of `String` is
+                    // dead weight in `NamespaceEntry`.
+                    let target: Box<str> = target_path
+                        .to_string_lossy()
+                        .as_ref()
+                        .into();
                     (target.len() as u64, Some(target))
                 }
                 Err(err) => {
@@ -885,7 +892,11 @@ fn walk_one_directory(
             });
         }
         out_entries.push(NamespaceEntry {
-            path: relative_str,
+            // `into_boxed_str()` is a free conversion (no realloc)
+            // when the String has zero spare capacity — and our
+            // `relative_str` came from `s.to_string()` on a fresh
+            // `&str`, so its capacity equals its length.
+            path: relative_str.into_boxed_str(),
             entry_kind: kind,
             file_id,
             logical_size,
@@ -1053,7 +1064,7 @@ fn build_aggregates(entries: &[NamespaceEntry]) -> Vec<DirectoryAggregate> {
     contributors.insert(".", HashMap::new());
     for entry in entries {
         if matches!(entry.entry_kind, EntryKind::Dir) {
-            contributors.entry(entry.path.as_str()).or_default();
+            contributors.entry(&*entry.path).or_default();
         }
     }
     for entry in entries {
@@ -1065,7 +1076,7 @@ fn build_aggregates(entries: &[NamespaceEntry]) -> Vec<DirectoryAggregate> {
         // a slice; no heap activity. We don't pre-build a Vec of
         // ancestors because the inner work is just a HashMap probe
         // that takes the `&str` directly.
-        let mut current: &str = entry.path.as_str();
+        let mut current: &str = &*entry.path;
         loop {
             match current.rfind('/') {
                 Some(idx) => {
@@ -1143,14 +1154,14 @@ mod tests {
         let paths: Vec<&str> = parser_output
             .entries
             .iter()
-            .map(|e| e.path.as_str())
+            .map(|e| e.path.as_ref())
             .collect();
         assert_eq!(paths, vec!["dst", "dst/link.txt", "dst/moved.txt", "src"]);
 
         let link = parser_output
             .entries
             .iter()
-            .find(|e| e.path == "dst/link.txt")
+            .find(|e| &*e.path == "dst/link.txt")
             .unwrap();
         assert_eq!(link.entry_kind, EntryKind::Symlink);
         assert_eq!(link.symlink_target.as_deref(), Some("moved.txt"));
@@ -1162,7 +1173,7 @@ mod tests {
         let moved = parser_output
             .entries
             .iter()
-            .find(|e| e.path == "dst/moved.txt")
+            .find(|e| &*e.path == "dst/moved.txt")
             .expect("dst/moved.txt present");
         assert_eq!(moved.entry_kind, EntryKind::File);
         // Regular files: fallback emits Some(st_blocks * 512), which
@@ -1177,7 +1188,7 @@ mod tests {
         let dst_dir = parser_output
             .entries
             .iter()
-            .find(|e| e.path == "dst")
+            .find(|e| &*e.path == "dst")
             .expect("dst directory entry present");
         assert_eq!(dst_dir.entry_kind, EntryKind::Dir);
         assert_eq!(dst_dir.allocated_size, Some(0));
@@ -1185,7 +1196,7 @@ mod tests {
         let aggregates: Vec<&str> = parser_output
             .aggregates
             .iter()
-            .map(|a| a.path.as_str())
+            .map(|a| a.path.as_ref())
             .collect();
         assert_eq!(aggregates, vec![".", "dst", "src"]);
         // The fallback's per-file allocated_size is always Some(_)
@@ -1241,13 +1252,13 @@ mod tests {
             .parser_output
             .entries
             .iter()
-            .map(|e| e.path.as_str())
+            .map(|e| e.path.as_ref())
             .collect();
         let parallel_paths: Vec<&str> = parallel
             .parser_output
             .entries
             .iter()
-            .map(|e| e.path.as_str())
+            .map(|e| e.path.as_ref())
             .collect();
         assert_eq!(
             serial_paths, parallel_paths,
@@ -1341,7 +1352,7 @@ mod tests {
             .parser_output
             .entries
             .iter()
-            .map(|e| e.path.as_str())
+            .map(|e| e.path.as_ref())
             .collect();
         assert_eq!(paths, vec!["ordinary"]);
     }
@@ -1374,7 +1385,7 @@ mod tests {
             .parser_output
             .entries
             .iter()
-            .map(|e| e.path.as_str())
+            .map(|e| e.path.as_ref())
             .collect();
         // Both directories show up; "locked" is recorded but not descended.
         assert!(paths.contains(&"readable"));
