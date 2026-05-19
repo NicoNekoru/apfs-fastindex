@@ -28,6 +28,12 @@ struct NativeContentView: View {
     /// SwiftUI list view doesn't re-walk the tree on every
     /// view body re-evaluation.
     @State private var treeRows: [TreeListRow] = []
+    /// Per-(node, metric) ext-list summary for the right-hand
+    /// side panel. Computed in Rust via `Scan.extSummary` and
+    /// rebuilt whenever `currentNode` or `metric` changes; on a
+    /// typical /Applications-class scan that's well under
+    /// 10 ms so we don't bother caching across navigations.
+    @State private var extSummary: Scan.ExtSummary?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -41,13 +47,20 @@ struct NativeContentView: View {
                 .padding(.vertical, 6)
                 .background(VizPalette.panel)
             Divider().background(VizPalette.border)
-            // HSplitView so the user can drag the boundary
-            // between the tree-list sidebar and the treemap.
-            // Tree-list panel is on the left at ~280 pt
-            // default; the treemap fills the rest.
-            HSplitView {
-                treeListPanel
-                    .frame(minWidth: 220, idealWidth: 300, maxWidth: 500)
+            // Nested splits matching the WizTree layout:
+            //   - VSplitView between (tree-list + ext-list) top
+            //     half and the treemap bottom half.
+            //   - The top half is itself an HSplitView so the
+            //     user can drag the boundary between the two
+            //     side panels.
+            VSplitView {
+                HSplitView {
+                    treeListPanel
+                        .frame(minWidth: 220, idealWidth: 340, maxWidth: 600)
+                    extListPanel
+                        .frame(minWidth: 200, idealWidth: 280, maxWidth: 600)
+                }
+                .frame(minHeight: 120, idealHeight: 220)
                 GeometryReader { proxy in
                     ZStack {
                         VizPalette.bg
@@ -61,7 +74,7 @@ struct NativeContentView: View {
                     .onAppear { resize(to: proxy.size) }
                     .onChange(of: proxy.size) { newSize in resize(to: newSize) }
                 }
-                .frame(minWidth: 320)
+                .frame(minHeight: 200)
             }
             Divider().background(VizPalette.border)
             statusBar
@@ -72,9 +85,18 @@ struct NativeContentView: View {
         .background(VizPalette.bg)
         .preferredColorScheme(.dark)
         .foregroundStyle(VizPalette.text)
-        .onChange(of: scan?.entryCount) { _ in rebuildTreeRows() }
-        .onChange(of: currentNode) { _ in rebuildTreeRows() }
-        .onChange(of: metric) { _ in rebuildTreeRows() }
+        .onChange(of: scan?.entryCount) { _ in
+            rebuildTreeRows()
+            rebuildExtSummary()
+        }
+        .onChange(of: currentNode) { _ in
+            rebuildTreeRows()
+            rebuildExtSummary()
+        }
+        .onChange(of: metric) { _ in
+            rebuildTreeRows()
+            rebuildExtSummary()
+        }
         .onChange(of: expandedNodes) { _ in rebuildTreeRows() }
     }
 
@@ -298,6 +320,178 @@ struct NativeContentView: View {
             c = scan.parent(of: cur)
         }
         updateLayout()
+    }
+
+    // MARK: - Ext-list panel
+
+    private var extListPanel: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Text("BY EXTENSION")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(VizPalette.muted)
+                    .tracking(0.4)
+                if let summary = extSummary, summary.count > 0 {
+                    Text(extSubtitle(summary: summary))
+                        .font(.system(size: 11))
+                        .foregroundStyle(VizPalette.muted)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(VizPalette.bg)
+            HStack(spacing: 0) {
+                Spacer().frame(width: 18)
+                Text("Extension")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(VizPalette.muted)
+                    .tracking(0.4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text("% / view")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(VizPalette.muted)
+                    .frame(width: 70, alignment: .trailing)
+                Text("Size")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(VizPalette.muted)
+                    .frame(width: 70, alignment: .trailing)
+                    .padding(.leading, 4)
+                Text("Files")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(VizPalette.muted)
+                    .frame(width: 50, alignment: .trailing)
+                    .padding(.leading, 4)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(VizPalette.bg)
+            Divider().background(VizPalette.border)
+            if let summary = extSummary {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(summary.allRows()) { row in
+                            extListRowView(row, total: summary.totalValue)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            } else {
+                Spacer()
+                Text("(scan a folder to see breakdown)")
+                    .font(.system(size: 11))
+                    .foregroundStyle(VizPalette.muted)
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                Spacer()
+            }
+        }
+        .background(VizPalette.panel)
+    }
+
+    private func extSubtitle(summary: Scan.ExtSummary) -> String {
+        let total = ByteCountFormatter.string(
+            fromByteCount: Int64(summary.totalValue),
+            countStyle: .binary
+        )
+        if summary.anyUnclaimed {
+            return "\(summary.count) ext · \(total) · some unclaimed"
+        }
+        return "\(summary.count) ext · \(total)"
+    }
+
+    @ViewBuilder
+    private func extListRowView(_ row: Scan.ExtSummary.Row, total: UInt64) -> some View {
+        HStack(spacing: 0) {
+            // Colour chip matching the JS canvas leaf palette so
+            // the panel chip → treemap rect colour-binds for
+            // the user.
+            Rectangle()
+                .fill(extChipColor(ext: row.ext))
+                .frame(width: 10, height: 10)
+                .padding(.leading, 6)
+                .padding(.trailing, 6)
+            Text(row.ext)
+                .font(.system(size: 11, design: .monospaced))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(extPercentText(row: row, total: total))
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(VizPalette.muted)
+                .frame(width: 70, alignment: .trailing)
+            Text(extSizeText(row: row))
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(VizPalette.text)
+                .frame(width: 70, alignment: .trailing)
+                .padding(.leading, 4)
+            Text(row.fileCount.formatted())
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(VizPalette.muted)
+                .frame(width: 50, alignment: .trailing)
+                .padding(.leading, 4)
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 2)
+    }
+
+    private func extPercentText(row: Scan.ExtSummary.Row, total: UInt64) -> String {
+        guard total > 0 else { return "—" }
+        let v: UInt64 = metric == .allocated
+            ? (row.valueAllocated ?? 0)
+            : row.valueLogical
+        let pct = Double(v) / Double(total) * 100.0
+        return String(format: "%.1f%%", pct)
+    }
+
+    private func extSizeText(row: Scan.ExtSummary.Row) -> String {
+        if metric == .allocated {
+            guard let alloc = row.valueAllocated else { return "unclaimed" }
+            return ByteCountFormatter.string(fromByteCount: Int64(alloc), countStyle: .binary)
+        }
+        return ByteCountFormatter.string(fromByteCount: Int64(row.valueLogical),
+                                         countStyle: .binary)
+    }
+
+    /// Subset of the JS `EXT_COLORS` palette so the chip beside
+    /// each row reads the same colour the leaf rects render
+    /// in the treemap. Unknown extensions hash to grey for now
+    /// (a future commit can FNV-1a → HSL like the canvas-era
+    /// `hashColor` for full colour parity).
+    private func extChipColor(ext: String) -> Color {
+        let key = ext.hasPrefix(".") ? String(ext.dropFirst()) : ext
+        switch key.lowercased() {
+        case "txt", "md": return Color(red: 0xa0/255, green: 0xc4/255, blue: 0xff/255)
+        case "rs": return Color(red: 0xff/255, green: 0xc0/255, blue: 0x9f/255)
+        case "py": return Color(red: 0xff/255, green: 0xd6/255, blue: 0xa5/255)
+        case "js", "ts", "tsx", "jsx": return Color(red: 0xff/255, green: 0xe0/255, blue: 0x66/255)
+        case "json": return Color(red: 0xf4/255, green: 0xd3/255, blue: 0x5e/255)
+        case "html": return Color(red: 0xff/255, green: 0x8f/255, blue: 0xab/255)
+        case "css": return Color(red: 0xca/255, green: 0xff/255, blue: 0xbf/255)
+        case "c", "cpp", "h", "hpp": return Color(red: 0xbd/255, green: 0xb2/255, blue: 0xff/255)
+        case "swift": return Color(red: 0xfd/255, green: 0xb5/255, blue: 0xa5/255)
+        case "go": return Color(red: 0x9b/255, green: 0xf6/255, blue: 0xff/255)
+        case "rb": return Color(red: 0xff/255, green: 0xb3/255, blue: 0xc1/255)
+        case "png", "jpg", "jpeg", "gif", "webp", "heic", "svg", "icns":
+            return Color(red: 0x8e/255, green: 0xca/255, blue: 0xe6/255)
+        case "mp4", "mov", "mp3", "wav", "m4a", "flac":
+            return Color(red: 0xb3/255, green: 0x88/255, blue: 0xeb/255)
+        case "pdf", "doc", "docx", "pages":
+            return Color(red: 0xef/255, green: 0x47/255, blue: 0x6f/255)
+        case "zip", "tar", "gz", "bz2", "dmg", "iso":
+            return Color(red: 0xad/255, green: 0xb5/255, blue: 0xbd/255)
+        case "app", "framework", "dylib", "so":
+            return Color(red: 0xff/255, green: 0xaf/255, blue: 0xcc/255)
+        default:
+            return VizPalette.muted
+        }
+    }
+
+    private func rebuildExtSummary() {
+        guard let scan else { extSummary = nil; return }
+        extSummary = scan.extSummary(rootedAt: currentNode, metric: metric)
     }
 
     private func rebuildTreeRows() {
@@ -589,10 +783,12 @@ struct NativeContentView: View {
                     }
                     updateLayout()
                     rebuildTreeRows()
+                    rebuildExtSummary()
                 } else {
                     scan = nil
                     layout = nil
                     treeRows = []
+                    extSummary = nil
                     scanError = "scan failed for \(path)"
                 }
             }

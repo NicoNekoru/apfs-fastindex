@@ -28,6 +28,10 @@ pub mod tree;
 /// `UnsafeBufferPointer<ApfsCell>`. Squarify algorithm ported
 /// from d3-hierarchy.
 pub mod render;
+/// Per-extension aggregate for the ext-list side panel. Walks
+/// a subtree, groups leaves by extension, sorts by the active
+/// metric.
+pub mod ext_summary;
 /// C ABI surface for the native (Swift) renderer. See
 /// `docs/implementation/viz-perf-study.md` for the architecture
 /// sketch. The `#[no_mangle] extern "C"` symbols defined here are

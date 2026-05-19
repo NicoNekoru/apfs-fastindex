@@ -27,6 +27,7 @@ use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::ptr;
 
+use crate::ext_summary::ExtSummary;
 use crate::render::{render_cells, ApfsCell, ApfsLayout, HitGrid, Metric};
 use crate::tree::{Tree, NODE_INVALID};
 use crate::{fallback_scan_path_with_options, FallbackOptions};
@@ -515,6 +516,118 @@ pub extern "C" fn apfs_layout_hit_test(layout: *const ApfsLayout, x: f32, y: f32
     l.hit_grid
         .hit_test(x, y, &l.cells)
         .unwrap_or(APFS_CELL_INVALID)
+}
+
+// ─────────────────────────────────────────────────────────────
+// Phase 5d: ext-list summary
+// ─────────────────────────────────────────────────────────────
+
+/// Opaque handle holding a `(rows, total_value, any_unclaimed)`
+/// snapshot built from a subtree walk. Swift constructs via
+/// `apfs_scan_ext_summary_new`, reads rows via `_count` /
+/// `_row`, drops via `_free`.
+pub struct ApfsExtSummaryHandle(pub(crate) ExtSummary);
+
+/// One ext-list row, flattened for the C ABI. Strings are
+/// borrowed (lifetime tied to the enclosing
+/// `ApfsExtSummaryHandle`); `value_allocated == u64::MAX` is
+/// the SR-019 None-collapse sentinel.
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct ApfsExtRow {
+    pub ext: ApfsPathRef,
+    pub value_logical: u64,
+    pub value_allocated: u64,
+    pub file_count: u32,
+    pub _pad: u32,
+}
+
+/// Construct the ext-list summary for the subtree rooted at
+/// `node_idx`. `metric == 1` sorts by allocated; anything else
+/// sorts by logical. Returns NULL on invalid scan / idx.
+#[no_mangle]
+pub extern "C" fn apfs_scan_ext_summary_new(
+    scan: *const ApfsScan,
+    node_idx: u32,
+    metric: u32,
+) -> *mut ApfsExtSummaryHandle {
+    let Some(s) = (unsafe { scan.as_ref() }) else { return ptr::null_mut(); };
+    if (node_idx as usize) >= s.tree.nodes.len() {
+        return ptr::null_mut();
+    }
+    let metric_enum = if metric == 1 { Metric::Allocated } else { Metric::Logical };
+    let summary = ExtSummary::build(&s.tree, node_idx, metric_enum);
+    Box::into_raw(Box::new(ApfsExtSummaryHandle(summary)))
+}
+
+/// Drop the summary handle. Idempotent on NULL.
+#[no_mangle]
+pub extern "C" fn apfs_scan_ext_summary_free(handle: *mut ApfsExtSummaryHandle) {
+    if handle.is_null() {
+        return;
+    }
+    // SAFETY: caller obtained `handle` from `_new` and hasn't
+    // freed it.
+    unsafe {
+        drop(Box::from_raw(handle));
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn apfs_scan_ext_summary_count(handle: *const ApfsExtSummaryHandle) -> u32 {
+    let Some(h) = (unsafe { handle.as_ref() }) else { return 0; };
+    h.0.rows.len() as u32
+}
+
+/// Sum of the active-metric values across all rows. Used by
+/// Swift for the per-row percent column. Returns 0 on
+/// invalid handle.
+#[no_mangle]
+pub extern "C" fn apfs_scan_ext_summary_total(handle: *const ApfsExtSummaryHandle) -> u64 {
+    let Some(h) = (unsafe { handle.as_ref() }) else { return 0; };
+    h.0.total_value
+}
+
+/// True iff at least one contributing file's `allocated_size`
+/// was None (SR-019 None-collapse). The Swift panel uses this
+/// to caption the header subtitle.
+#[no_mangle]
+pub extern "C" fn apfs_scan_ext_summary_any_unclaimed(handle: *const ApfsExtSummaryHandle) -> bool {
+    let Some(h) = (unsafe { handle.as_ref() }) else { return false; };
+    h.0.any_unclaimed
+}
+
+/// Fetch row `n`. Returns a zero-filled row if `n` is out of
+/// range or the handle is NULL.
+#[no_mangle]
+pub extern "C" fn apfs_scan_ext_summary_row(
+    handle: *const ApfsExtSummaryHandle,
+    n: u32,
+) -> ApfsExtRow {
+    let zero = ApfsExtRow {
+        ext: ApfsPathRef { bytes: ptr::null(), len: 0 },
+        value_logical: 0,
+        value_allocated: APFS_ALLOCATED_TOTAL_UNCLAIMED,
+        file_count: 0,
+        _pad: 0,
+    };
+    let Some(h) = (unsafe { handle.as_ref() }) else { return zero; };
+    let idx = n as usize;
+    if idx >= h.0.rows.len() {
+        return zero;
+    }
+    let row = &h.0.rows[idx];
+    let allocated = row.value_allocated.unwrap_or(APFS_ALLOCATED_TOTAL_UNCLAIMED);
+    ApfsExtRow {
+        ext: ApfsPathRef {
+            bytes: row.ext.as_ptr(),
+            len: row.ext.len() as u64,
+        },
+        value_logical: row.value_logical,
+        value_allocated: allocated,
+        file_count: row.file_count,
+        _pad: 0,
+    }
 }
 
 /// `true` iff at least one entry has `allocated_size = Some(_)`.

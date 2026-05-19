@@ -461,4 +461,77 @@ final class Scan {
         let count = Int(apfs_layout_cell_count(handle))
         return Layout(handle: handle, count: count)
     }
+
+    // MARK: - Phase 5d ext-list summary
+
+    /// Owning wrapper around an `ApfsExtSummaryHandle`. Built
+    /// once per (node, metric) tuple; the Swift panel calls
+    /// `row(at:)` for each visible row. `deinit` calls
+    /// `apfs_scan_ext_summary_free`.
+    final class ExtSummary {
+        fileprivate let handle: OpaquePointer
+        let count: Int
+        let totalValue: UInt64
+        let anyUnclaimed: Bool
+
+        /// One materialised row. We copy out into Swift-owned
+        /// types so the SwiftUI view doesn't have to hold the
+        /// `ApfsPathRef` lifetime invariant; the ext strings
+        /// are tiny (< 16 chars typical) so the copy cost is
+        /// negligible.
+        struct Row: Identifiable {
+            let id: Int
+            let ext: String
+            let valueLogical: UInt64
+            let valueAllocated: UInt64?
+            let fileCount: UInt32
+        }
+
+        fileprivate init(handle: OpaquePointer) {
+            self.handle = handle
+            self.count = Int(apfs_scan_ext_summary_count(handle))
+            self.totalValue = apfs_scan_ext_summary_total(handle)
+            self.anyUnclaimed = apfs_scan_ext_summary_any_unclaimed(handle)
+        }
+
+        deinit {
+            apfs_scan_ext_summary_free(handle)
+        }
+
+        /// Materialise row `n`. Index out of range returns a
+        /// blank-extension row with zero values.
+        func row(at n: Int) -> Row {
+            let r = apfs_scan_ext_summary_row(handle, UInt32(n))
+            let ext: String = {
+                guard let bytes = r.ext.bytes, r.ext.len > 0 else { return "" }
+                let data = Data(bytes: bytes, count: Int(r.ext.len))
+                return String(data: data, encoding: .utf8) ?? ""
+            }()
+            let allocated: UInt64? =
+                r.value_allocated == Scan.allocatedTotalUnclaimed ? nil : r.value_allocated
+            return Row(
+                id: n,
+                ext: ext,
+                valueLogical: r.value_logical,
+                valueAllocated: allocated,
+                fileCount: r.file_count
+            )
+        }
+
+        /// Materialise every row at once. Cheap enough for the
+        /// typical case (~50 extensions per directory tree); the
+        /// SwiftUI `ForEach` consumes the array directly.
+        func allRows() -> [Row] {
+            (0..<count).map { row(at: $0) }
+        }
+    }
+
+    /// Build the ext-list summary for the subtree rooted at
+    /// `nodeIndex`. Returns nil on invalid args.
+    func extSummary(rootedAt nodeIndex: UInt32, metric: Metric) -> ExtSummary? {
+        guard let h = apfs_scan_ext_summary_new(handle, nodeIndex, metric.rawValue) else {
+            return nil
+        }
+        return ExtSummary(handle: h)
+    }
 }
