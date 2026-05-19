@@ -19,6 +19,15 @@ struct NativeContentView: View {
     @State private var lastSize: CGSize = .zero
     @State private var currentNode: UInt32 = 0
     @State private var lastClickedPath: String = ""
+    /// Set of node indices whose tree-list rows are expanded.
+    /// On a fresh scan we seed with `{0}` so the root's
+    /// top-level children are visible without a click.
+    @State private var expandedNodes: Set<UInt32> = [0]
+    /// Cached flattened tree-list rows. Recomputed when scan /
+    /// currentNode / expandedNodes / metric change so the
+    /// SwiftUI list view doesn't re-walk the tree on every
+    /// view body re-evaluation.
+    @State private var treeRows: [TreeListRow] = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -32,18 +41,27 @@ struct NativeContentView: View {
                 .padding(.vertical, 6)
                 .background(VizPalette.panel)
             Divider().background(VizPalette.border)
-            GeometryReader { proxy in
-                ZStack {
-                    VizPalette.bg
-                    TreemapViewRepresentable(
-                        layout: layout,
-                        onClick: { nodeIndex in
-                            handleClick(nodeIndex: nodeIndex)
-                        }
-                    )
+            // HSplitView so the user can drag the boundary
+            // between the tree-list sidebar and the treemap.
+            // Tree-list panel is on the left at ~280 pt
+            // default; the treemap fills the rest.
+            HSplitView {
+                treeListPanel
+                    .frame(minWidth: 220, idealWidth: 300, maxWidth: 500)
+                GeometryReader { proxy in
+                    ZStack {
+                        VizPalette.bg
+                        TreemapViewRepresentable(
+                            layout: layout,
+                            onClick: { nodeIndex in
+                                handleClick(nodeIndex: nodeIndex)
+                            }
+                        )
+                    }
+                    .onAppear { resize(to: proxy.size) }
+                    .onChange(of: proxy.size) { newSize in resize(to: newSize) }
                 }
-                .onAppear { resize(to: proxy.size) }
-                .onChange(of: proxy.size) { newSize in resize(to: newSize) }
+                .frame(minWidth: 320)
             }
             Divider().background(VizPalette.border)
             statusBar
@@ -54,6 +72,274 @@ struct NativeContentView: View {
         .background(VizPalette.bg)
         .preferredColorScheme(.dark)
         .foregroundStyle(VizPalette.text)
+        .onChange(of: scan?.entryCount) { _ in rebuildTreeRows() }
+        .onChange(of: currentNode) { _ in rebuildTreeRows() }
+        .onChange(of: metric) { _ in rebuildTreeRows() }
+        .onChange(of: expandedNodes) { _ in rebuildTreeRows() }
+    }
+
+    // MARK: - Tree-list panel
+
+    /// Soft cap on visible children per directory in the tree-
+    /// list — matches the JS canvas-era constant. Beyond this
+    /// the row build adds a "… and N more" placeholder; the
+    /// user can drill into the directory to see the rest.
+    private static let treeListChildrenCap = 400
+
+    private struct TreeListRow: Identifiable {
+        // Stable identity: a (nodeIndex, depth) pair survives
+        // re-renders without re-issuing implicit identifiers.
+        let id: UInt64
+        let nodeIndex: UInt32
+        let depth: Int
+        let hasChildren: Bool
+        let isExpanded: Bool
+        let isCurrent: Bool
+        /// Special "+N more" row that doesn't correspond to a
+        /// real node. `nodeIndex == APFS_NODE_INVALID`.
+        let isOverflow: Bool
+        let overflowCount: Int
+    }
+
+    private var treeListPanel: some View {
+        VStack(spacing: 0) {
+            paneHeader("Folder tree")
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(VizPalette.bg)
+            colHeader
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(VizPalette.bg)
+            Divider().background(VizPalette.border)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(treeRows) { row in
+                        treeListRowView(row)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+        }
+        .background(VizPalette.panel)
+    }
+
+    @ViewBuilder
+    private func paneHeader(_ title: String) -> some View {
+        HStack {
+            Text(title.uppercased())
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(VizPalette.muted)
+                .tracking(0.4)
+            Spacer()
+        }
+    }
+
+    private var colHeader: some View {
+        HStack(spacing: 0) {
+            // 22 pt indent column for the disclosure triangle.
+            Spacer().frame(width: 22)
+            Text("Name")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(VizPalette.muted)
+                .tracking(0.4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text("% / parent")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(VizPalette.muted)
+                .frame(width: 80, alignment: .trailing)
+            Text("Size")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(VizPalette.muted)
+                .frame(width: 70, alignment: .trailing)
+                .padding(.leading, 4)
+        }
+    }
+
+    @ViewBuilder
+    private func treeListRowView(_ row: TreeListRow) -> some View {
+        if row.isOverflow {
+            HStack {
+                Spacer().frame(width: CGFloat(14 * (row.depth + 1) + 8))
+                Text("… and \(row.overflowCount) more")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(VizPalette.muted)
+                Spacer()
+            }
+            .padding(.vertical, 1)
+        } else {
+            let scan = self.scan
+            HStack(spacing: 0) {
+                Spacer().frame(width: CGFloat(14 * row.depth + 4))
+                // Disclosure triangle (or invisible placeholder
+                // when this row has no children — keeps the
+                // name column lined up).
+                Button {
+                    toggleExpansion(of: row.nodeIndex)
+                } label: {
+                    Image(systemName: row.isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9))
+                        .foregroundStyle(row.hasChildren ? VizPalette.muted : .clear)
+                        .frame(width: 14, height: 14, alignment: .center)
+                }
+                .buttonStyle(.plain)
+                .disabled(!row.hasChildren)
+
+                // Kind icon — quick visual telling files,
+                // symlinks, dirs apart.
+                let kind = scan?.kind(of: row.nodeIndex) ?? .invalid
+                Image(systemName: rowIconName(kind: kind))
+                    .font(.system(size: 11))
+                    .foregroundStyle(rowIconColor(kind: kind))
+                    .frame(width: 14)
+                    .padding(.trailing, 4)
+
+                // Name (or "/" for the root). Tap-anywhere area:
+                // wrap in a Button so SwiftUI catches the click
+                // without us having to hand-roll gesture
+                // tracking.
+                Button {
+                    navigate(to: row.nodeIndex)
+                } label: {
+                    let name: String = {
+                        if row.nodeIndex == 0 { return "/" }
+                        return scan?.name(of: row.nodeIndex) ?? "?"
+                    }()
+                    HStack(spacing: 0) {
+                        Text(name)
+                            .font(.system(size: 12, design: .monospaced))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Text(percentText(for: row))
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(VizPalette.muted)
+                            .frame(width: 80, alignment: .trailing)
+                        Text(sizeText(for: row))
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(VizPalette.text)
+                            .frame(width: 70, alignment: .trailing)
+                            .padding(.leading, 4)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1)
+            .background(row.isCurrent
+                        ? VizPalette.accent.opacity(0.22)
+                        : Color.clear)
+        }
+    }
+
+    private func rowIconName(kind: Scan.NodeKind) -> String {
+        switch kind {
+        case .dir: return "folder.fill"
+        case .file: return "doc"
+        case .symlink: return "arrow.forward.circle"
+        default: return "questionmark.circle"
+        }
+    }
+
+    private func rowIconColor(kind: Scan.NodeKind) -> Color {
+        switch kind {
+        case .dir: return Color(red: 0xf4 / 255, green: 0xd3 / 255, blue: 0x5e / 255)
+        case .symlink: return Color(red: 0x7d / 255, green: 0x8a / 255, blue: 0x99 / 255)
+        default: return VizPalette.muted
+        }
+    }
+
+    private func percentText(for row: TreeListRow) -> String {
+        guard let scan, row.nodeIndex != 0 else { return "—" }
+        let parent = scan.parent(of: row.nodeIndex) ?? 0
+        let parentValue = metricValue(for: parent, scan: scan)
+        guard parentValue > 0 else { return "—" }
+        let ownValue = metricValue(for: row.nodeIndex, scan: scan)
+        let pct = Double(ownValue) / Double(parentValue) * 100.0
+        return String(format: "%.1f%%", pct)
+    }
+
+    private func sizeText(for row: TreeListRow) -> String {
+        guard let scan else { return "" }
+        let value = metricValue(for: row.nodeIndex, scan: scan)
+        if metric == .allocated && scan.valueAllocated(of: row.nodeIndex) == nil {
+            return "unclaimed"
+        }
+        return ByteCountFormatter.string(fromByteCount: Int64(value), countStyle: .binary)
+    }
+
+    private func metricValue(for nodeIndex: UInt32, scan: Scan) -> UInt64 {
+        if metric == .allocated {
+            return scan.valueAllocated(of: nodeIndex) ?? 0
+        }
+        return scan.valueLogical(of: nodeIndex)
+    }
+
+    private func toggleExpansion(of nodeIndex: UInt32) {
+        if expandedNodes.contains(nodeIndex) {
+            expandedNodes.remove(nodeIndex)
+        } else {
+            expandedNodes.insert(nodeIndex)
+        }
+    }
+
+    private func navigate(to nodeIndex: UInt32) {
+        guard let scan else { return }
+        currentNode = nodeIndex
+        let path = scan.path(of: nodeIndex) ?? ""
+        lastClickedPath = path.isEmpty ? "/" : path
+        // Expand the path so the highlighted row is visible.
+        // We don't auto-expand subtrees — only ancestors of the
+        // navigated node.
+        var c: UInt32? = scan.parent(of: nodeIndex)
+        while let cur = c {
+            expandedNodes.insert(cur)
+            c = scan.parent(of: cur)
+        }
+        updateLayout()
+    }
+
+    private func rebuildTreeRows() {
+        guard let scan else { treeRows = []; return }
+        var out: [TreeListRow] = []
+        walkForRows(scan: scan, nodeIndex: 0, depth: 0, out: &out)
+        treeRows = out
+    }
+
+    private func walkForRows(scan: Scan, nodeIndex: UInt32, depth: Int, out: inout [TreeListRow]) {
+        let kind = scan.kind(of: nodeIndex)
+        let childCount = scan.childCount(of: nodeIndex)
+        let isDir = kind == .dir
+        let hasChildren = isDir && childCount > 0
+        let isExpanded = hasChildren && expandedNodes.contains(nodeIndex)
+        let isCurrent = nodeIndex == currentNode
+        let id = (UInt64(nodeIndex) << 8) | UInt64(depth & 0xff)
+        out.append(TreeListRow(
+            id: id, nodeIndex: nodeIndex, depth: depth,
+            hasChildren: hasChildren, isExpanded: isExpanded,
+            isCurrent: isCurrent,
+            isOverflow: false, overflowCount: 0
+        ))
+        guard isExpanded else { return }
+        // Sort children descending by the active metric. Pull
+        // the value-per-child once into an array then sort to
+        // keep the per-comparison FFI cost down.
+        let children = Array(scan.children(of: nodeIndex))
+        let scored: [(UInt32, UInt64)] = children.map { ($0, metricValue(for: $0, scan: scan)) }
+        let sorted = scored.sorted { $0.1 > $1.1 }
+        let visible = sorted.prefix(NativeContentView.treeListChildrenCap)
+        for (child, _) in visible {
+            walkForRows(scan: scan, nodeIndex: child, depth: depth + 1, out: &out)
+        }
+        if sorted.count > visible.count {
+            let id = (UInt64(nodeIndex) << 8) | UInt64((depth + 1) & 0xff) | 0xff_0000_0000
+            out.append(TreeListRow(
+                id: id, nodeIndex: Scan.nodeInvalid, depth: depth,
+                hasChildren: false, isExpanded: false, isCurrent: false,
+                isOverflow: true, overflowCount: sorted.count - visible.count
+            ))
+        }
     }
 
     // MARK: - Toolbar
@@ -293,6 +579,7 @@ struct NativeContentView: View {
                     scan = result
                     currentNode = 0
                     lastClickedPath = ""
+                    expandedNodes = [0]
                     // If the scan's allocated column is missing,
                     // force the picker back to "Logical" so the
                     // user doesn't see an empty treemap on the
@@ -301,9 +588,11 @@ struct NativeContentView: View {
                         metric = .logical
                     }
                     updateLayout()
+                    rebuildTreeRows()
                 } else {
                     scan = nil
                     layout = nil
+                    treeRows = []
                     scanError = "scan failed for \(path)"
                 }
             }
