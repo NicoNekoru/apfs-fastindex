@@ -19,7 +19,10 @@ on a real APFS image, or by behaviour that converges across multiple
 independent open-source readers. Convergence across six readers
 (\texttt{linux-apfs-rw}, \texttt{apfs-fuse}, \texttt{dissect.apfs},
 \texttt{go-apfs}, \texttt{libfsapfs}, the Sleuth Kit's APFS module)
-plus the reference is harder to fault than the reference alone.
+plus the reference is harder to fault than the reference alone. For
+performance claims the same convergence pattern applies across
+independent fast macOS scanners (\texttt{dumac}, \texttt{macdirstat},
+\texttt{jwalk}) and the xnu kernel source itself.
 
 \textbf{Hypothesis.} A claim that is plausible and useful for design
 but has no probe or convergence behind it yet. Hypothesis does not

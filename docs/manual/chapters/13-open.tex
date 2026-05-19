@@ -1,140 +1,268 @@
 \chapter{Open Questions}
 
 The narrow v1 contract --- one volume, one pinned state, namespace
-plus logical size, fallback for everything else --- is complete.
-What follows are the named investigation lanes the project has
-opened deliberately, with enough scope clarity that they can be
-worked on without widening v1's support claims by accident.
+plus logical size, fallback for everything else --- has been the
+project's anchor through R1. R2 opened three named lanes against it.
+This chapter is what each lane has resolved and what each has not,
+written so a reader can see what the project knows and what it has
+deliberately left unclaimed.
 
-The chapter is organised by R2 lane rather than by topic. A lane is
-a unit of work whose entire scope --- source class, semantic mode,
+The chapter is organised by lane rather than by topic. A lane is a
+unit of work whose entire scope --- source class, semantic mode,
 oracle, support claim --- can be specified before the work starts.
 Lanes are isolated from each other; finishing one does not entail
 finishing any other.
 
-\section{R2-A: Physical Size Per File}
+\section{R2-A: Allocated Size --- Landed With Two Fail-Closed Cases}
 
-The most visible WizTree feature R1 does not yet provide.
+The most visible WizTree feature R1 did not yet provide.
 
 \textbf{The question.} For each inode, what number of bytes does
 APFS allocate to its content on disk?
 
-\textbf{Why now.} Two of the candidate sources are already decoded
-by the v1 body parser. \texttt{j\_dstream\_t.alloced\_size} is
-emitted by the inode body decoder; \texttt{j\_file\_extent\_*}
-records are walked by the FS-tree walker and counted in the family
-histogram. The chapter~6 cursor rule already gives us
-correct field reads. What is missing is the precedence rule that
-turns the candidates into one number per inode, with an oracle
-that says when the number is right.
+\textbf{The result.} Five of six case classes emit a per-inode
+\texttt{allocated\_size} that matches macOS's
+\texttt{st\_blocks * 512} oracle exactly. Two cases fail closed in
+v1: sparse files (where \texttt{j\_dstream\_t.alloced\_size}
+overstates the actual allocation by the sparse-bytes hint) and
+decmpfs-compressed files (where no on-disk field has been
+oracle-validated against the macOS number). Chapter~8 gives the
+precedence rule, the case-class table, and the per-row evidence;
+chapter~11 records that the visualisation greys the metric toggle
+out for any row that lacks a value, and any directory aggregate
+containing such a row propagates \texttt{None} upward.
 
-\textbf{Candidate sources.}
+The fail-closed cases are not bugs. They are scope choices: the
+sparse hypothesis (\texttt{alloced\_size} $-$ \texttt{sparse\_bytes}
+$=$ \texttt{st\_blocks * 512}) holds on the one fixture that
+exercises it, but is one data point and needs a broader sparse
+corpus before it can be promoted from Hypothesis to Observation.
+The decmpfs gap is genuine: no public reader has been validated
+for the resource-fork-backed decmpfs path on macOS, and v1 will
+not emit a number it cannot defend.
 
-\begin{description}
-  \item[\texttt{j\_dstream\_t.alloced\_size}.] The dstream's claim
-    about allocated bytes. Easy to read, but APFS clone records
-    and snapshot-retained data can make the dstream's view
-    incomplete.
-  \item[\texttt{j\_file\_extent\_val\_t} records.] Per-inode
-    extents, walked from the FS tree. Summing the
-    \texttt{length\_and\_flags} of an inode's extents gives the
-    inode's apparent on-disk extent.
-  \item[Extent reference tree.] The container-level structure that
-    tracks block ownership across clones and snapshots. Required
-    when the question is "bytes uniquely owned by this inode" but
-    not when the question is "bytes allocated to this inode's
-    extents."
-\end{description}
-
-\textbf{Oracle.} \texttt{st\_blocks * 512}, for cases that have
-been validated case by case. The match is not always exact ---
-APFS may allocate metadata blocks that \texttt{st\_blocks} does not
-count, and clone behaviour means two inodes' allocated bytes do not
-sum to disk usage. The probe records both numbers and the
-divergence, rather than asserting equality.
-
-\textbf{Entry path.} SR-019 (source review of allocation
-semantics: dstream vs extents vs extent reference tree) then
-EX-22 (same-run fixture: ordinary, sparse, clone, hard link,
-symlink, compressed; \texttt{st\_blocks * 512} per inode; raw
-allocated number per source candidate; divergence breakdown). Pass
-condition: for every case, exactly one source candidate matches
-\texttt{st\_blocks * 512}, and the precedence rule that picks it is
-stated in SR-019.
-
-\textbf{What stays out.} Exclusive bytes (bytes only this inode
+\textbf{What did not land.} Exclusive bytes (bytes only this inode
 owns, after accounting for clones and snapshots) and shared bytes
-(bytes shared across inodes or snapshots) are separate metrics
-with separate oracles. They are not R2-A. The extent-reference
-tree is decoded only as far as R2-A's allocated-size question
-requires.
+(bytes shared across inodes or snapshots) require the
+extent-reference tree to be opened and joined against per-inode
+extents. Neither is part of R2-A; both are separate lanes with
+their own oracles.
 
-\section{R2-B: Snapshot-Assisted Scanning}
+\textbf{Future direction.} An EX-22b sparse-corpus probe (leading
+hole, trailing hole, multi-hole, hole-larger-than-file, zero-hole
+boundary) would close the sparse fail-closed case. The
+\texttt{alloced\_size - sparse\_bytes} identity is the candidate;
+the EX-22b oracle is the same \texttt{st\_blocks * 512} that R2-A
+used.
+
+\section{R2-B: Snapshot-Assisted Scanning --- Entitlement-Blocked}
 
 The mechanism by which a fast indexer can scan a live machine
 honestly.
 
 \textbf{The question.} If the indexer takes a local APFS snapshot
 of a live volume, mounts it read-only, and walks it through the
-existing fallback, does the result match what the same walker would
-have emitted on the live volume at the snapshot moment?
+existing fallback, does the result match what the same walker
+would have emitted on the live volume at the snapshot moment?
 
-\textbf{Why now.} The snapshot mechanism is the only published
-macOS API that pins a coherent state of a live volume. The
-fallback walker is shape-equivalent to raw mode on the proof
-fixture (chapter~11). Combining the two lets the indexer scan a
-live volume without depending on the raw-mode allowlist, and
-without needing to handle live churn (chapter~3).
+\textbf{What landed.} A source review of the snapshot API surface
+(SR-020) made the privilege boundary explicit:
+\texttt{fs\_snapshot\_create(2)} requires root \emph{and} the
+\texttt{com.apple.developer.vfs.snapshot} entitlement; the same
+gate applies to delete, rename, mount, and revert.
+\texttt{mount\_apfs -s} also requires root.
+\texttt{tmutil~localsnapshot} is the only unprivileged create
+path; it invokes \texttt{backupd} over XPC and only works on
+volumes included in the Time Machine backup set.
+\texttt{fs\_snapshot\_list(2)} and the corresponding
+\texttt{diskutil} and \texttt{tmutil list} subcommands are free.
 
-\textbf{Oracle.} The live-volume scan at the snapshot moment is its
-own oracle: the snapshot is, by construction, a copy of the live
-state at the moment it was taken. The probe compares the snapshot
-walk to the live walk, taken simultaneously, for unchanged data.
+The scanner therefore cannot stage its own snapshot inside an
+unprivileged test process. The R2-B Rust integration --- a
+\texttt{--snapshot <mountpoint>} flag that consumes an
+already-mounted snapshot directory and runs the existing fallback
+against it --- is operationally useful immediately. The
+shape-parity claim itself is parked behind an unblock condition:
+the EX-23 probe ran on a clean dev workstation, found no
+user-visible snapshots (only the sealed-system
+\texttt{com.apple.os.update-*} snapshot, which it correctly
+skipped), and emitted a \texttt{blocked\_no\_snapshots\_at\_all}
+verdict with the exact \texttt{sudo mount\_apfs -s} reproducer
+command saved in the probe artefacts.
 
-\textbf{Entry path.} SR-020 (source review of snapshot API:
-\texttt{fs\_snapshot\_create}, snapshot identity, mount lifecycle,
-cleanup) then EX-23 (live-vs-snapshot shape parity fixture). Pass
-condition: every \texttt{NamespaceEntry} and every
-\texttt{DirectoryAggregate} that the snapshot walk produces is
-present and identical in the live walk for paths that did not
-change during the probe.
+\textbf{What did not land.} The shape-parity oracle itself.
+Until a privileged rerun produces a positive verdict, the
+\texttt{--snapshot} flag tags the source as a snapshot in
+\texttt{correctness\_claim} and \texttt{not\_claimed} but does
+not promise that the result matches a live-directory walk on this
+host. The \texttt{not\_claimed} register names the missing
+oracle explicitly so a consumer cannot accidentally treat a
+snapshot scan as equivalent to a live scan.
 
-\textbf{What stays out.} Snapshot-retained bytes (bytes a snapshot
-holds against deletion) is a separate metric and a separate
-oracle. Sealed-system content (the parts of the macOS startup
-volume that user snapshots cannot mount) is a separate access
-class. Neither belongs in R2-B.
+\textbf{Future direction.} A privileged rerun. The reproducer
+is:
 
-\section{R2-C: Scanner Ergonomics}
+\begin{minted}{bash}
+tmutil localsnapshot /
+tmutil listlocalsnapshots /
+sudo mkdir -p /tmp/apfsfi-ex23-snap
+sudo mount_apfs -s <snapshot-name> / /tmp/apfsfi-ex23-snap
+python3 docs/research/experiments/EX-23-snapshot-shape-parity/artifacts/probe_ex23.py
+sudo umount /tmp/apfsfi-ex23-snap
+\end{minted}
+
+A positive verdict would unlock moving the snapshot-mount cell of
+the support matrix from \texttt{not\_claimed} to
+\texttt{fallback\_supported}.
+
+\section{R2-C: Scanner Ergonomics --- Two Levers Investigated, One Shipped}
 
 The lane that does not change semantics, only the surface.
 
-\textbf{The question.} Which parts of the scanner's user-facing
-surface --- backend selection, progress reporting, embeddability
-in a native UI, batch syscalls --- can be improved without moving
-the emission contract?
+\textbf{The questions.} Which parts of the scanner's
+user-facing surface --- backend selection, progress reporting,
+embeddability in a native UI, attribute fetch cost, parallelism
+--- can be improved without moving the emission contract?
 
-\textbf{What has landed.} Bulk syscalls for the fallback path
-(\texttt{getattrlistbulk}, chapter~12) and stderr-streamed
-progress events with one update per directory boundary. A native
-macOS shell (\texttt{app/}) that runs the scanner as a subprocess
-and hosts the result in a treemap.
+\textbf{The performance-lever map.} Source review SR-021
+synthesised four parallel research threads (xnu source, the
+Spotlight alternative, an OSS-tool survey, and the
+\texttt{jwalk}/\texttt{rayon} prior art) into one map.
 
-\textbf{What is still in scope.} A native NSMenu for row context
-operations (Reveal in Finder, Move to Trash, Copy Path); a Top-N
-sidebar so a treemap with a long tail is browsable; a search
-field that filters rows by stored UTF-8 name; bundling the
-scanner binary into the app so the user does not need to run
-\texttt{cargo build} themselves; code signing and notarisation
-for a distributable build.
+\paragraph{Falsified.} EX-24 measured the attribute-mask shrink
+lever: drec-only attributes (no inode-required fields) versus the
+production walker's attribute mask
+(\texttt{ATTR\_FILE\_TOTALSIZE | ATTR\_FILE\_ALLOCSIZE}).
+The two rows landed within one per cent of each other. The
+SR-021 hypothesis that the inode-attribute fetch path crosses
+xnu's vnode-rage boundary as a measurable lever is
+\emph{falsified for modern Apple silicon and this attribute set}.
+The Phase-2 deferred-attribute refactor is therefore
+de-prioritised. The \texttt{fts(3)} control was 1.7$\times$
+slower than the production mask, contradicting Tempel's 2019
+result and cancelling the conditional follow-up.
 
-\textbf{What stays out.} The shape of \texttt{ParserOutput} does
-not move in R2-C. A new column would be R2-A or R2-B. R2-C only
-makes the existing columns easier to consume.
+\paragraph{Validated.} EX-25 measured the parallel-walker lever
+at $T \in \{1, 2, 4, 8, 14\}$. T=4 reached 2.47$\times$ the
+single-threaded throughput; the system-CPU-per-thread cost
+stayed flat through T=4 then jumped super-linearly. Chapter~12
+gives the curve. The parallel slice landed with default
+\texttt{min(hw.physicalcpu, 4)} and a synthetic-tree regression
+test asserting byte-identical output across schedulers.
+
+\paragraph{Ruled out.} Spotlight as a metadata oracle (by-design
+incomplete coverage, no scoped-subtree streaming API, no
+row-formatted output, undocumented store format, write
+visibility lag). \texttt{getattrlistbulk} buffer size larger
+than 64~KiB (the per-syscall floor is sub-0.1\% of the budget).
+\texttt{getdirentriesattr(2)} (deprecated since macOS 10.10,
+routes through the same VFS path on APFS).
+
+\paragraph{Other slices shipped.} A firmlink-overlay dedup that
+cut whole-machine \texttt{/} scans from 5.25M to 3.06M entries by
+refusing the \texttt{/System/Volumes/Data/*} duplicate paths
+(chapter~11); a progress-cadence change from one second to
+250~ms so the stopwatch on a fast scan does not freeze; and the
+native shell developed in the next subsection.
+
+\subsection{The Native Shell}
+
+The lane's product surface is a SwiftUI app that hosts the
+existing treemap inside a WebKit view. The scanner runs as a
+subprocess; the JSON is piped into the visualisation through a
+small JavaScript bridge; user actions on the treemap come back
+through the same bridge as typed Swift messages.
+
+The app starts empty. A toolbar exposes the target field, a
+Browse button, the \texttt{auto}/\texttt{raw}/\texttt{fallback}
+backend picker, a mode menu, and the Scan button. The status
+bar reads \texttt{auto / ready}.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{figures/app-idle.png}
+\caption{The native shell, idle state. The state-aware toolbar
+exposes the source picker and the auto-dispatch backend mode;
+the metric toggle in the upper-right becomes live once a scan
+completes.}
+\end{figure}
+
+After the scanner exits, three sub-phases run before the
+treemap appears: serialising the JSON to a temp file, the WebKit
+XHR fetching it, and the viz's parse-and-ingest. On a
+five-million-row scan that gap is several seconds, and an
+overlay covers the empty viz until ingestion completes so the
+user is never left looking at a frozen window with no visible
+work.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{figures/app-loading.png}
+\caption{The post-scan ingestion gap. The scanner has emitted
+3,062,947 entries in 16.26 seconds against \texttt{/}; the
+spinner remains until the WebKit side has parsed the JSON and
+materialised the treemap.}
+\end{figure}
+
+The loaded treemap packs \texttt{NamespaceEntry} rows by their
+unique-inode logical aggregate (chapter~8). The metric toggle
+in the top right swaps the column the treemap weights by:
+\texttt{Logical} (R1) or \texttt{Allocated} (R2-A; greyed if the
+visible subtree contains any fail-closed row). The toolbar
+breadcrumb reads the scanner's \texttt{correctness\_claim} so a
+viewer can tell at a glance which mode and which thread count
+produced the scan.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{figures/app-treemap.png}
+\caption{A loaded scan of \texttt{/Applications}: 163,651 entries
+in 0.3~s (the four-thread parallel fallback). Leaf rectangles
+carry path and size; the colour family encodes file kind. The
+status bar reads the total logical bytes for the visible
+aggregate.}
+\end{figure}
+
+Right-clicking a leaf opens a native \texttt{NSMenu} bridged
+through a typed JS-to-Swift message. \texttt{Open},
+\texttt{Reveal in Finder}, \texttt{Copy Path}, and
+\texttt{Move to Trash} are real macOS file-system actions
+running in Swift, not Web shell-outs --- they inherit the
+operating system's permissions, undo semantics, and recovery
+behaviour. The viz emits the click event's coordinates so the
+\texttt{NSMenu} appears at the click location rather than at a
+WebKit-injected DOM popover.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{figures/app-context-menu.png}
+\caption{A right-click context menu over a leaf
+(\texttt{WhatsApp.app/Contents/MacOS/WhatsApp}). The menu is a
+native \texttt{NSMenu}, positioned at the click event the viz
+forwarded through the bridge.}
+\end{figure}
+
+Smaller slices that complete the surface: a dark theme that
+matches macOS's accent system; a state-aware toolbar that
+collapses the source-selection controls once a scan is loaded
+and exposes \texttt{Rescan} and \texttt{New} instead; the file
+picker presented as a sheet rather than as a modal window
+(presenting from the toolbar removes the focus-steal common to
+\texttt{NSOpenPanel}); and a cached \texttt{NumberFormatter} for
+the live entry counter so the stopwatch label does not allocate
+per progress event.
+
+\paragraph{Future direction.} The user-space post-processing tax
+(roughly 110 thousand entries per second of budget between the
+microbench kernel ceiling and the production end-to-end
+throughput) is the next bounded lever. Candidates:
+\texttt{NamespaceEntry} allocation, per-worker merge,
+\texttt{build\_aggregates}, the final sort. None is load-bearing
+today; recorded for context.
 
 \section{Beyond R2}
 
-Three areas are deliberately deferred past R2. Each is large
+Four areas remain deliberately deferred past R2. Each is large
 enough to warrant its own gate and its own oracle work; each is
 unsafe to open opportunistically.
 
@@ -145,42 +273,50 @@ parser currently fails closed on encryption flags; opening
 encryption support requires deciding which classes of key access
 the product is willing to use and which it is not.
 
-\paragraph{Live boot disk.} The startup disk on modern macOS is a
-sealed system volume joined to a data volume by firmlinks, with a
-snapshot pinning the system content. Raw scanning of the System
-volume is constrained by the seal; raw scanning of the Data volume
-is constrained by the live-churn problem; the merged user-visible
-view depends on firmlink table semantics that are themselves
-not fully public. Opening live boot support means building each
-of those subsystems' oracle.
+\paragraph{Live boot disk.} The startup disk on modern macOS is
+a sealed system volume joined to a data volume by firmlinks,
+with a snapshot pinning the system content. Raw scanning of the
+System volume is constrained by the seal; raw scanning of the
+Data volume is constrained by the live-churn problem; the
+merged user-visible view depends on firmlink table semantics
+that are themselves not fully public. Opening live boot support
+means building each of those subsystems' oracle.
 
 \paragraph{Boot-root merged namespace.} The Finder-visible
 \texttt{/} on a modern Mac is not any single APFS volume's
-namespace. It is the System volume's content joined to the Data
-volume's content through firmlinks, plus the current snapshot
-overlay. The product mode for this is distinct from
+namespace. It is the System volume's content joined to the
+Data volume's content through firmlinks, plus the current
+snapshot overlay. The product mode for this is distinct from
 raw-single-volume; it cannot share the same oracle, and its
-support claims must be stated separately.
+support claims must be stated separately. The firmlink-dedup
+slice in chapter~11 is the closest the project has come to
+this: it suppresses the on-disk duplication at the fallback
+layer without claiming Finder semantics.
 
-\paragraph{Persistent incremental cache.} The work of chapter~10
-turns into product only after the full set of cache-invalidation
-conditions has been enumerated, a crash-safe cache storage design
-exists, and an incremental scan has been validated against a
-fresh full reparse. The R2 lanes deliberately precede this work;
-a cache built on top of incomplete metrics or unstable support
-matrices would propagate its instability.
+\paragraph{Persistent incremental cache.} The work of
+chapter~10 turns into product only after the full set of
+cache-invalidation conditions has been enumerated, a
+crash-safe cache storage design exists, and an incremental scan
+has been validated against a fresh full reparse. The R2 lanes
+deliberately precede this work; a cache built on top of
+incomplete metrics or unstable support matrices would propagate
+its instability.
 
 \section{The Manual's Own Future}
 
-The chapter ends where the manual ends. Each lane above will, when
-it lands, become its own chapter: a thesis, the evidence, the
-precedence rule or the oracle pairing, the per-case table, the
-limits of what was checked. The chapter list will lengthen; the
-voice should not change.
+The chapter ends where the manual ends. Each lane above will,
+when it lands, become its own chapter: a thesis, the evidence,
+the precedence rule or the oracle pairing, the per-case table,
+the limits of what was checked. The chapter list will lengthen;
+the voice should not change.
 
 The discipline that produced R1 produced something narrow but
-defensible. The discipline that produces R2 will produce something
-broader and still defensible. Anything written here that survives
-the next year of work survives because it was written carefully.
-Anything that does not survive was an error worth recording so the
-next attempt does not repeat it.
+defensible. The discipline that produced R2 produced something
+broader, with the same defensibility intact: a metric that
+landed, a lane that was correctly entitlement-gated, a lane
+whose perf claim is empirically calibrated against a contention
+regime the project did not invent and does not pretend does not
+exist. Anything written here that survives the next year of
+work survives because it was written carefully. Anything that
+does not survive was an error worth recording so the next
+attempt does not repeat it.

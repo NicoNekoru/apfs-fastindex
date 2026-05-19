@@ -5,40 +5,17 @@ before optimising; record what was measured so future claims can be
 compared against it; never report a number whose source class is
 ambiguous.
 
-This chapter contains the first reproducible measurements
-\texttt{apfs-fastindex-scan} produced after R1 was complete. The
-numbers are not impressive in isolation; they are useful as a
-baseline.
+This chapter contains the reproducible measurements
+\texttt{apfs-fastindex-scan} has produced since R1 was complete.
+There are three passes: the standing baseline (chapter~11's
+fallback first cut), a user-space micro-optimisation pass on the
+fallback walker, and a parallel-walker pass that follows from the
+performance-lever map. Each pass changes one thing at a time and
+records the before/after numbers.
 
-\section{Setup}
+\section{The Standing Baseline}
 
-The benchmark harness lives at \texttt{src/apfs\_fastindex/bench.py}.
-It runs the scanner several times against one target, drops the
-slowest and fastest run, and reports median wall time, total entries,
-and median user / system CPU. Wall time is measured with
-\texttt{time.monotonic}; CPU time with \texttt{os.times} on the
-scanner subprocess. The Rust scanner is built in release mode.
-
-Three classes of target appear in the table.
-
-\begin{description}
-  \item[Raw, tiny.] The proof fixture (chapter~5 onward) parsed
-    through raw mode against a detached \texttt{.dmg}.
-  \item[Fallback, medium.] The project repository (about nine
-    thousand entries) and \texttt{/Applications} (about a hundred
-    sixty thousand entries) parsed through the POSIX fallback.
-  \item[Fallback, large.] A whole-machine \texttt{/} scan (about
-    five and a quarter million entries) parsed through the
-    fallback, in two variants: ordinary \texttt{lstat} per entry,
-    and macOS \texttt{getattrlistbulk} batching.
-\end{description}
-
-The host is a single macOS machine; the manifest is recorded in
-\texttt{docs/implementation/measurement-baseline.md}. The numbers
-below are from that page, copied here so the manual is
-self-contained.
-
-\section{The Numbers}
+Cold cache, normal user, release build, single host.
 
 \begin{center}
 \begin{tabular}{lrrrrl}
@@ -56,16 +33,16 @@ apfs-fastindex repo & fallback (std)  &     9 124 &   0.07 & 130 734 & 15 ms / 4
 \end{tabular}
 \end{center}
 
-The two whole-machine rows are the apples-to-apples comparison
-between the two fallback backends.
-
 \begin{figure}[h]
 \centering
 \includegraphics[width=\linewidth]{figures/perf-throughput.pdf}
 \caption{Entries per second across the measurement rows. The proof
-  fixture is dominated by \texttt{hdiutil attach} setup; the fallback
-  rows cluster between forty and one-hundred-sixty thousand entries
-  per second depending on backend and tree shape.}
+  fixture is dominated by \texttt{hdiutil attach} setup; the
+  fallback rows cluster from forty thousand to over three hundred
+  thousand entries per second depending on backend and tree shape.
+  The orange row is the standing single-threaded fallback after the
+  micro-optimisation pass below; the red row is the parallel
+  walker.}
 \end{figure}
 
 \begin{figure}[h]
@@ -73,86 +50,262 @@ between the two fallback backends.
 \includegraphics[width=\linewidth]{figures/perf-cpu.pdf}
 \caption{User-plus-system CPU per row, comparing ordinary
   \texttt{lstat} against \texttt{getattrlistbulk}. The wall-time
-  improvement is real but modest; the system-CPU drop is the cleaner
-  signal that bulk fetch is doing less per-entry work in the kernel.}
+  improvement is real but modest; the system-CPU drop is the
+  cleaner signal that bulk fetch is doing less per-entry work in
+  the kernel.}
 \end{figure}
 
-\section{Reading The Numbers}
+Reading the standing baseline:
 
 \paragraph{The proof-fixture raw number is dominated by setup.}
-Most of the 0.23 s is \texttt{hdiutil attach}; the actual seven-entry
-walk is sub-millisecond. The raw-mode throughput on a meaningful
-real volume is not yet measured because the project does not carry
-a large detached APFS sample. The number above is honest but
-unrepresentative.
+Most of the 0.23~s is \texttt{hdiutil attach}; the actual
+seven-entry walk is sub-millisecond. The raw-mode throughput on a
+meaningful real volume is not yet measured because the project
+does not carry a large detached APFS sample. The number is honest
+but unrepresentative.
 
-\paragraph{Fallback throughput sits at roughly 130 thousand entries
-per second on warm trees with \texttt{lstat} and roughly 157 thousand
-with \texttt{getattrlistbulk}.} The improvement on \texttt{/Applications}
-is about 24 per cent throughput. On the cold \texttt{/} scan the
-improvement is smaller: 16 per cent wall, because the disk is the
-bottleneck on a cold-cache run.
+\paragraph{Fallback throughput sits at roughly 130 thousand
+entries per second on warm trees with \texttt{lstat} and roughly
+157 thousand with \texttt{getattrlistbulk}.} The improvement on
+\texttt{/Applications} is about 24 per cent throughput. On the
+cold \texttt{/} scan the improvement is smaller: 16 per cent
+wall, because the disk is the bottleneck on a cold-cache run.
 
-\paragraph{The cleaner perf signal is system CPU, not wall time.}
-\texttt{getattrlistbulk} drops cold-\texttt{/} system CPU from 48 s
-to 30 s, a 38 per cent reduction --- the kernel is doing
-significantly less work per entry because batching cuts the
-syscall count. The wall-time savings will compound on warm-cache
-runs where the disk is not the constraint.
+\paragraph{The cleaner perf signal is system CPU.} On the cold
+\texttt{/} scan, \texttt{getattrlistbulk} drops system CPU from
+48~s to 30~s --- a 38 per cent reduction. Batching cuts the
+syscall count, and the kernel does less work per entry. The
+wall-time savings compound on warm-cache runs where the disk is
+not the constraint.
 
-\paragraph{Symlinks remain at one extra \texttt{readlink} per entry.}
-\texttt{getattrlistbulk} returns most file metadata in batch but does
-not return link targets. The fallback walker fetches the target with
-\texttt{readlink} when an entry is a symlink, which adds one
-syscall per symlink. On filesystem trees with many symlinks (Python
-virtualenvs, macOS frameworks) this is visible; on trees with few,
-it is invisible.
+\section{The Micro-Optimisation Pass}
+
+The standing baseline left fallback throughput on
+\texttt{/Applications} at roughly 172 thousand entries per second
+end-to-end (single-threaded, post-baseline) with system CPU
+dominating the budget. A user-space pass against per-entry
+allocations and aggregate construction landed four coupled
+changes:
+
+\begin{itemize}
+  \item \texttt{BulkReader} owns one 64~KiB
+    \texttt{getattrlistbulk} buffer and one output
+    \texttt{Vec<BulkEntry>} across the whole walk, replacing the
+    fresh \texttt{vec![0u8; 65\_536]} the per-directory
+    \texttt{read\_directory\_bulk} used to allocate.
+  \item \texttt{build\_aggregates} switched from
+    \texttt{BTreeMap<String, BTreeMap<u64, \_{}>>} keyed by owned
+    ancestor paths to \texttt{HashMap<\&str, HashMap<u64, \_{}>>}
+    keyed by slices borrowed from each entry's path
+    \texttt{String}. The old shape walked ancestors as a
+    \texttt{Vec<String>} per file --- on a five-million-row
+    \texttt{/} scan, twenty-five million owned-\texttt{String}
+    allocations. The rewrite walks parents inline with
+    \texttt{rfind('/')} and slices; the final sorted emission
+    converts to owned \texttt{String} exactly once.
+  \item \texttt{EntryKind} gained \texttt{Copy} (it is a
+    four-variant unit enum), eliminating pointless
+    \texttt{.clone()} calls in the per-entry walker hot path.
+  \item The unconditional \texttt{relative\_str.clone()} per
+    entry was collapsed: the mount-boundary branch is the only
+    one that ever needed a second copy; the common path moves
+    the \texttt{String} into the \texttt{NamespaceEntry}
+    directly. Combined with the \texttt{Copy} change above, the
+    steady-state inner loop pushes one entry with zero heap
+    activity beyond the \texttt{String}/\texttt{Vec} growth
+    itself.
+\end{itemize}
+
+\begin{center}
+\begin{tabular}{llrrl}
+\toprule
+target & metric & before & after & delta \\
+\midrule
+apfs-fastindex repo & median wall    & 58.6 ms       & 53.9 ms       & $-8\%$ \\
+apfs-fastindex repo & user CPU       & 21 ms         & 17 ms         & $-19\%$ \\
+apfs-fastindex repo & sys CPU        & 32 ms         & 32 ms         & flat \\
+apfs-fastindex repo & throughput     & 323\,721 ent/s & 351\,757 ent/s & $+9\%$ \\
+/Applications       & median wall    & 950 ms        & 816 ms        & $-14\%$ \\
+/Applications       & user CPU       & 340 ms        & 227 ms        & $-33\%$ \\
+/Applications       & sys CPU        & 535 ms        & 515 ms        & flat \\
+/Applications       & throughput     & 172\,283 ent/s & 200\,512 ent/s & $+16\%$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{figures/perf-fallback-pass.pdf}
+\caption{Micro-optimisation pass. The user-CPU column is the
+  load-bearing signal: $-19\%$ on a small tree and $-33\%$ on a
+  medium one. System CPU is flat (the syscall count did not
+  change); only the per-directory allocator pressure is gone. The
+  user-space savings scale with entry count because the aggregate
+  phase dominates on larger trees.}
+\end{figure}
+
+The whole-machine \texttt{/} scan was not re-measured here ---
+the host's filesystem cache state would dominate any single
+re-run --- so the medium-tree percentages are the load-bearing
+data points.
+
+\section{The Performance-Lever Map}
+
+The micro-optimisation pass left the scanner at roughly 200
+thousand entries per second on \texttt{/Applications} with 63 per
+cent of the budget in system CPU. The remaining cost was
+structurally kernel-side: user-space micro-opts had no further
+room. A source review (SR-021) cross-read four parallel research
+threads --- xnu's \texttt{getattrlistbulk} cost decomposition,
+the Spotlight alternative, an open-source-tool survey, and the
+\texttt{jwalk}/\texttt{rayon} prior art --- to produce a map of
+which levers were structurally viable. The map flagged two
+candidates worth measuring (parallelism and attribute-mask
+shrink), two ruled-out alternatives (Spotlight, bulk buffer size),
+and one worth A/B testing (\texttt{fts(3)}).
+
+Two probes ran:
+
+\paragraph{EX-24: attribute-mask shrink falsification.} A
+single-threaded microbench compared
+\texttt{getattrlistbulk} with three configurations on
+\texttt{/Applications}: drec-only (no inode-required attributes),
+the production mask
+(\texttt{ATTR\_FILE\_TOTALSIZE | ATTR\_FILE\_ALLOCSIZE}), and
+\texttt{fts(3)}. The drec-only and production rows landed within
+one per cent of each other on every dimension --- wall, user CPU,
+system CPU, throughput --- which falsifies SR-021's hypothesis
+that the inode-attribute fetch path was a measurable lever on
+modern Apple silicon. The \texttt{fts(3)} configuration was 1.7
+times slower than the production mask, contradicting Tempel's
+2019 result and cancelling the conditional follow-up. The pure
+kernel throughput in this microbench was 312 thousand entries per
+second, which gave the parallel probe a useful kernel ceiling
+estimate.
+
+\paragraph{EX-25: parallel walker.} A standalone parallel
+microbench swept thread counts $T \in \{1, 2, 4, 8, 14\}$ (14
+being the host's \texttt{hw.logicalcpu}). The verdict ladder
+required both $T = 4$ throughput $\geq 2 \times T = 1$ throughput
+\emph{and} $T = 4$ system CPU per thread $\leq 1.2 \times T = 1$
+system CPU to declare scaling validated. Both gates passed.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{figures/perf-parallel.pdf}
+\caption{The EX-25 parallel scaling curve. Throughput rises to a
+  peak at $T = 4$ (2.47$\times$ over $T = 1$) and then regresses;
+  system CPU per thread stays flat through $T = 4$ and then jumps
+  super-linearly as the APFS container contention regime fires.
+  At $T = 8$ total system CPU is $4\times$ the $T = 1$ value for
+  $1.94\times$ throughput; at $T = 14$ it is $9.3\times$ for
+  $1.38\times$. The contention shape exactly reproduces the
+  Szorc-2018 prediction on this kernel.}
+\end{figure}
+
+\begin{center}
+\begin{tabular}{rrrrrr}
+\toprule
+T  & wall (s) & sys (s) & sys/T (s) & entries/s & speedup \\
+\midrule
+1  & 0.521 & 0.508 & 0.508 & 314\,380 & $1.00\times$ \\
+2  & 0.316 & 0.616 & 0.308 & 517\,437 & $1.65\times$ \\
+\textbf{4}  & \textbf{0.211} & 0.819 & \textbf{0.205} & \textbf{776\,196} & \textbf{2.47$\times$} \\
+8  & 0.268 & 2.076 & 0.260 & 609\,748 & $1.94\times$ \\
+14 & 0.378 & 4.717 & 0.337 & 432\,866 & $1.38\times$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The four-thread cell is the production default. The two regression
+cells matter even though they are not the default: they explain
+\emph{why} the default is conservative, and they tell a future
+maintainer how to interpret a host whose curve looks different.
+
+\subsection{The Parallel Slice In Product}
+
+The Rust slice landed a \texttt{--threads N} flag with default
+\texttt{min(hw.physicalcpu, 4)}, computed via
+\texttt{sysctlbyname("hw.physicalcpu")} with
+\texttt{std::thread::available\_parallelism()} as the
+cross-platform fallback. The walker's contract is preserved by
+shape: per-worker \texttt{BulkReader}, shared
+\texttt{WorkQueue} (mutex plus condvar plus outstanding counter
+plus an atomic done flag), per-worker entry vectors concatenated
+on the main thread, the existing
+\texttt{sort\_unstable\_by} plus \texttt{build\_aggregates}
+normalising ordering. A synthetic-tree regression test
+(\texttt{parallel\_walker\_matches\_serial\_shape}) asserts
+byte-identical entries, aggregates, and walk-skip lists across
+the two schedulers.
+
+End-to-end measurement on \texttt{/Applications}, same host as
+the previous tables, median of five runs each side:
+
+\begin{center}
+\begin{tabular}{lrrl}
+\toprule
+metric             & $T = 1$ (post-pass) & $T = 4$ (parallel) & delta \\
+\midrule
+median wall        & 816 ms       & 523 ms       & $-36\%$ \\
+throughput         & 200\,512 ent/s & 312\,879 ent/s & $+56\%$ \\
+user CPU           & 227 ms       & 256 ms       & $+13\%$ (worker setup) \\
+sys CPU            & 515 ms       & 802 ms       & $+56\%$ (kernel scales) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Cumulative \texttt{/Applications} throughput across both perf
+passes: 172\,283 $\to$ 312\,879 entries per second, $+82\%$
+($1.82\times$). The user-CPU gap between the production scanner
+(256~ms at $T = 4$) and the parallel microbench (about 20~ms at
+$T = 4$) quantifies the user-space post-processing tax ---
+\texttt{NamespaceEntry} allocation, per-worker merge, final sort,
+aggregate construction. It is recorded as a candidate future
+optimisation; not load-bearing today.
 
 \section{What The Numbers Do Not Say}
 
-The table is a baseline; it is not a claim about anything beyond what
-it measures. Three categories of question are explicitly outside the
-table:
+The table is a baseline; it is not a claim about anything beyond
+what it measures. Three categories are explicitly outside it:
 
 \begin{enumerate}
   \item Raw-mode throughput on a real source. The project has not
-    measured raw mode on a representative live or detached volume
-    of meaningful size. Until it does, the comparison "raw vs
-    fallback" cannot be made.
+    measured raw mode on a representative live or detached
+    volume of meaningful size. Until it does, the comparison
+    ``raw vs fallback'' cannot be made.
   \item Incremental scans. The current model is full reparse on
     every run; the cache work of chapter~10 has not landed in
-    product. Repeat-scan numbers will only mean something after a
-    cache implementation passes its own oracle.
-  \item Allocated, exclusive, or shared bytes. The R2-A lane in
-    chapter~13 will change the cost model when it lands. The
-    current numbers are for namespace plus logical size; adding
-    extent-tree work will add measurement that the table does not
-    capture.
+    product. Repeat-scan numbers will only mean something after
+    a cache implementation passes its own oracle.
+  \item Encrypted or live-boot-disk surfaces. The parallel
+    walker has not been measured on encrypted APFS; per
+    SR-021's review of Petrenko (2020), the surviving
+    contention may behave differently there.
 \end{enumerate}
 
 \section{The Measurement Discipline}
 
-The discipline behind the table is what justifies leaning on it:
+Three habits keep the numbers honest.
 
-\paragraph{Measure before optimising.} The bulk-syscall improvement
-was implemented after the standard \texttt{lstat} fallback was
-measured, so the gain could be quantified. Optimisation without
-measurement produces code whose effects nobody can describe.
+\paragraph{Measure before optimising.} Each pass landed only
+after a microbench established what the lever was worth. The
+micro-optimisation pass was justified by an allocator-pressure
+profile; the parallel pass was justified by EX-25's scaling
+verdict; the attribute-mask refactor was killed by EX-24's
+falsification of the vnode-rage cost.
 
-\paragraph{Record the source class and the semantic mode with each
-number.} The table above carries both. A throughput number without
-those is not interpretable: 130 thousand entries per second is
-either impressive or unimpressive depending on whether it ran on a
-cold disk or a warm one, against raw or fallback, against
-\texttt{/Applications} or \texttt{/}.
+\paragraph{Record the source class and the semantic mode with
+each number.} The tables above carry both. A throughput number
+without those is not interpretable: 300 thousand entries per
+second is either impressive or unimpressive depending on whether
+it ran cold or warm, against raw or fallback, single-threaded
+or parallel, against \texttt{/Applications} or \texttt{/}.
 
-\paragraph{Hold the baseline.} Any future performance claim has to
-compare against the table or against a row added to the table with
-the same shape. A new optimisation that does not improve a baseline
-row is not yet evidence of an improvement; it is a hypothesis
-awaiting measurement.
-
-The baseline above is conservative. The R2 work in chapter~13 will
-have its own measurements, and the table will grow. The discipline
-that keeps the table honest is the same discipline that keeps the
-manual honest.
+\paragraph{Hold the baseline.} Any future performance claim has
+to compare against the tables above or against a row added with
+the same shape. A new optimisation that does not improve a
+baseline row is not yet evidence of an improvement; it is a
+hypothesis awaiting measurement. The discipline that keeps the
+tables honest is the same discipline that keeps the manual
+honest.
