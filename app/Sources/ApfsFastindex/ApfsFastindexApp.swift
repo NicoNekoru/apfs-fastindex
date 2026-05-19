@@ -16,6 +16,13 @@ struct ApfsFastindexApp: App {
 
     init() {
         NSApplication.shared.setActivationPolicy(.regular)
+        // Phase-1 native-bridge sanity check. Logs the linked
+        // crate version to NSLog; if `apfs_hello` doesn't return
+        // 42 the FFI is misconfigured (wrong linker order, wrong
+        // dylib search path, name-mangling drift). Returning
+        // here would stay quiet so the UI still launches —
+        // future phases will surface the failure in a dialog.
+        NativeBridge.validate()
     }
 
     var body: some Scene {

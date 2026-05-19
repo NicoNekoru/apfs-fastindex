@@ -19,6 +19,12 @@ mod namespace;
 mod object;
 mod omap;
 mod volume;
+/// C ABI surface for the native (Swift) renderer. See
+/// `docs/implementation/viz-perf-study.md` for the architecture
+/// sketch. The `#[no_mangle] extern "C"` symbols defined here are
+/// always exported by the cdylib regardless of whether the rlib
+/// path is used; cost is zero when no caller references them.
+pub mod ffi;
 
 use block_io::{checksum_matches, le_u32, le_u64, open_block_source, read_block};
 use object::{
