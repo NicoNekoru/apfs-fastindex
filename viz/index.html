@@ -491,6 +491,9 @@
   #tooltip {
     position: absolute;
     pointer-events: none;
+    /* Above `#hover-overlay` (z-index 5) so the outline never
+       paints over the tooltip's content. */
+    z-index: 10;
     background: rgba(20, 22, 28, 0.95);
     border: 1px solid var(--border);
     border-radius: 6px;
