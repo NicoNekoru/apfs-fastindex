@@ -97,8 +97,17 @@ struct VizWebView: NSViewRepresentable {
 
         /// Latest scan-result file the controller wrote. Read on the
         /// main thread when the WKURLSchemeHandler fires for
-        /// `apfs-scan://current`.
+        /// `apfs-scan://current`. Optional fallback if
+        /// `currentScanData` is nil; the in-memory path is the
+        /// default now.
         var currentScanFileURL: URL?
+        /// In-memory scan bytes. The post-scan flow sets this
+        /// directly on the coordinator from the controller's
+        /// stdout buffer — no temp file roundtrip — and the
+        /// URL-scheme handler serves it on the next XHR. Cleared
+        /// when the user resets / starts a new scan so the old
+        /// bytes are GC'd.
+        var currentScanData: Data?
 
         init(onMessage: @escaping (BridgeMessage) -> Void,
              onReady: @escaping (WKWebView) -> Void) {
@@ -134,6 +143,15 @@ struct VizWebView: NSViewRepresentable {
             // (We don't gate on host because some macOS WebKit builds
             // canonicalize the URL differently — accepting any path
             // makes the handler robust to that.)
+            //
+            // Prefer the in-memory data path. The temp-file fallback
+            // is kept in case a future caller (e.g. dropping a JSON
+            // file into the page) wants to point at an on-disk
+            // resource without copying it through `Data` first.
+            if let data = currentScanData {
+                respondWith(data: data, requestURL: requestURL, task: urlSchemeTask)
+                return
+            }
             guard let scanURL = currentScanFileURL else {
                 urlSchemeTask.didFailWithError(NSError(
                     domain: "ApfsScanScheme", code: 404,
@@ -144,56 +162,59 @@ struct VizWebView: NSViewRepresentable {
             DispatchQueue.global(qos: .userInitiated).async {
                 do {
                     let data = try Data(contentsOf: scanURL, options: .mappedIfSafe)
-                    // Sniff the first byte to pick the right
-                    // Content-Type. JSON output starts with `{`
-                    // (0x7b); MessagePack output starts with a
-                    // fixmap (0x80-0x8f) or map16/map32
-                    // (0xde/0xdf). Anything else is fail-closed
-                    // — we'd rather the page show a parse error
-                    // than mis-label the payload.
-                    let firstByte = data.first ?? 0
-                    let isJson = firstByte == 0x7b // '{'
-                    let mime = isJson
-                        ? "application/json"
-                        : "application/x-msgpack"
-                    let contentType = isJson
-                        ? "application/json; charset=utf-8"
-                        : "application/x-msgpack"
-                    // **CORS matters here.** The viz is loaded from a
-                    // `file://` URL (the SwiftPM resource bundle) and
-                    // is XHR'ing to `apfs-scan://`. Different schemes
-                    // count as different origins; without an
-                    // `Access-Control-Allow-Origin` header WebKit
-                    // silently rejects the response and the JS
-                    // `onload` never fires. Return a real
-                    // `HTTPURLResponse` with `*` so the bytes reach
-                    // `xhr.response`.
-                    let response = HTTPURLResponse(
-                        url: requestURL,
-                        statusCode: 200,
-                        httpVersion: "HTTP/1.1",
-                        headerFields: [
-                            "Content-Type": contentType,
-                            "Content-Length": "\(data.count)",
-                            "Access-Control-Allow-Origin": "*",
-                            "Cache-Control": "no-store"
-                        ]
-                    ) ?? URLResponse(
-                        url: requestURL,
-                        mimeType: mime,
-                        expectedContentLength: data.count,
-                        textEncodingName: isJson ? "utf-8" : nil
-                    )
-                    DispatchQueue.main.async {
-                        urlSchemeTask.didReceive(response)
-                        urlSchemeTask.didReceive(data)
-                        urlSchemeTask.didFinish()
-                    }
+                    self.respondWith(data: data, requestURL: requestURL, task: urlSchemeTask)
                 } catch {
                     DispatchQueue.main.async {
                         urlSchemeTask.didFailWithError(error)
                     }
                 }
+            }
+        }
+
+        /// Build the URL-scheme response (with sniff-derived
+        /// Content-Type + CORS header) and dispatch it on the main
+        /// thread. Shared between the in-memory and file-backed
+        /// branches of the URL handler.
+        func respondWith(data: Data, requestURL: URL, task: WKURLSchemeTask) {
+            // Sniff the first byte to pick the right Content-Type.
+            // JSON output starts with `{` (0x7b); MessagePack
+            // output starts with a fixmap (0x80-0x8f) or
+            // map16/map32 (0xde/0xdf). Anything else is
+            // fail-closed — we'd rather the page show a parse
+            // error than mis-label the payload.
+            let firstByte = data.first ?? 0
+            let isJson = firstByte == 0x7b // '{'
+            let mime = isJson ? "application/json" : "application/x-msgpack"
+            let contentType = isJson
+                ? "application/json; charset=utf-8"
+                : "application/x-msgpack"
+            // **CORS matters here.** The viz is loaded from a
+            // `file://` URL (the SwiftPM resource bundle) and is
+            // XHR'ing to `apfs-scan://`. Different schemes count
+            // as different origins; without an
+            // `Access-Control-Allow-Origin` header WebKit
+            // silently rejects the response and the JS `onload`
+            // never fires.
+            let response = HTTPURLResponse(
+                url: requestURL,
+                statusCode: 200,
+                httpVersion: "HTTP/1.1",
+                headerFields: [
+                    "Content-Type": contentType,
+                    "Content-Length": "\(data.count)",
+                    "Access-Control-Allow-Origin": "*",
+                    "Cache-Control": "no-store"
+                ]
+            ) ?? URLResponse(
+                url: requestURL,
+                mimeType: mime,
+                expectedContentLength: data.count,
+                textEncodingName: isJson ? "utf-8" : nil
+            )
+            DispatchQueue.main.async {
+                task.didReceive(response)
+                task.didReceive(data)
+                task.didFinish()
             }
         }
 

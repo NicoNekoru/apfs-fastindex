@@ -100,9 +100,17 @@ final class ScanController: ObservableObject {
     private var operationMessageGeneration: UInt64 = 0
 
     /// Latest scan-result URL written to disk so the viz can load it via
-    /// XHR. We retain it for the lifetime of the scan + page render; the
-    /// next scan or app exit cleans it up.
+    /// XHR. Retained for compatibility with the SwiftUI re-render
+    /// path; the post-scan flow no longer writes a temp file — it
+    /// hands the bytes directly to `vizCoordinator.currentScanData`
+    /// and stashes the same buffer in `pendingScanData` for the
+    /// replay-on-bind case.
     private(set) var pendingScanFileURL: URL? = nil
+    /// Latest scan-result bytes, kept in memory until the next scan
+    /// or reset replaces them. Used by `bindWebView` to replay the
+    /// scan into a WKWebView that hadn't finished its first
+    /// navigation when the controller fired `__apfs_ingest_file__`.
+    private(set) var pendingScanData: Data? = nil
     private(set) var pendingProgress: ProgressUpdate? = nil
 
     private weak var webView: WKWebView?
@@ -277,8 +285,16 @@ final class ScanController: ObservableObject {
         // scan-result file URL onto it directly without going through
         // the SwiftUI re-render path.
         self.vizCoordinator = webView.navigationDelegate as? VizWebView.Coordinator
-        if let url = pendingScanFileURL {
-            evaluateLoadScanFromFile(url)
+        // Replay any scan that landed before the webview was ready
+        // for `evaluateJavaScript`. Prefer the in-memory bytes (the
+        // default since Lever C); fall back to the file URL for
+        // any legacy code path.
+        if let data = pendingScanData {
+            vizCoordinator?.currentScanData = data
+            evaluateLoadScan()
+        } else if let url = pendingScanFileURL {
+            vizCoordinator?.currentScanFileURL = url
+            evaluateLoadScan()
         }
         if let progress = pendingProgress {
             evaluateSetProgress(progress)
@@ -465,64 +481,51 @@ final class ScanController: ObservableObject {
         isIngesting = true
 
         // Pull the small `correctness_claim` field off the raw bytes
-        // before we ship the rest of the blob to disk. Doing this on
-        // main is fine: it reads only the first ~4 KB.
+        // for the status line. Reads only the first ~4 KB.
         if let claim = Self.extractCorrectnessClaim(stdout) {
             correctnessClaim = claim
         }
 
-        // The scan JSON can be hundreds of MB. We write it to a temp
-        // file on a background queue and hand the path to the viz; the
-        // viz fetches via XHR (parsed in the WebKit content process)
-        // instead of eating a giant string interpolation + IPC on the
-        // main thread.
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("apfs-scan-\(UUID().uuidString).json")
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            do {
-                try stdout.write(to: url, options: .atomic)
-                DispatchQueue.main.async {
-                    self?.pendingScanFileURL = url
-                    self?.lastTempScanURL = url
-                    self?.evaluateLoadScanFromFile(url)
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    self?.lastError = "failed to write scan to disk: \(error.localizedDescription)"
-                }
-            }
-        }
+        // Hand the scan bytes straight to the WKURLSchemeHandler —
+        // no temp file roundtrip. The previous flow wrote ~150 MB
+        // to `/tmp/apfs-scan-…json` on a background queue, then
+        // the URL-scheme handler read it back via
+        // `Data(contentsOf:, .mappedIfSafe)`. Skipping the disk
+        // hop saves ~200 ms-1.5 s on `/`-class scans and one
+        // FileManager allocation per scan. The bytes are
+        // referenced from the coordinator; clearing it on the
+        // next reset / scan-start lets ARC drop them.
+        vizCoordinator?.currentScanData = stdout
+        pendingScanData = stdout
+        evaluateLoadScan()
     }
 
     private func cleanupLastTempScan() {
+        // No temp file to remove since Lever C — the scan bytes
+        // live in memory on the coordinator + the pendingScanData
+        // mirror. Clear both so ARC can drop the ~150 MB the
+        // previous scan held.
         if let url = lastTempScanURL {
             try? FileManager.default.removeItem(at: url)
             lastTempScanURL = nil
-            pendingScanFileURL = nil
         }
+        pendingScanFileURL = nil
+        pendingScanData = nil
+        vizCoordinator?.currentScanData = nil
     }
 
     // MARK: - WKWebView calls
 
-    private func evaluateLoadScanFromFile(_ url: URL) {
+    private func evaluateLoadScan() {
         guard let webView else { return }
-        // **Order matters.** The Coordinator (URL-scheme handler) must
-        // know about this scan file *before* the JS XHR fires; if we
-        // relied on SwiftUI's `updateNSView` to propagate the URL,
-        // `evaluateJavaScript` would beat the re-render and the XHR
-        // would 404. Set it directly on the coordinator first.
-        vizCoordinator?.currentScanFileURL = url
-
-        // The path argument is purely for diagnostics — the JS shim
-        // always fetches `apfs-scan://current` regardless of what we
-        // pass. Escape backslashes and single-quotes defensively.
-        let escaped = url.path
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "'", with: "\\'")
-        let js = "if (window.__apfs_ingest_file__) __apfs_ingest_file__('\(escaped)');"
+        // The coordinator's `currentScanData` (or `currentScanFileURL`
+        // fallback) must already be set by the caller. The JS shim
+        // fetches `apfs-scan://current` regardless of what path arg
+        // we pass — keep the call payload empty.
+        let js = "if (window.__apfs_ingest_file__) __apfs_ingest_file__('');"
         webView.evaluateJavaScript(js) { _, err in
             if let err = err {
-                NSLog("evaluateLoadScanFromFile JS error: \(err.localizedDescription)")
+                NSLog("evaluateLoadScan JS error: \(err.localizedDescription)")
             }
         }
     }
@@ -543,6 +546,7 @@ final class ScanController: ObservableObject {
     private func evaluateClearScan() {
         guard let webView else { return }
         vizCoordinator?.currentScanFileURL = nil
+        vizCoordinator?.currentScanData = nil
         let js = """
         (function() {
           try {

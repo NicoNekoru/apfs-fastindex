@@ -959,6 +959,7 @@ function ingest(doc, filename) {
   cellsMaxDepth = 0;
   currentDepthFilter = 0;
   hitGrid = null;
+  hitGridStale = true;
   lastHoverCell = null;
   updateHoverOverlay(null);
   const parserOutput = doc.parser_output || doc;
@@ -990,7 +991,10 @@ function ingest(doc, filename) {
     setActiveMetric("logical");
   }
   rootNode = buildHierarchy(entries, aggregates);
-  applyActiveMetric(rootNode);
+  // `finalize` (inside `buildHierarchy`) already populated
+  // `node.value` for the active metric — one tree walk, not two.
+  // `setActiveMetric` is still the entry point for metric toggles
+  // (which need a re-walk to flip every `value`).
   currentNode = rootNode;
   currentSkips = walkSkips;
   claim.textContent = doc.correctness_claim || filename;
@@ -1022,12 +1026,12 @@ function ingest(doc, filename) {
   // remembered in `expandedNodes` until the next scan replaces
   // `rootNode`, after which the WeakSet entries become unreachable.
   expandedNodes.add(rootNode);
-  // `navigate` returns a Promise that resolves after the canvas
-  // is actually painted (slow path: one rAF tick + render; fast
-  // path: synchronous resolve). Returning it from `ingest` lets
-  // the native shell shim keep the loading spinner up until the
-  // user can see the result.
-  return navigate(rootNode);
+  // `navigate` with `immediate: true` runs the cold first paint
+  // synchronously — no rAF yield between ingest completing and
+  // the canvas being drawn. Returned Promise resolves after the
+  // canvas paint so the native shell shim can hold the loading
+  // spinner up until the user can see the result.
+  return navigate(rootNode, { immediate: true });
 }
 // Expose `ingest` on the global scope so the native shell shim can call
 // it directly via `window.ingest(parsedDoc, filename)`. Top-level function
@@ -1183,74 +1187,120 @@ function decodeMsgpack(buffer) {
 window.decodeMsgpack = decodeMsgpack;
 
 function buildHierarchy(entries, aggregates) {
-  // Build a tree keyed by path components. Files contribute leaves with
-  // both their `logical_size` (always present) and `allocated_size`
-  // (Option<u64> from the Rust crate; null collapses the directory
-  // total per SR-019 / EX-22).
+  // Walk every entry once and build a tree keyed by path
+  // components. Hot-loop microopts vs. the original code:
+  //
+  // - No `split("/").filter(Boolean)` per entry. Splitting allocates
+  //   a fresh array of strings on every row (~5 entries per
+  //   row on average × 1 M rows = 5 M garbage strings on a
+  //   `/`-scan). We scan the path with charCode comparisons and
+  //   only `slice()` out the segment name when we need it (i.e.
+  //   when we have to create a new node).
+  // - Cumulative path is *not* recomputed per level. The parent
+  //   directory already knows its full path; for an existing
+  //   child we never need a path string at all, and for a new
+  //   child we build it from the parent's `path` + "/" + name.
+  // - Direct array-index assignment into `cursor.children` (still
+  //   a Map for fast `get`/`has`) — we don't pre-check `has`
+  //   then `get`; one `get` + null-check covers both.
   const root = newDirNode(".", ".");
-  for (const entry of entries) {
-    const parts = entry.path.split("/").filter(Boolean);
+  for (let ei = 0; ei < entries.length; ei++) {
+    const entry = entries[ei];
+    const path = entry.path;
+    const pathLen = path.length;
     let cursor = root;
-    for (let i = 0; i < parts.length - 1; i++) {
-      const name = parts[i];
-      if (!cursor.children.has(name)) {
-        const child = newDirNode(name, parts.slice(0, i + 1).join("/"));
-        child.parent = cursor;
-        cursor.children.set(name, child);
+    let segStart = 0;
+    let i = 0;
+    // Walk every '/' boundary in `path`. At each boundary we
+    // either advance into an existing dir or create a new one.
+    // The last segment (at i === pathLen) is the leaf or
+    // terminal-dir node.
+    for (i = 0; i <= pathLen; i++) {
+      const isSep = (i === pathLen) || (path.charCodeAt(i) === 47);
+      if (!isSep) continue;
+      if (i === segStart) {
+        // empty segment (leading '/' or '//'); skip
+        segStart = i + 1;
+        continue;
       }
-      cursor = cursor.children.get(name);
-    }
-    const leafName = parts[parts.length - 1];
-    if (entry.entry_kind === "dir") {
-      if (!cursor.children.has(leafName)) {
-        const child = newDirNode(leafName, entry.path);
-        child.parent = cursor;
-        cursor.children.set(leafName, child);
+      const isLast = (i === pathLen);
+      const name = path.slice(segStart, i);
+      if (isLast) {
+        // Terminal segment — leaf or directory node.
+        if (entry.entry_kind === "dir") {
+          if (!cursor.children.has(name)) {
+            const fullPath = cursor.path === "."
+              ? name : cursor.path + "/" + name;
+            const child = newDirNode(name, fullPath);
+            child.parent = cursor;
+            cursor.children.set(name, child);
+          }
+        } else {
+          // File / symlink / other. `allocated_size` may be
+          // missing (pre-R2-A scan: `undefined`) or null (SR-019
+          // fail-closed). Both render as "unclaimed" downstream.
+          const rawAllocated = Object.prototype.hasOwnProperty.call(entry, "allocated_size")
+            ? entry.allocated_size
+            : undefined;
+          const allocatedSize = rawAllocated === null || rawAllocated === undefined
+            ? null
+            : Number(rawAllocated) || 0;
+          const fullPath = cursor.path === "."
+            ? name : cursor.path + "/" + name;
+          cursor.children.set(name, {
+            name,
+            kind: entry.entry_kind,
+            path: fullPath,
+            parent: cursor,
+            logicalSize: entry.logical_size || 0,
+            allocatedSize,
+            // `value` is set in `finalize` so a metric switch
+            // doesn't have to rebuild the tree.
+            value: 0,
+            symlinkTarget: entry.symlink_target || null,
+            itemCount: 1,
+          });
+        }
+      } else {
+        // Intermediate dir along the path. Get-or-create.
+        let child = cursor.children.get(name);
+        if (!child) {
+          const fullPath = cursor.path === "."
+            ? name : cursor.path + "/" + name;
+          child = newDirNode(name, fullPath);
+          child.parent = cursor;
+          cursor.children.set(name, child);
+        }
+        cursor = child;
       }
-    } else {
-      // File / symlink / other: contribute size as a leaf. `allocated_size`
-      // is read as Option<u64>: `undefined` means the field is missing
-      // from this row entirely (pre-R2-A scan); `null` means the
-      // scanner deliberately fail-closed (sparse / decmpfs). The two
-      // are different shape-wise but render identically as "unclaimed."
-      const rawAllocated = Object.prototype.hasOwnProperty.call(entry, "allocated_size")
-        ? entry.allocated_size
-        : undefined;
-      const allocatedSize = rawAllocated === null || rawAllocated === undefined
-        ? null
-        : Number(rawAllocated) || 0;
-      cursor.children.set(leafName, {
-        name: leafName,
-        kind: entry.entry_kind,
-        path: entry.path,
-        parent: cursor,
-        logicalSize: entry.logical_size || 0,
-        allocatedSize,
-        // `value` is set by `applyActiveMetric` so a metric switch
-        // doesn't have to rebuild the tree.
-        value: 0,
-        symlinkTarget: entry.symlink_target || null,
-        itemCount: 1,
-      });
+      segStart = i + 1;
     }
   }
-  // Convert children Maps to arrays and compute both per-node totals.
-  // `valueAllocated === null` collapses up the tree: any parent whose
-  // subtree contains a null leaf has a null allocated total (SR-019
-  // None-collapse policy mirrored from the Rust + Python aggregate).
+
+  // Convert children Maps to arrays and compute per-node totals
+  // (logical, allocated, item count) **plus** the active-metric
+  // `value` field in the same walk. Folding `applyActiveMetric`
+  // into `finalize` halves the post-build tree-walk cost on big
+  // scans (was two O(n) passes over millions of nodes; now one).
+  // `valueAllocated === null` collapses up the tree (SR-019 / EX-22).
+  const metricAllocated = activeMetric === "allocated";
   function finalize(node) {
     if (!node.children) {
       node.valueLogical = node.logicalSize || 0;
       node.valueAllocated = node.allocatedSize;
       node.itemCount = 1;
+      node.value = metricAllocated
+        ? (node.valueAllocated === null ? 0 : node.valueAllocated)
+        : node.valueLogical;
       return;
     }
+    const childIter = node.children.values();
     const arr = [];
     let logical = 0;
     let allocated = 0;
     let allocatedCollapsed = false;
     let items = 0;
-    for (const child of node.children.values()) {
+    for (const child of childIter) {
       finalize(child);
       logical += child.valueLogical;
       if (child.valueAllocated === null) {
@@ -1265,6 +1315,9 @@ function buildHierarchy(entries, aggregates) {
     node.valueLogical = logical;
     node.valueAllocated = allocatedCollapsed ? null : allocated;
     node.itemCount = items;
+    node.value = metricAllocated
+      ? (allocatedCollapsed ? 0 : allocated)
+      : logical;
   }
   finalize(root);
   return root;
@@ -1286,7 +1339,7 @@ function newDirNode(name, path) {
   };
 }
 
-function navigate(node) {
+function navigate(node, opts) {
   currentNode = node;
   statusCurrent.textContent = node.path === "." ? "/" : "/" + node.path;
   renderBreadcrumb(node);
@@ -1302,7 +1355,7 @@ function navigate(node) {
   renderTreeList();
   renderExtList();
   scrollSelectedIntoView();
-  return render(node);
+  return render(node, opts);
 }
 
 function renderBreadcrumb(node) {
@@ -1686,7 +1739,14 @@ function renderContextKey(node, w, h) {
 let pendingRenderHandle = null;
 let pendingRenderResolve = null;
 
-function render(node) {
+/// `render(node, opts)` where `opts.immediate` skips the rAF yield
+/// (used by `ingest` so the cold first-paint doesn't pay an extra
+/// frame of latency); default is deferred so depth-picker /
+/// breadcrumb / tree-list updates paint visibly before the heavy
+/// canvas redraw kicks in. Returned Promise resolves after the
+/// canvas is actually drawn.
+function render(node, opts) {
+  const immediate = !!(opts && opts.immediate);
   if (pendingRenderHandle !== null) {
     cancelAnimationFrame(pendingRenderHandle);
     pendingRenderHandle = null;
@@ -1705,6 +1765,7 @@ function render(node) {
     cellsContextKey = null;
     cellsMaxDepth = 0;
     hitGrid = null;
+    hitGridStale = true;
     return Promise.resolve();
   }
 
@@ -1727,12 +1788,17 @@ function render(node) {
     return Promise.resolve();
   }
 
-  // Slow path: defer to next frame so any pending paint work
-  // (breadcrumb / tree-list highlight / depth-input value / etc.)
-  // lands before the layout + flatten + draw blocks the main
-  // thread. The returned Promise resolves after `renderAtDepth`
-  // completes, so callers that need to wait for the canvas to
-  // actually be drawn (ingest → spinner-clear) can `await` it.
+  // Slow path. Immediate mode (ingest): run synchronously so the
+  // ingest-success post fires the moment the canvas is painted —
+  // no extra rAF frame between scanner-exit and viz-visible.
+  if (immediate) {
+    renderAtDepth(node, targetDepth, width, height);
+    return Promise.resolve();
+  }
+
+  // Slow path, deferred. The frame yield lets any pending paint
+  // (breadcrumb, tree-list highlight, depth-input value) land
+  // before the layout + flatten + draw blocks the main thread.
   return new Promise((resolve) => {
     pendingRenderResolve = resolve;
     pendingRenderHandle = requestAnimationFrame(() => {
@@ -1829,8 +1895,12 @@ function renderAtDepth(node, depth, width, height) {
   currentDepthFilter = depth;
   const tFlatten1 = performance.now();
 
-  buildHitGrid();
-  const tGrid1 = performance.now();
+  // Hit grid is lazy — built on first hover after this render.
+  // For typical use the user reads the treemap before hovering,
+  // so the grid build (~30-200 ms on big trees) doesn't have to
+  // happen on the critical first-paint path.
+  hitGridStale = true;
+  hitGrid = null;
 
   drawCells();
   const tDraw1 = performance.now();
@@ -1840,8 +1910,7 @@ function renderAtDepth(node, depth, width, height) {
     path: node.path,
     cellCount: cells.length,
     flattenMs: tFlatten1 - tFlatten0,
-    gridMs: tGrid1 - tFlatten1,
-    drawMs: tDraw1 - tGrid1,
+    drawMs: tDraw1 - tFlatten1,
   });
 }
 
@@ -1909,22 +1978,29 @@ function buildCells(treeRoot) {
 /// the full `cells` array on a mousemove tick. Each cell is
 /// pushed into every grid bucket it overlaps; buckets are then
 /// sorted depth-descending so the first-containing match in the
-/// loop is always the deepest cell at that position.
+/// loop is always the deepest cell at that position. Lazily
+/// built — `renderAtDepth` marks the grid stale, the first
+/// `hitTest` call after a render pays the build cost (typically
+/// after the user's eye has had time to acquire the picture).
 const HIT_GRID_N = 64;
 let hitGrid = null;
+let hitGridStale = true;
 let hitGridCellW = 0;
 let hitGridCellH = 0;
 
-function buildHitGrid() {
+function actuallyBuildHitGrid() {
   hitGridCellW = canvasCssW / HIT_GRID_N;
   hitGridCellH = canvasCssH / HIT_GRID_N;
   const buckets = new Array(HIT_GRID_N * HIT_GRID_N);
   for (let i = 0; i < buckets.length; i++) buckets[i] = [];
-  for (const c of cells) {
-    const gx0 = Math.max(0, Math.floor(c.x0 / hitGridCellW));
-    const gy0 = Math.max(0, Math.floor(c.y0 / hitGridCellH));
-    const gx1 = Math.min(HIT_GRID_N - 1, Math.floor((c.x1 - 0.0001) / hitGridCellW));
-    const gy1 = Math.min(HIT_GRID_N - 1, Math.floor((c.y1 - 0.0001) / hitGridCellH));
+  for (let i = 0; i < cells.length; i++) {
+    const c = cells[i];
+    const gx0 = Math.max(0, (c.x0 / hitGridCellW) | 0);
+    const gy0 = Math.max(0, (c.y0 / hitGridCellH) | 0);
+    let gx1 = ((c.x1 - 0.0001) / hitGridCellW) | 0;
+    let gy1 = ((c.y1 - 0.0001) / hitGridCellH) | 0;
+    if (gx1 > HIT_GRID_N - 1) gx1 = HIT_GRID_N - 1;
+    if (gy1 > HIT_GRID_N - 1) gy1 = HIT_GRID_N - 1;
     for (let gy = gy0; gy <= gy1; gy++) {
       const row = gy * HIT_GRID_N;
       for (let gx = gx0; gx <= gx1; gx++) {
@@ -1932,17 +2008,21 @@ function buildHitGrid() {
       }
     }
   }
-  for (const bucket of buckets) {
-    bucket.sort((a, b) => b.depth - a.depth);
+  for (let i = 0; i < buckets.length; i++) {
+    buckets[i].sort((a, b) => b.depth - a.depth);
   }
   hitGrid = buckets;
+  hitGridStale = false;
 }
 
 function hitTest(x, y) {
-  if (!hitGrid) return null;
   if (x < 0 || y < 0 || x >= canvasCssW || y >= canvasCssH) return null;
-  const gx = Math.min(HIT_GRID_N - 1, Math.floor(x / hitGridCellW));
-  const gy = Math.min(HIT_GRID_N - 1, Math.floor(y / hitGridCellH));
+  if (hitGridStale || !hitGrid) {
+    if (cells.length === 0) return null;
+    actuallyBuildHitGrid();
+  }
+  const gx = Math.min(HIT_GRID_N - 1, (x / hitGridCellW) | 0);
+  const gy = Math.min(HIT_GRID_N - 1, (y / hitGridCellH) | 0);
   const bucket = hitGrid[gy * HIT_GRID_N + gx];
   for (let i = 0; i < bucket.length; i++) {
     const c = bucket[i];
@@ -1980,62 +2060,91 @@ function resizeCanvasBuffer() {
 }
 
 /// Paint every cell whose d3 depth is ≤ `currentDepthFilter`.
-/// Two-pass: fills first (all rectangles), then labels. The split
-/// keeps text crisp because all the fill operations alpha-blend
-/// over one another (semi-transparent dir-bg), and the labels we
-/// drop in the second pass land on the final colour mix. Cells
-/// are iterated in `cells[]` order, which is descendants-pre-order
-/// — parents before children — so deeper rectangles naturally
-/// overpaint their ancestors.
+///
+/// Three-phase pipeline tuned for canvas perf:
+///   1. Dir backgrounds. All directories share one fillStyle, so
+///      one state change covers them all. Painted in cells-array
+///      order, which is descendants pre-order — parents before
+///      children — so deeper directories naturally overpaint
+///      their ancestors.
+///   2. Leaf fills, **grouped by colour** while we iterate. The
+///      old code re-set `ctx.fillStyle` per leaf (~50 k state
+///      changes on `/Applications`); collapsing to one
+///      `fillStyle = …` per unique colour cuts canvas state
+///      thrashing by 1-2 orders of magnitude. Sibling cells in a
+///      squarified treemap never overlap, so reordering leaves
+///      by colour is safe.
+///   3. Labels. Two font families (dir 600/11px, leaf 400/10px);
+///      `ctx.font` is set once per family.
+///
+/// Per-cell strokes are gone. The previous 0.5 px stroke at
+/// `rgba(120, 140, 170, 0.4)` was below sub-pixel visibility at
+/// any realistic cell size and was ~3-5× slower than `fillRect`
+/// — on a `/`-scan it was the single biggest canvas cost.
 function drawCells() {
   const ctx = canvasCtx;
   // Clear via fillRect with the body bg (alpha:true canvas would
   // otherwise leave us compositing onto whatever was previously
   // there during a partial redraw).
-  ctx.globalCompositeOperation = "source-over";
   ctx.fillStyle = "#0f1115";
   ctx.fillRect(0, 0, canvasCssW, canvasCssH);
 
   const filter = currentDepthFilter;
-  let drawn = 0;
+  const n = cells.length;
 
-  // Pass 1: fills.
-  for (let i = 0; i < cells.length; i++) {
+  // Phase 1: dir backgrounds (one fillStyle for all of them).
+  ctx.fillStyle = "rgba(30, 35, 45, 0.55)";
+  let drawnDirs = 0;
+  for (let i = 0; i < n; i++) {
     const c = cells[i];
     if (c.depth > filter) continue;
-    if (c.isDir) {
-      ctx.fillStyle = "rgba(30, 35, 45, 0.55)";
-      ctx.fillRect(c.x0, c.y0, c.w, c.h);
-      ctx.strokeStyle = "rgba(120, 140, 170, 0.4)";
-      ctx.lineWidth = 0.5;
-      ctx.strokeRect(c.x0 + 0.25, c.y0 + 0.25, c.w - 0.5, c.h - 0.5);
-    } else {
-      ctx.fillStyle = c.fill;
-      ctx.fillRect(c.x0, c.y0, c.w, c.h);
-      // Leaf stroke (was SVG `stroke: rgba(0,0,0,0.35)` at 0.5px)
-      // is dropped here — at MIN_PIXEL_AREA=1 it would dominate
-      // every visible pixel anyway, and the contrast between
-      // adjacent leaves comes from `leafColor` per-extension.
-    }
-    drawn++;
+    if (!c.isDir) continue;
+    ctx.fillRect(c.x0, c.y0, c.w, c.h);
+    drawnDirs++;
   }
 
-  // Pass 2: labels. Setting the canvas `font` is one of the
+  // Phase 2: leaves, batched by fillStyle. Build per-colour
+  // buckets while iterating once, then walk them with a single
+  // `fillStyle` set per colour. A `Map<string, Cell[]>` keyed by
+  // the precomputed `c.fill` is the cheapest grouping that
+  // preserves insertion order (which doesn't matter visually
+  // because siblings in a partition don't overlap).
+  const leafGroups = new Map();
+  let drawnLeaves = 0;
+  for (let i = 0; i < n; i++) {
+    const c = cells[i];
+    if (c.depth > filter) continue;
+    if (c.isDir) continue;
+    let g = leafGroups.get(c.fill);
+    if (!g) { g = []; leafGroups.set(c.fill, g); }
+    g.push(c);
+  }
+  for (const [fill, group] of leafGroups) {
+    ctx.fillStyle = fill;
+    const len = group.length;
+    for (let j = 0; j < len; j++) {
+      const c = group[j];
+      ctx.fillRect(c.x0, c.y0, c.w, c.h);
+      drawnLeaves++;
+    }
+  }
+
+  // Phase 3: labels. Setting the canvas `font` is one of the
   // pricier 2d-context calls, so we set it once per family/size
-  // change and group cells that share styling.
+  // and walk cells that share styling.
+  ctx.textBaseline = "top";
   ctx.fillStyle = "#cfd6e4";
   ctx.font = "600 11px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
-  for (let i = 0; i < cells.length; i++) {
+  for (let i = 0; i < n; i++) {
     const c = cells[i];
     if (c.depth > filter) continue;
     if (!c.isDir) continue;
     if (c.w < MIN_DIR_LABEL_W || c.h < DIR_LABEL_HEIGHT + 2) continue;
     ctx.fillText(c.label, c.x0 + 4, c.y0 + 2);
   }
-
   ctx.fillStyle = "#0b0d12";
   ctx.font = "10px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
-  for (let i = 0; i < cells.length; i++) {
+  for (let i = 0; i < n; i++) {
     const c = cells[i];
     if (c.depth > filter) continue;
     if (c.isDir) continue;
@@ -2043,7 +2152,11 @@ function drawCells() {
     ctx.fillText(c.label, c.x0 + 4, c.y0 + 2);
   }
 
-  pushPerf("draw", -1, { drawn, total: cells.length, filter });
+  pushPerf("draw", -1, {
+    drawnDirs, drawnLeaves,
+    total: n, filter,
+    colorGroups: leafGroups.size,
+  });
 }
 
 /// Special-case render path: no children to lay out. Draw a
