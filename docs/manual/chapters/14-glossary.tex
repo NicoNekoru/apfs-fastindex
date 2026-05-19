@@ -44,11 +44,17 @@ identifier as well as the prose definition.
     represents one \texttt{(subtree-root, depth, metric,
     width$\times$height)} configuration.
   \item[\texttt{ApfsScan}.] The Rust opaque handle the C ABI
-    returns from \texttt{apfs\_scan\_directory}. Owns the
-    \texttt{FallbackScanOutput} (entries, walk-skips,
-    \texttt{correctness\_claim}, source descriptor) and the
-    indexed tree built from it. Released by
-    \texttt{apfs\_scan\_free}.
+    returns from \texttt{apfs\_scan\_directory} (or
+    \texttt{apfs\_scan\_directory\_with\_progress}, which adds a
+    sampled progress callback at the same 250~ms cadence as the
+    CLI's \texttt{-{}-progress} stream and carries a cumulative
+    \texttt{bytes} field so the SwiftUI shell's progress bar is
+    determinate). Owns the \texttt{FallbackScanOutput} (entries,
+    walk-skips, \texttt{correctness\_claim}, source descriptor),
+    the indexed tree built from it, and a path-string cache the
+    \texttt{apfs\_scan\_node\_path} accessor populates on first
+    query (chapter~12, structural-density pass round 4). Released
+    by \texttt{apfs\_scan\_free}.
   \item[\texttt{BulkReader}.] The Rust struct that owns a
     reusable 64~KiB \texttt{getattrlistbulk} buffer and one output
     \texttt{Vec<BulkEntry>} across the whole walk. The
@@ -139,13 +145,20 @@ identifier as well as the prose definition.
   \item[Indexed tree.] The in-memory \texttt{Tree} the FFI
     builds once per scan from the flat
     \texttt{Vec<NamespaceEntry>}. One \texttt{TreeNode} per
-    directory and per leaf, carrying parent and children indices,
-    own logical and allocated sizes, and post-order-computed
-    \texttt{value\_logical}, \texttt{value\_allocated}, and
-    \texttt{item\_count} aggregates. Random-access reads by
-    index are constant-time; consumers need the indexed shape
-    for the breadcrumb, the tree-list panel, the squarify
-    recursion, and the hit-test loop.
+    directory and per leaf, 112~B per slot post-structural-
+    density-pass, carrying name (as \texttt{Box<str>}), parent
+    index, a \texttt{(children\_start, children\_count)} pair
+    into a contiguous \texttt{children\_arena} shared across the
+    whole forest, own logical and allocated sizes, and post-
+    order-computed \texttt{value\_logical},
+    \texttt{value\_allocated}, and \texttt{item\_count}
+    aggregates. The path string is not stored on the node; it is
+    lazy-computed by walking the parent chain when
+    \texttt{apfs\_scan\_node\_path} first asks for it, then
+    cached on the \texttt{ApfsScan}. Random-access reads by index
+    are constant-time; consumers need the indexed shape for the
+    breadcrumb, the tree-list panel, the squarify recursion, and
+    the hit-test loop.
   \item[\texttt{INODE}.] Inode record. The FS-tree leaf that
     carries file/dir/symlink identity, mode, parent ID, link
     count, internal flags, and an xfield tail.
@@ -195,7 +208,11 @@ identifier as well as the prose definition.
   \item[\texttt{-{}-progress}.] CLI flag emitting stderr
     progress events at a 250~ms cadence. The parallel walker
     delivers events through a dedicated sampling thread so the
-    cadence matches the serial path.
+    cadence matches the serial path. The same stream is exposed
+    on the FFI via \texttt{apfs\_scan\_directory\_with\_progress},
+    whose \texttt{ApfsProgressEvent} adds a cumulative
+    logical-bytes field the SwiftUI shell uses as a determinate
+    progress denominator.
   \item[Raw mode.] The native APFS-parsing backend. Used when the
     source is in the raw-mode allowlist (detached \texttt{.dmg},
     caller-supplied raw device, explicitly stable APFS source).

@@ -55,12 +55,35 @@ pub(crate) struct BulkEntry {
     pub dev_id: u32,
 }
 
-/// One-shot bulk-attribute reader. Owns the 64 KiB kernel-fill buffer
-/// (`vec![0u8; 65_536]` reallocated per directory was ~13 GiB of churn
-/// on a 200k-directory `/` scan) and the per-call output `Vec`. Reuse
-/// across directories by calling `read_directory(dir, &mut out)`
-/// repeatedly with the same `out` Vec; `out` is cleared at the top of
-/// each call.
+/// Buffer size for the `getattrlistbulk` per-directory fill. The
+/// kernel returns as many directory entries as fit. Larger
+/// buffers reduce syscall count on big dirs (one syscall vs
+/// several) but waste memory on small dirs (most dirs have a
+/// handful of entries that fit in a few KB). Override at compile
+/// time via `APFS_BULK_BUF_KIB` (also read at runtime so the
+/// `perf_probe` example can ablate without recompiling the lib).
+const DEFAULT_BULK_BUF_BYTES: usize = 65_536;
+
+fn bulk_buf_bytes() -> usize {
+    // Read once and cache; an env var lookup per `BulkReader::new`
+    // would otherwise cost a few hundred ns per worker startup.
+    use std::sync::OnceLock;
+    static CACHED: OnceLock<usize> = OnceLock::new();
+    *CACHED.get_or_init(|| {
+        std::env::var("APFS_BULK_BUF_KIB")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .map(|kib| kib * 1024)
+            .unwrap_or(DEFAULT_BULK_BUF_BYTES)
+    })
+}
+
+/// One-shot bulk-attribute reader. Owns the kernel-fill buffer
+/// (`vec![0u8; N]` reallocated per directory was ~13 GiB of churn
+/// on a 200k-directory `/` scan) and the per-call output `Vec`.
+/// Reuse across directories by calling `read_directory(dir,
+/// &mut out)` repeatedly with the same `out` Vec; `out` is
+/// cleared at the top of each call.
 pub(crate) struct BulkReader {
     #[cfg(target_os = "macos")]
     buf: Vec<u8>,
@@ -70,7 +93,7 @@ impl BulkReader {
     pub(crate) fn new() -> Self {
         Self {
             #[cfg(target_os = "macos")]
-            buf: vec![0u8; 65_536],
+            buf: vec![0u8; bulk_buf_bytes()],
         }
     }
 

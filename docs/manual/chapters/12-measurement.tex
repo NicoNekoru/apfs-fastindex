@@ -262,7 +262,118 @@ passes: 172\,283 $\to$ 312\,879 entries per second, $+82\%$
 $T = 4$) quantifies the user-space post-processing tax ---
 \texttt{NamespaceEntry} allocation, per-worker merge, final sort,
 aggregate construction. It is recorded as a candidate future
-optimisation; not load-bearing today.
+optimisation; the structural-density pass below is the work that
+followed.
+
+\section{The Structural-Density Pass}
+
+The native-shell rewrite of chapter~13 introduced a new dominant
+workload: the FFI scan plus indexed-tree build that the SwiftUI
+app performs on every \texttt{Choose Folder}. The first
+measurements against this path on a representative real tree
+(\texttt{/Users/kai/Projects}, 320~000 entries, four threads,
+warm cache) showed where the post-rewrite cost actually sits:
+roughly 600 milliseconds of scan wall, 68 milliseconds of tree
+build, and 262 mebibytes of peak resident set. The walk-time
+work the previous pass had already taken; what was left was
+structural --- the shape of the in-memory representations and the
+work the build phase did once the bytes were back.
+
+A bench-driven pass (eight rounds, each backed by per-phase
+timings the \texttt{APFS\_PHASE\_TIMINGS=1} envvar surfaces and
+allocator-pressure counts the \texttt{examples/perf\_probe}
+binary records) attacked that surface change by change. Each
+round changes one thing; each round is recorded in the commit
+that landed it (\texttt{git log -{}-grep='perf('}); the cumulative
+shape across all eight is the table below.
+
+\begin{center}
+\begin{tabular}{lrrl}
+\toprule
+metric & before & after & delta \\
+\midrule
+scan wall ($T=4$, warm) & $\sim$600 ms     & $\sim$410 ms     & $-32\%$ ($1.5\times$) \\
+tree wall (warm)        &       68 ms      &       34 ms      & $-50\%$ ($2\times$)   \\
+peak RSS                &      262 MiB     &      190 MiB     & $-28\%$ \\
+\texttt{TreeNode}       &      168 B       &      112 B       & $-33\%$ \\
+\texttt{NamespaceEntry} &       88 B       &       72 B       & $-18\%$ \\
+scan-time allocations   &      2.23 M      &      2.09 M      & $-7\%$  \\
+scan-time bytes         &      580 MiB     &      330 MiB     & $-43\%$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Most of the eight rounds are mechanical: the structures the scan
+produces and the indexed tree reads once per scan settle into a
+narrower shape, with one fewer indirection per access wherever an
+interior allocation could be folded into a contiguous arena or a
+borrowed slice. Three are worth naming separately because each
+implicates a larger principle.
+
+\paragraph{\texttt{Box<str>} over \texttt{String} for write-once
+fields.} Both the flat \texttt{NamespaceEntry} and the indexed
+\texttt{TreeNode} carry strings that are built once during the
+walk or the index build and never mutated. The eight bytes of
+capacity each \texttt{String} carries against the day it might
+grow is wasted work on a write-once row. Switching \texttt{path},
+\texttt{symlink\_target}, and \texttt{name} fields to
+\texttt{Box<str>} shaves twenty-four bytes per \texttt{TreeNode}
+across three fields and sixteen bytes per \texttt{NamespaceEntry}
+across two, without changing the build side: the strings already
+came from \texttt{into\_boxed\_str()} on a fresh \texttt{String}
+whose capacity equalled its length, so the shrink is a
+metadata-only operation. (Rounds 1 and 2.)
+
+\paragraph{Non-cryptographic hashing for non-adversarial keys.}
+Two of the build's largest \texttt{HashMap}s --- the
+\texttt{Tree::build} per-directory child map keyed by short
+filenames, and the \texttt{build\_aggregates} outer map keyed by
+ancestor-path slices and inner map keyed by inode numbers ---
+were running on \texttt{std}'s default SipHash, which trades
+collision-resistance against speed. Filenames and inode numbers
+are not adversarial input; the collision-resistance trade is moot.
+Swapping the hasher to \texttt{rustc\_hash::FxBuildHasher}
+dropped \texttt{Tree::build} from sixty-three to forty-seven
+milliseconds (round 3, $-25\%$) and \texttt{build\_aggregates}
+from roughly 150 to 91 milliseconds (round 7, $-40\%$) on the
+same input. The change is bounded to build-time maps; the read
+side is untouched. (Rounds 3 and 7.)
+
+\paragraph{Don't compute what the caller does not read.} The
+\texttt{DirectoryAggregate} table the fallback produces is a flat
+\texttt{Vec} keyed by directory path with per-inode contribution
+totals. The CLI's JSON output consumes it; the SwiftUI FFI does
+not (the indexed tree's \texttt{value\_logical} and
+\texttt{value\_allocated} cover the same surface from a different
+angle). A boolean option on
+\texttt{FallbackOptions::skip\_aggregates} --- false by default,
+true on the FFI path --- skips the build entirely. The change
+saved roughly ninety milliseconds of scan wall, 250 mebibytes of
+scan-time allocator pressure, and roughly thirty-four mebibytes
+of peak resident set on the FFI path; the CLI's JSON shape is
+unchanged. (Round 8.)
+
+The other five rounds (drop \texttt{TreeNode.path} and lazy-
+compute it from the parent chain; flatten per-directory
+\texttt{Vec<u32>} children into a single contiguous arena; shard
+\texttt{VisitedDirs} into sixteen mutexes keyed by a hashed
+\texttt{(dev, ino)}; pre-size per-directory child vectors;
+\texttt{Box<str>} for the inflight child-map keys so the map and
+the \texttt{TreeNode.name} share one allocation) follow the same
+shape: identify the wasted indirection, the wasted capacity, or
+the wasted lock, and remove it.
+
+Two more candidates were probed and falsified inside the pass and
+warrant naming so they are not relitigated. The
+\texttt{getattrlistbulk} buffer size is not a perf lever on this
+workload (every value tested from 32~KiB through 2~MiB landed
+within noise; 4~MiB regressed), exposed at runtime via the
+\texttt{APFS\_BULK\_BUF\_KIB} envvar for any future re-ablation.
+And EX-24's kernel-side falsification of the attribute-mask
+shrink hypothesis means the next bounded lever on the FFI path is
+no longer in user-space allocation or hashing --- it is the walk
+itself, where the kernel is already doing the syscall work
+\texttt{getattrlistbulk} reduced.
 
 \section{What The Numbers Do Not Say}
 

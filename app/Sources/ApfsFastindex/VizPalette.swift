@@ -1,4 +1,34 @@
 import SwiftUI
+import AppKit
+
+/// Single-source-of-truth typography. We pick a single Apple-
+/// universally-installed font and use it everywhere so the
+/// SwiftUI chrome, the AppKit treemap labels, and the tooltip
+/// card all read as one piece. Trebuchet MS is on every macOS
+/// install since 10.4 and renders cleanly at small UI sizes.
+enum AppFont {
+    /// PostScript-family name. AppKit + SwiftUI both accept the
+    /// human-readable family form; if a future macOS ever drops
+    /// it, fall back to the system font in `ns(_:weight:)`.
+    static let family = "Monaco"
+    static let familyBold = "Monaco Bold"
+
+    /// SwiftUI `Font` factory. Weight is baked into the family
+    /// (no synthetic-bold fallback) — Trebuchet ships regular +
+    /// bold only, so anything ≥ .semibold maps to bold.
+    static func ui(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        let isBold = weight == .bold || weight == .semibold || weight == .heavy || weight == .black
+        return Font.custom(isBold ? familyBold : family, size: size)
+    }
+
+    /// AppKit `NSFont` factory used by the treemap label /
+    /// tooltip passes. Mirrors `ui(_:weight:)` so the two layers
+    /// look identical.
+    static func ns(_ size: CGFloat, bold: Bool = false) -> NSFont {
+        return NSFont(name: bold ? familyBold : family, size: size)
+            ?? NSFont.systemFont(ofSize: size, weight: bold ? .semibold : .regular)
+    }
+}
 
 /// Single-source-of-truth palette for the native renderer.
 /// Lives in its own file (instead of bundled with the toolbar

@@ -175,7 +175,8 @@ fn layout_subtree(
 
     // Stop recursing on leaves or at the depth cap (max_depth = 0
     // disables the cap — it's the user-facing "unlimited" mode).
-    if node.children.is_empty() {
+    let children = tree.children_of(node_idx);
+    if children.is_empty() {
         return;
     }
     if max_depth != 0 && depth >= max_depth {
@@ -188,8 +189,7 @@ fn layout_subtree(
     // Build the squarify input: (node_index, value), sorted
     // descending. Zero-value children are skipped — squarify's
     // ratio math degenerates on zero.
-    let mut items: Vec<(u32, f64)> = node
-        .children
+    let mut items: Vec<(u32, f64)> = children
         .iter()
         .filter_map(|&ci| {
             let v = metric_value(&tree.nodes[ci as usize], metric);
@@ -540,7 +540,7 @@ mod tests {
 
     fn entry(path: &str, kind: EntryKind, logical: u64) -> NamespaceEntry {
         NamespaceEntry {
-            path: path.to_string(),
+            path: path.into(),
             entry_kind: kind,
             file_id: 0,
             logical_size: logical,

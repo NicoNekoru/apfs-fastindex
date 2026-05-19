@@ -389,9 +389,10 @@ fn run_fallback(
         let mut stderr = std::io::stderr().lock();
         let _ = writeln!(
             stderr,
-            "{{\"scanned\":{},\"skipped\":{},\"elapsed_ms\":{},\"terminal\":{}}}",
+            "{{\"scanned\":{},\"skipped\":{},\"bytes\":{},\"elapsed_ms\":{},\"terminal\":{}}}",
             event.scanned,
             event.skipped,
+            event.bytes,
             event.elapsed.as_millis(),
             event.terminal
         );
@@ -404,6 +405,10 @@ fn run_fallback(
             None
         },
         threads,
+        // CLI emits aggregates in its JSON output; keep them
+        // computed. FFI / SwiftUI uses the tree's subtree
+        // totals directly and flips this to `true`.
+        skip_aggregates: false,
     };
     match fallback_scan_path_with_options(path, options) {
         Ok(output) => {
@@ -556,7 +561,7 @@ fn slim_stream_entry(entry: &apfs_fastindex::NamespaceEntry) -> serde_json::Valu
     let mut obj = serde_json::Map::new();
     obj.insert(
         "path".to_string(),
-        serde_json::Value::String(entry.path.clone()),
+        serde_json::Value::String(entry.path.to_string()),
     );
     obj.insert(
         "entry_kind".to_string(),
@@ -579,7 +584,7 @@ fn slim_stream_entry(entry: &apfs_fastindex::NamespaceEntry) -> serde_json::Valu
     if let Some(target) = &entry.symlink_target {
         obj.insert(
             "symlink_target".to_string(),
-            serde_json::Value::String(target.clone()),
+            serde_json::Value::String(target.to_string()),
         );
     }
     serde_json::Value::Object(obj)
@@ -632,7 +637,7 @@ fn slim_entries(entries: &[apfs_fastindex::NamespaceEntry]) -> Vec<serde_json::V
             let mut obj = serde_json::Map::new();
             obj.insert(
                 "path".to_string(),
-                serde_json::Value::String(entry.path.clone()),
+                serde_json::Value::String(entry.path.to_string()),
             );
             obj.insert(
                 "entry_kind".to_string(),
@@ -645,7 +650,7 @@ fn slim_entries(entries: &[apfs_fastindex::NamespaceEntry]) -> Vec<serde_json::V
             if let Some(target) = &entry.symlink_target {
                 obj.insert(
                     "symlink_target".to_string(),
-                    serde_json::Value::String(target.clone()),
+                    serde_json::Value::String(target.to_string()),
                 );
             }
             serde_json::Value::Object(obj)

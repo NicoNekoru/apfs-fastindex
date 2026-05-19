@@ -66,7 +66,7 @@ impl ExtSummary {
         while let Some(idx) = stack.pop() {
             let n = &tree.nodes[idx as usize];
             if matches!(n.kind, EntryKind::Dir) {
-                for &c in &n.children {
+                for &c in tree.children_of(idx) {
                     stack.push(c);
                 }
                 continue;
@@ -157,7 +157,7 @@ mod tests {
 
     fn entry(path: &str, kind: EntryKind, logical: u64) -> NamespaceEntry {
         NamespaceEntry {
-            path: path.to_string(),
+            path: path.into(),
             entry_kind: kind,
             file_id: 0,
             logical_size: logical,

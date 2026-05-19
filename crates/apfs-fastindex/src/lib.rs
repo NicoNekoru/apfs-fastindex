@@ -97,13 +97,19 @@ pub enum EntryKind {
     Other,
 }
 
+/// `path` and `symlink_target` are stored as `Box<str>` (16
+/// bytes vs 24 for `String`) since `NamespaceEntry` is built
+/// once during the scan and never mutated. On a 3M-entry scan
+/// that's a ~50 MiB drop on the entry vec alone, plus tighter
+/// cache lines per row. The JSONL output via `serde` is
+/// unchanged (`Box<str>` serializes as a plain string).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct NamespaceEntry {
-    pub path: String,
+    pub path: Box<str>,
     pub entry_kind: EntryKind,
     pub file_id: u64,
     pub logical_size: u64,
-    pub symlink_target: Option<String>,
+    pub symlink_target: Option<Box<str>>,
     /// Per-inode allocated bytes under SR-019 + EX-22 precedence:
     ///
     /// - regular + dstream + no `INO_EXT_TYPE_SPARSE_BYTES` xfield →

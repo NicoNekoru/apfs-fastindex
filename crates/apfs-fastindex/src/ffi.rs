@@ -23,6 +23,7 @@
 //!   parallel "has-this-field" bool from a FFI standpoint;
 //!   Swift maps the sentinel back to `nil` on the wrapper side.
 
+use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::ptr;
@@ -73,6 +74,16 @@ pub struct ApfsScan {
     /// Phase 3 builds this at scan time so the renderer can
     /// query it by path without re-scanning the entry list.
     pub(crate) tree: Tree,
+    /// Lazy cache for `apfs_scan_node_path`. `TreeNode` itself no
+    /// longer stores the materialised path (round 4 of the perf
+    /// pass — saved 16 B per node by computing on demand); the
+    /// FFI populates this cache on first query and then returns
+    /// the borrowed slice on every subsequent call for the same
+    /// `idx`. `Mutex` rather than `RefCell` so the FFI is safe
+    /// to call from multiple Swift threads (the Swift bridge
+    /// doesn't actually do that today, but the C signature
+    /// doesn't gate against it).
+    path_cache: std::sync::Mutex<HashMap<u32, Box<str>>>,
     // CStrings keep the NUL-terminated bytes alive for the
     // lifetime of the scan. Pointers handed to Swift point
     // into these — Swift must not free them; they go away
@@ -124,10 +135,14 @@ pub extern "C" fn apfs_scan_directory(
 /// nullable function pointer); cbindgen collapses
 /// `Option<extern "C" fn>` to a plain function-pointer typedef
 /// when written this way.
+// `bytes` is the cumulative `logical_size` sum for entries
+// scanned so far — drives a determinate progress bar (numerator)
+// against a volume-capacity denominator on the Swift side.
 pub type ApfsProgressCallback = Option<
     extern "C" fn(
         scanned: u64,
         skipped: u64,
+        bytes: u64,
         elapsed_ms: u64,
         terminal: bool,
         userdata: *mut std::os::raw::c_void,
@@ -175,6 +190,7 @@ pub extern "C" fn apfs_scan_directory_with_progress(
             cb(
                 event.scanned,
                 event.skipped,
+                event.bytes,
                 event.elapsed.as_millis() as u64,
                 event.terminal,
                 user.0,
@@ -190,6 +206,10 @@ pub extern "C" fn apfs_scan_directory_with_progress(
         cross_mounts,
         progress: progress_ref,
         threads: if threads == 0 { 4 } else { threads as usize },
+        // FFI consumers (the SwiftUI app) read subtree totals
+        // from the indexed `Tree`, not from the legacy
+        // `aggregates` Vec — skip the ~90 ms aggregate pass.
+        skip_aggregates: true,
     };
     let output = match fallback_scan_path_with_options(path_str, options) {
         Ok(o) => o,
@@ -227,6 +247,7 @@ fn finalize_scan_handle(output: crate::FallbackScanOutput) -> *mut ApfsScan {
     Box::into_raw(Box::new(ApfsScan {
         output,
         tree,
+        path_cache: std::sync::Mutex::new(HashMap::new()),
         correctness_claim: claim_c,
         source_kind: source_kind_c,
         source_requested_path: source_requested_path_c,
@@ -328,7 +349,7 @@ pub extern "C" fn apfs_scan_node_child_count(scan: *const ApfsScan, idx: u32) ->
     if (idx as usize) >= s.tree.nodes.len() {
         return 0;
     }
-    s.tree.nodes[idx as usize].children.len() as u32
+    s.tree.nodes[idx as usize].children_count
 }
 
 /// Per-node aggregate read by Swift's status bar. Pre-computed
@@ -385,6 +406,12 @@ pub struct ApfsPathRef {
 
 /// Borrow the node's absolute logical path. Returns a null
 /// pointer + zero length for invalid indices.
+///
+/// The path isn't stored on `TreeNode` (round 4 of the perf
+/// pass dropped it — saved 16 B per node). We compute on demand
+/// via parent-walk and cache the materialised `Box<str>` in
+/// `ApfsScan.path_cache`. Pointer lifetime matches the scan
+/// handle: the cache owns the bytes until `apfs_scan_free`.
 #[no_mangle]
 pub extern "C" fn apfs_scan_node_path(scan: *const ApfsScan, idx: u32) -> ApfsPathRef {
     let null_ref = ApfsPathRef { bytes: ptr::null(), len: 0 };
@@ -392,8 +419,19 @@ pub extern "C" fn apfs_scan_node_path(scan: *const ApfsScan, idx: u32) -> ApfsPa
     if (idx as usize) >= s.tree.nodes.len() {
         return null_ref;
     }
-    let p = &s.tree.nodes[idx as usize].path;
-    ApfsPathRef { bytes: p.as_ptr(), len: p.len() as u64 }
+    let mut cache = s.path_cache.lock().unwrap();
+    // The entry stays in the HashMap for the lifetime of
+    // `ApfsScan`, so the borrowed slice is valid until
+    // `apfs_scan_free`. The `&'static str` lifetime extension
+    // below is justified by that invariant; we only hand the
+    // pointer + length across the FFI boundary, never a
+    // reference Rust has to verify.
+    let entry = cache
+        .entry(idx)
+        .or_insert_with(|| s.tree.compute_path(idx));
+    let bytes = entry.as_ptr();
+    let len = entry.len() as u64;
+    ApfsPathRef { bytes, len }
 }
 
 /// Borrow the node's last path component (display name). Like
@@ -462,7 +500,7 @@ pub extern "C" fn apfs_scan_node_children(
     if (idx as usize) >= s.tree.nodes.len() {
         return null_slice;
     }
-    let children = &s.tree.nodes[idx as usize].children;
+    let children = s.tree.children_of(idx);
     if children.is_empty() {
         return null_slice;
     }

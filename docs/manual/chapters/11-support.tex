@@ -198,13 +198,17 @@ Live progress events flow through a dedicated sampling thread
 inside the parallel scheduler at a 250~ms cadence (matching the
 serial path), so the CLI's \texttt{-{}-progress} stream and any
 user-space consumer of it can tick smoothly even on a
-whole-machine scan that is otherwise silent for tens of
-seconds. The in-process FFI consumed by the native shell of
-chapter~13 does not pipe these events through today --- the
-scan runs as one synchronous call --- but the event-emitting
-machinery is preserved on the library side so a future
-asynchronous-FFI slice can light up the stopwatch without
-re-implementing it.
+whole-machine scan that is otherwise silent for tens of seconds.
+The in-process FFI consumed by the native shell of chapter~13
+exposes the same stream through
+\texttt{apfs\_scan\_directory\_with\_progress}, which takes a
+\texttt{(*const c\_void, ApfsProgressEvent*)} callback the
+sampling thread invokes from the library side; the SwiftUI shell
+hands in a closure that updates an \texttt{@Published}
+\texttt{ProgressSnapshot} on the main actor and the toolbar's
+determinate progress bar follows it. The serial-vs-parallel
+cadence and event payload are identical across the CLI and the
+FFI; one source of truth, two delivery surfaces.
 
 \begin{figure}[h]
 \centering
@@ -215,9 +219,12 @@ events. The stopwatch and entry counter come from the parallel
 walker's progress thread; 231 paths have been recorded as
 skipped at this point in the walk (sandboxed application data,
 sealed-system locations). The Cancel control terminates the
-worker pool cleanly. The same event stream still flows from
-the CLI binary; the in-process FFI used by the current native
-shell awaits a slice that exposes it.}
+worker pool cleanly. The same event stream now also flows into
+the native shell through
+\texttt{apfs\_scan\_directory\_with\_progress}, which carries
+the cumulative logical-bytes count as well so the SwiftUI
+shell's progress bar is determinate rather than spin-wait
+indeterminate.}
 \end{figure}
 
 \section{Firmlink Overlay Dedup}

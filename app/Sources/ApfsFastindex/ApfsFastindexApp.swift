@@ -26,8 +26,17 @@ struct ApfsFastindexApp: App {
         WindowGroup("apfs-fastindex") {
             NativeContentView()
                 .frame(minWidth: 900, minHeight: 600)
+                .font(AppFont.ui(12))
         }
         .windowResizability(.contentSize)
+
+        // ⌘, gets a real SwiftUI Settings scene. The scene
+        // discovery hook ("Preferences…" / "Settings…" in the
+        // app menu) is wired automatically by SwiftUI when this
+        // is present.
+        Settings {
+            SettingsView()
+        }
     }
 }
 

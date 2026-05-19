@@ -141,23 +141,60 @@ fn read_firmlink_overlays(scan_root: &Path) -> FirmlinkOverlaySet {
 /// is a single `HashSet::insert` under a lock, which at ~200k
 /// directories on a `/`-scan totals well under 50 ms of overhead — far
 /// less than even one missed `lstat`.
+/// Number of mutex-shards on `VisitedDirs`. With T=4 workers and
+/// 16 shards we expect 4× under-utilisation per shard — i.e. the
+/// odds of two workers colliding on the same shard at the same
+/// moment are ~1/16. EX-25 measured the mutex as the second-
+/// largest single-point contention behind the work queue; this
+/// drops the wait-on-mutex term by ~16× on /-class scans.
+///
+/// Power-of-two so the shard pick is a bit-mask instead of a mod.
+const VISITED_SHARDS: usize = 16;
+const VISITED_SHARD_MASK: usize = VISITED_SHARDS - 1;
+
 struct VisitedDirs {
-    inner: Mutex<HashSet<(u64, u64)>>,
+    /// Sharded `(dev, ino)` dedup set. Each visit hashes into one
+    /// of `VISITED_SHARDS` independent buckets; under the EX-25
+    /// walk profile (~200k dirs on /, evenly inode-distributed)
+    /// each shard holds ~12.5k entries — small enough that
+    /// rehashing on the FxHashSet is amortised cheaply. Shards
+    /// use fxhash (already a dep) since the keys are kernel
+    /// inode pairs, non-adversarial.
+    shards: [Mutex<rustc_hash::FxHashSet<(u64, u64)>>; VISITED_SHARDS],
 }
 
 impl VisitedDirs {
     fn new() -> Self {
+        // `Default::default()` for the array isn't const, and
+        // `[Mutex::new(...); 16]` requires the inner be `Copy`,
+        // which Mutex isn't. Use `from_fn` to construct each
+        // shard individually.
         Self {
-            inner: Mutex::new(HashSet::new()),
+            shards: std::array::from_fn(|_| Mutex::new(rustc_hash::FxHashSet::default())),
         }
     }
 
+    /// Pick a shard for `(dev, ino)`. Mixes the two u64s into a
+    /// single hash via fxhash-style multiply-shift; APFS inodes
+    /// for a single volume share a `dev`, so the `ino` term has
+    /// to carry the mixing. Bitwise-masked to `VISITED_SHARDS`.
+    #[inline]
+    fn shard_idx(dev: u64, ino: u64) -> usize {
+        // Cheap two-step mix — multiply ino by a 64-bit odd
+        // constant (the fxhash multiplier) and XOR dev's high
+        // bits. Good distribution for non-adversarial inode pairs.
+        let h = ino.wrapping_mul(0x517c_c1b7_2722_0a95).wrapping_add(dev);
+        (h as usize) & VISITED_SHARD_MASK
+    }
+
     fn mark_root(&self, dev: u64, ino: u64) {
-        self.inner.lock().unwrap().insert((dev, ino));
+        let s = Self::shard_idx(dev, ino);
+        self.shards[s].lock().unwrap().insert((dev, ino));
     }
 
     fn check_and_mark(&self, dev: u64, ino: u64) -> bool {
-        self.inner.lock().unwrap().insert((dev, ino))
+        let s = Self::shard_idx(dev, ino);
+        self.shards[s].lock().unwrap().insert((dev, ino))
     }
 }
 
@@ -191,12 +228,27 @@ pub struct FallbackOptions<'a> {
     /// cost 9.3× T=1 sys-CPU for 1.38× throughput — see EX-25 for
     /// the contention shape).
     pub threads: usize,
+    /// Skip the per-directory aggregate build. The aggregates
+    /// pass walks every file's ancestor chain, accumulating
+    /// `(file_id → (logical, allocated))` per directory; on a
+    /// /-class scan that's ~90 ms (~17% of total scan wall).
+    /// FFI callers (the SwiftUI app) reconstruct subtree totals
+    /// from the indexed tree's `value_logical`/`value_allocated`
+    /// fields, so the legacy aggregate Vec is dead weight for
+    /// them. CLI emits aggregates in the JSON output, so the
+    /// CLI keeps the default (`false`); FFI flips this to
+    /// `true`.
+    pub skip_aggregates: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct ProgressEvent {
     pub scanned: u64,
     pub skipped: u64,
+    /// Sum of `entry.logical_size` for every entry scanned so far —
+    /// lets a UI render a determinate-style progress bar with the
+    /// volume's used-bytes as the denominator.
+    pub bytes: u64,
     pub elapsed: Duration,
     /// `true` for the final event emitted at the end of the walk so a
     /// consumer can render the last line without waiting for the
@@ -305,6 +357,7 @@ pub fn fallback_scan_path_with_options<P: AsRef<Path>>(
             scan_start,
         )
     };
+    let walk_done = Instant::now();
 
     // Paths are unique inside a walk (no two entries can share a full
     // path) so stability is not required. `sort_unstable_by` is ~20%
@@ -315,7 +368,27 @@ pub fn fallback_scan_path_with_options<P: AsRef<Path>>(
     // quickly via the existing already-mostly-sorted optimisation.
     entries.sort_unstable_by(|a, b| a.path.cmp(&b.path));
     walk_skips.sort_unstable_by(|a, b| a.path.cmp(&b.path));
-    let aggregates = build_aggregates(&entries);
+    let sort_done = Instant::now();
+    let aggregates = if options.skip_aggregates {
+        Vec::new()
+    } else {
+        build_aggregates(&entries)
+    };
+    let aggregates_done = Instant::now();
+
+    // Optional per-phase timing dump for the perf_probe ablation
+    // runs. Off by default; gated on `APFS_PHASE_TIMINGS=1` so
+    // production callers don't pay even the env-var lookup cost.
+    if std::env::var("APFS_PHASE_TIMINGS").as_deref() == Ok("1") {
+        eprintln!(
+            "[phase] walk={:.1}ms sort={:.1}ms aggregates={:.1}ms entries={} skips={}",
+            walk_done.duration_since(scan_start).as_secs_f64() * 1000.0,
+            sort_done.duration_since(walk_done).as_secs_f64() * 1000.0,
+            aggregates_done.duration_since(sort_done).as_secs_f64() * 1000.0,
+            entries.len(),
+            walk_skips.len(),
+        );
+    }
 
     let descriptor = SourceDescriptor {
         requested_path: root_path.to_path_buf(),
@@ -414,14 +487,24 @@ fn scan_serial(
 
     let progress_interval = Duration::from_millis(250);
     let mut next_progress_tick = scan_start + progress_interval;
+    // Running sum of `entry.logical_size`. Updated at each
+    // progress tick from `entries[bytes_cursor..]` so the
+    // per-entry path stays untouched.
+    let mut bytes_total: u64 = 0;
+    let mut bytes_cursor: usize = 0;
 
     while let Some(frame) = stack.pop() {
         if let Some(cb) = progress.as_mut() {
             let now = Instant::now();
             if now >= next_progress_tick {
+                for e in &entries[bytes_cursor..] {
+                    bytes_total = bytes_total.saturating_add(e.logical_size);
+                }
+                bytes_cursor = entries.len();
                 cb(ProgressEvent {
                     scanned: entries.len() as u64,
                     skipped: walk_skips.len() as u64,
+                    bytes: bytes_total,
                     elapsed: now.duration_since(scan_start),
                     terminal: false,
                 });
@@ -449,9 +532,13 @@ fn scan_serial(
     }
 
     if let Some(cb) = progress.as_mut() {
+        for e in &entries[bytes_cursor..] {
+            bytes_total = bytes_total.saturating_add(e.logical_size);
+        }
         cb(ProgressEvent {
             scanned: entries.len() as u64,
             skipped: walk_skips.len() as u64,
+            bytes: bytes_total,
             elapsed: scan_start.elapsed(),
             terminal: true,
         });
@@ -499,6 +586,7 @@ fn scan_parallel(
     // doesn't change the totals).
     let scanned_count = Arc::new(AtomicU64::new(0));
     let skipped_count = Arc::new(AtomicU64::new(0));
+    let bytes_count = Arc::new(AtomicU64::new(0));
     let progress_done = Arc::new(AtomicBool::new(false));
 
     std::thread::scope(
@@ -511,6 +599,7 @@ fn scan_parallel(
             let progress_handle = progress.map(|callback| {
                 let scanned = Arc::clone(&scanned_count);
                 let skipped = Arc::clone(&skipped_count);
+                let bytes = Arc::clone(&bytes_count);
                 let done = Arc::clone(&progress_done);
                 scope.spawn(move || {
                     let interval = Duration::from_millis(250);
@@ -528,6 +617,7 @@ fn scan_parallel(
                             callback(ProgressEvent {
                                 scanned: scanned.load(Ordering::Relaxed),
                                 skipped: skipped.load(Ordering::Relaxed),
+                                bytes: bytes.load(Ordering::Relaxed),
                                 elapsed: now.duration_since(scan_start),
                                 terminal: false,
                             });
@@ -539,6 +629,7 @@ fn scan_parallel(
                     callback(ProgressEvent {
                         scanned: scanned.load(Ordering::Relaxed),
                         skipped: skipped.load(Ordering::Relaxed),
+                        bytes: bytes.load(Ordering::Relaxed),
                         elapsed: scan_start.elapsed(),
                         terminal: true,
                     });
@@ -555,6 +646,7 @@ fn scan_parallel(
                 let q = Arc::clone(&queue);
                 let scanned = Arc::clone(&scanned_count);
                 let skipped = Arc::clone(&skipped_count);
+                let bytes = Arc::clone(&bytes_count);
                 let visited = Arc::clone(visited_dirs);
                 let overlays = Arc::clone(firmlink_overlays);
                 handles.push(scope.spawn(move || {
@@ -583,6 +675,17 @@ fn scan_parallel(
                         let added_skips = (local_skips.len() - prev_skips) as u64;
                         if added_entries > 0 {
                             scanned.fetch_add(added_entries, Ordering::Relaxed);
+                            // Sum logical bytes for the newly-added
+                            // entries and roll into the shared atomic.
+                            // Bounded by per-frame entries (~1-100),
+                            // not by total scan size.
+                            let mut added_bytes: u64 = 0;
+                            for e in &local_entries[prev_entries..] {
+                                added_bytes = added_bytes.saturating_add(e.logical_size);
+                            }
+                            if added_bytes > 0 {
+                                bytes.fetch_add(added_bytes, Ordering::Relaxed);
+                            }
                         }
                         if added_skips > 0 {
                             skipped.fetch_add(added_skips, Ordering::Relaxed);
@@ -786,7 +889,14 @@ fn walk_one_directory(
         let (logical_size, symlink_target) = match kind {
             EntryKind::Symlink => match fs::read_link(&absolute) {
                 Ok(target_path) => {
-                    let target = target_path.to_string_lossy().into_owned();
+                    // `Box<str>` (16B) instead of `String` (24B) —
+                    // symlink_target is set once and never grown,
+                    // so the spare capacity slot of `String` is
+                    // dead weight in `NamespaceEntry`.
+                    let target: Box<str> = target_path
+                        .to_string_lossy()
+                        .as_ref()
+                        .into();
                     (target.len() as u64, Some(target))
                 }
                 Err(err) => {
@@ -851,7 +961,11 @@ fn walk_one_directory(
             });
         }
         out_entries.push(NamespaceEntry {
-            path: relative_str,
+            // `into_boxed_str()` is a free conversion (no realloc)
+            // when the String has zero spare capacity — and our
+            // `relative_str` came from `s.to_string()` on a fresh
+            // `&str`, so its capacity equals its length.
+            path: relative_str.into_boxed_str(),
             entry_kind: kind,
             file_id,
             logical_size,
@@ -1011,15 +1125,21 @@ fn entry_kind_from_meta(meta: &fs::Metadata) -> EntryKind {
 /// shape which allocated ~25M intermediate Strings on a 5M-entry
 /// `/`-scan.
 fn build_aggregates(entries: &[NamespaceEntry]) -> Vec<DirectoryAggregate> {
-    // Seed the directory set from the explicit dir entries in the
-    // input. We use the path strings *borrowed* from `entries` so no
-    // allocation happens here either. The implicit root `.` is
-    // inserted separately because no entry has path == ".".
-    let mut contributors: HashMap<&str, HashMap<u64, (u64, Option<u64>)>> = HashMap::new();
-    contributors.insert(".", HashMap::new());
+    use rustc_hash::FxBuildHasher;
+    // Both maps swap to fxhash. The outer is probed once per
+    // ancestor per file (~30M probes on a /-scale scan); the
+    // inner is probed once per (file, ancestor) pair. SipHash is
+    // ~3× slower than fxhash on short-string and u64 keys, and
+    // the keys here are filesystem paths + inode numbers, both
+    // non-adversarial.
+    type OuterMap<'a> = HashMap<&'a str, InnerMap, FxBuildHasher>;
+    type InnerMap = HashMap<u64, (u64, Option<u64>), FxBuildHasher>;
+
+    let mut contributors: OuterMap = OuterMap::default();
+    contributors.insert(".", InnerMap::default());
     for entry in entries {
         if matches!(entry.entry_kind, EntryKind::Dir) {
-            contributors.entry(entry.path.as_str()).or_default();
+            contributors.entry(&*entry.path).or_default();
         }
     }
     for entry in entries {
@@ -1031,7 +1151,7 @@ fn build_aggregates(entries: &[NamespaceEntry]) -> Vec<DirectoryAggregate> {
         // a slice; no heap activity. We don't pre-build a Vec of
         // ancestors because the inner work is just a HashMap probe
         // that takes the `&str` directly.
-        let mut current: &str = entry.path.as_str();
+        let mut current: &str = &*entry.path;
         loop {
             match current.rfind('/') {
                 Some(idx) => {
@@ -1109,14 +1229,14 @@ mod tests {
         let paths: Vec<&str> = parser_output
             .entries
             .iter()
-            .map(|e| e.path.as_str())
+            .map(|e| e.path.as_ref())
             .collect();
         assert_eq!(paths, vec!["dst", "dst/link.txt", "dst/moved.txt", "src"]);
 
         let link = parser_output
             .entries
             .iter()
-            .find(|e| e.path == "dst/link.txt")
+            .find(|e| &*e.path == "dst/link.txt")
             .unwrap();
         assert_eq!(link.entry_kind, EntryKind::Symlink);
         assert_eq!(link.symlink_target.as_deref(), Some("moved.txt"));
@@ -1128,7 +1248,7 @@ mod tests {
         let moved = parser_output
             .entries
             .iter()
-            .find(|e| e.path == "dst/moved.txt")
+            .find(|e| &*e.path == "dst/moved.txt")
             .expect("dst/moved.txt present");
         assert_eq!(moved.entry_kind, EntryKind::File);
         // Regular files: fallback emits Some(st_blocks * 512), which
@@ -1143,7 +1263,7 @@ mod tests {
         let dst_dir = parser_output
             .entries
             .iter()
-            .find(|e| e.path == "dst")
+            .find(|e| &*e.path == "dst")
             .expect("dst directory entry present");
         assert_eq!(dst_dir.entry_kind, EntryKind::Dir);
         assert_eq!(dst_dir.allocated_size, Some(0));
@@ -1151,7 +1271,7 @@ mod tests {
         let aggregates: Vec<&str> = parser_output
             .aggregates
             .iter()
-            .map(|a| a.path.as_str())
+            .map(|a| a.path.as_ref())
             .collect();
         assert_eq!(aggregates, vec![".", "dst", "src"]);
         // The fallback's per-file allocated_size is always Some(_)
@@ -1199,6 +1319,7 @@ mod tests {
                 cross_mounts: false,
                 progress: None,
                 threads: 4,
+                skip_aggregates: false,
             },
         )
         .expect("parallel walks");
@@ -1207,13 +1328,13 @@ mod tests {
             .parser_output
             .entries
             .iter()
-            .map(|e| e.path.as_str())
+            .map(|e| e.path.as_ref())
             .collect();
         let parallel_paths: Vec<&str> = parallel
             .parser_output
             .entries
             .iter()
-            .map(|e| e.path.as_str())
+            .map(|e| e.path.as_ref())
             .collect();
         assert_eq!(
             serial_paths, parallel_paths,
@@ -1307,7 +1428,7 @@ mod tests {
             .parser_output
             .entries
             .iter()
-            .map(|e| e.path.as_str())
+            .map(|e| e.path.as_ref())
             .collect();
         assert_eq!(paths, vec!["ordinary"]);
     }
@@ -1340,7 +1461,7 @@ mod tests {
             .parser_output
             .entries
             .iter()
-            .map(|e| e.path.as_str())
+            .map(|e| e.path.as_ref())
             .collect();
         // Both directories show up; "locked" is recorded but not descended.
         assert!(paths.contains(&"readable"));

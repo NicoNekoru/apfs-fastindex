@@ -249,13 +249,34 @@ typed messages between them. The scanner subprocess is gone;
 so is the post-scan ingestion gap that motivated the loading
 overlay an earlier slice of the lane introduced.
 
+\paragraph{Progress and polish.} The FFI exposes a
+\texttt{apfs\_scan\_directory\_with\_progress} entry point that
+takes a C-ABI callback the library's sampling thread invokes at
+the same 250~ms cadence the CLI's \texttt{-{}-progress} stream
+uses; the callback's \texttt{ApfsProgressEvent} carries
+\texttt{(phase, scanned, skipped, bytes, terminal)} so the
+SwiftUI shell can render a \emph{determinate} progress island
+(phase label, scanned/skipped counts, cumulative bytes against
+\texttt{volume.used}, m:ss stopwatch). The standard macOS
+settings scene (depth and worker-thread \texttt{@AppStorage}
+preferences), the right-click context menu, the breadcrumb-and-
+back-nav header, the depth-limited progressive treemap (which
+defers the deepest level of cells off the first render so the
+initial paint lands tens of milliseconds sooner on a whole-
+machine scan), and the unified Trebuchet MS / monospaced-digit
+typography all landed alongside the FFI progress surface; they
+are recorded here because each is a small visible move that the
+single chapter-13 narrative would otherwise lose.
+
 \paragraph{What the screenshots show.} The figures below were
 captured against an earlier build of the SwiftUI shell, before
-the tree-list and ext-list side panels and the breadcrumb bar
-landed. The toolbar and the treemap content read the same in
-both builds because they describe the same underlying data; the
-current build adds two resizable side panels above the treemap
-and the breadcrumb above them.
+the tree-list and ext-list side panels, the breadcrumb bar, the
+determinate progress island, and the settings scene landed. The
+toolbar and the treemap content read the same in both builds
+because they describe the same underlying data; the current
+build adds two resizable side panels above the treemap, the
+breadcrumb above them, and the centered determinate progress
+island during a scan.
 
 \begin{figure}[h]
 \centering
@@ -292,18 +313,25 @@ semantics, and recovery behaviour.}
 \end{figure}
 
 \paragraph{Future direction.} The user-space post-processing
-tax (roughly 110 thousand entries per second of budget between
-the microbench kernel ceiling and the production end-to-end
-throughput) is the next bounded scanner-side lever; candidates
-recorded for context are \texttt{NamespaceEntry} allocation,
-per-worker merge, \texttt{build\_aggregates}, and the final
-sort. On the rendering side: the in-process FFI does not
-surface live progress events today (the scan returns from one
-synchronous call, which is fast enough on
-\texttt{/Applications}-class trees but leaves the
-whole-machine scan without a stopwatch), and a
-threaded-scan-with-progress FFI is the natural next step. The
-CLI's \texttt{--progress} path still works for headless use.
+tax recorded as ``the next bounded scanner-side lever'' in
+chapter~12's parallel-walker section was the input to the
+structural-density pass the same chapter now records. The pass
+landed eight rounds against the FFI workload --- $-32\%$ scan
+wall, $-50\%$ tree wall, $-28\%$ peak RSS, with allocator
+pressure roughly halved (chapter~12, \S~Structural-Density
+Pass). What remains is no longer user-space allocation or
+hashing on this workload; the next bounded lever moves back to
+the kernel side, where EX-24 already falsified the most
+attractive structural candidate. A second oracle on a larger or
+different-shaped tree (a /-scale scan on a freshly cleared
+filesystem cache; a tree with deeper-than-usual nesting; a
+case-insensitive APFS volume) is the cheap follow-up before any
+further user-space rounds are planned. The progress-FFI gap
+this paragraph used to record is closed:
+\texttt{apfs\_scan\_directory\_with\_progress} now carries the
+same event stream the CLI's \texttt{-{}-progress} flag does, the
+SwiftUI shell renders it as a determinate progress island, and
+the CLI path is unchanged for headless use.
 
 \subsection{The Treemap Layout}
 

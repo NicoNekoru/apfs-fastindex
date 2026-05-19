@@ -35,7 +35,18 @@
 
 use std::collections::HashMap;
 
+use rustc_hash::FxBuildHasher;
+
 use crate::{EntryKind, NamespaceEntry};
+
+/// Per-dir child-lookup map used during `Tree::build`. The keys
+/// are filenames (short, non-adversarial UTF-8), so the
+/// DoS-resistant SipHash backing std's default `HashMap` is
+/// overkill — fxhash is ~3× faster on this workload at the cost
+/// of weaker collision resistance, which is irrelevant for
+/// filesystem names. Bounded to build time only; the map is
+/// discarded post-build.
+type FxChildMap = HashMap<Box<str>, u32, FxBuildHasher>;
 
 /// Sentinel value used by FFI callers for "no such node" /
 /// "metric isn't a sum I can give you". `u32::MAX` matches the
@@ -45,16 +56,38 @@ pub const NODE_INVALID: u32 = u32::MAX;
 /// One tree node. Holds the data the renderer needs in
 /// directly-indexable form. `parent == None` only at the root
 /// (index 0); every other node has a parent.
+/// `name` and `symlink_target` are stored as `Box<str>` (16
+/// bytes vs 24 for `String`) since `TreeNode` is built once at
+/// scan-finalize and never mutated afterwards.
+///
+/// `path` is deliberately *not* stored — the full absolute path
+/// is `parent.path + "/" + self.name`, and the only consumer
+/// that materialises it is the FFI (`apfs_scan_node_path`),
+/// which is called O(visible-cells) per UI session, not
+/// O(nodes). Computing on demand and caching the result on
+/// `ApfsScan` saves 16 bytes per node (~50 MiB on a /-scale
+/// scan) and eliminates the `join_path` allocation that
+/// happened once per node during build (~3M allocations).
+/// Callers that need the path call `Tree::compute_path`.
 #[derive(Debug)]
 pub struct TreeNode {
-    pub name: String,
-    pub path: String,
+    pub name: Box<str>,
     pub kind: EntryKind,
     pub parent: Option<u32>,
-    pub children: Vec<u32>,
+    /// Children of this node live contiguously in
+    /// `Tree::children_arena[children_start..children_start +
+    /// children_count]`. The flat-arena layout replaces a
+    /// `Vec<u32>` per node (24 B) with two `u32`s (8 B) — saves
+    /// 16 B / node, ~53 MiB on a /-scale tree — plus eliminates
+    /// the per-dir Vec heap allocations (one alloc per non-leaf
+    /// directory, ~200k on /). Use `Tree::children_of(idx)` to
+    /// get a borrowed slice; the FFI exposes the same pair as
+    /// `apfs_scan_node_children`.
+    pub children_start: u32,
+    pub children_count: u32,
     pub logical_size: u64,
     pub allocated_size: Option<u64>,
-    pub symlink_target: Option<String>,
+    pub symlink_target: Option<Box<str>>,
     /// Sum of `logical_size` for this subtree (own + descendants).
     pub value_logical: u64,
     /// Sum of `allocated_size` for this subtree, or `None` if the
@@ -68,6 +101,11 @@ pub struct TreeNode {
 #[derive(Debug)]
 pub struct Tree {
     pub nodes: Vec<TreeNode>,
+    /// Flat children arena — `Tree::children_of` slices into
+    /// this. Stored on `Tree` rather than per-node so the bytes
+    /// are contiguous and dense (one big allocation instead of
+    /// one Vec per dir).
+    pub children_arena: Vec<u32>,
 }
 
 impl Tree {
@@ -88,21 +126,36 @@ impl Tree {
         // count a bit larger but the over-allocation cost is
         // tiny vs. the savings from skipping Vec growth.
         let cap = entries.len() + 1;
+        // Build directly into the final `TreeNode` shape with
+        // `(children_start, children_count) = (0, 0)` as a
+        // placeholder; a parallel `child_lists: Vec<Vec<u32>>`
+        // captures the per-dir children-as-we-find-them. Once
+        // the entries loop is done we flatten `child_lists` into
+        // `Tree::children_arena` and patch the placeholders.
+        //
+        // This keeps the peak working set down: there's never a
+        // moment where two full-sized node Vecs coexist. The
+        // side-car `Vec<Vec<u32>>` is freed at flatten time.
         let mut nodes: Vec<TreeNode> = Vec::with_capacity(cap);
+        let mut child_lists: Vec<Vec<u32>> = Vec::with_capacity(cap);
         // Sparse: only directories need a child_map for the
         // duplicate-detection during build. Indexed by node_idx,
         // `None` for leaves. Saves ~5× the HashMap allocations
-        // on a file-heavy scan (most rows are files).
-        let mut child_maps: Vec<Option<HashMap<String, u32>>> = Vec::with_capacity(cap);
+        // on a file-heavy scan (most rows are files). The key is
+        // `Box<str>` rather than `String` so the map and the
+        // owning `TreeNode.name` can share the same allocation
+        // — we clone the box (one alloc) instead of allocating
+        // the name string twice.
+        let mut child_maps: Vec<Option<FxChildMap>> = Vec::with_capacity(cap);
 
         // Index 0 = root. Empty path; the renderer displays it
         // as "/" in the breadcrumb.
         nodes.push(TreeNode {
-            name: String::new(),
-            path: String::new(),
+            name: Box::<str>::from(""),
             kind: EntryKind::Dir,
             parent: None,
-            children: Vec::new(),
+            children_start: 0,
+            children_count: 0,
             logical_size: 0,
             allocated_size: None,
             symlink_target: None,
@@ -110,10 +163,16 @@ impl Tree {
             value_allocated: None,
             item_count: 0,
         });
-        child_maps.push(Some(HashMap::new()));
+        // Pre-size dir child Vecs to 8 — most dirs on a macOS
+        // volume have 1-32 children (median ~8). Skips the first
+        // three Vec doublings (1→2→4→8) for the median, trimming
+        // allocator pressure during the entries loop. Leaves get
+        // a `Vec::new()` so they don't allocate (see below).
+        child_lists.push(Vec::with_capacity(8));
+        child_maps.push(Some(FxChildMap::default()));
 
         for entry in entries {
-            let path = entry.path.as_str();
+            let path = &*entry.path;
             let bytes = path.as_bytes();
             let path_len = bytes.len();
 
@@ -151,15 +210,17 @@ impl Tree {
                                 .expect("dir cursor must have a child_map");
                             if !cm.contains_key(name) {
                                 let new_idx = nodes.len() as u32;
-                                let parent_path = nodes[cursor as usize].path.as_str();
-                                let full_path = join_path(parent_path, name);
-                                let name_owned = name.to_string();
+                                // Allocate `name` as Box<str>
+                                // once; we share the allocation
+                                // between the TreeNode and the
+                                // child_map via Box::clone.
+                                let name_box: Box<str> = Box::from(name);
                                 nodes.push(TreeNode {
-                                    name: name_owned.clone(),
-                                    path: full_path,
+                                    name: name_box.clone(),
                                     kind: EntryKind::Dir,
                                     parent: Some(cursor),
-                                    children: Vec::new(),
+                                    children_start: 0,
+                                    children_count: 0,
                                     logical_size: 0,
                                     allocated_size: None,
                                     symlink_target: None,
@@ -167,10 +228,13 @@ impl Tree {
                                     value_allocated: None,
                                     item_count: 0,
                                 });
-                                child_maps.push(Some(HashMap::new()));
-                                nodes[cursor as usize].children.push(new_idx);
+                                // Pre-sized dir child Vec (see
+                                // root-push comment for rationale).
+                                child_lists.push(Vec::with_capacity(8));
+                                child_maps.push(Some(FxChildMap::default()));
+                                child_lists[cursor as usize].push(new_idx);
                                 if let Some(cm_mut) = &mut child_maps[cursor as usize] {
-                                    cm_mut.insert(name_owned, new_idx);
+                                    cm_mut.insert(name_box, new_idx);
                                 }
                             }
                         }
@@ -180,23 +244,30 @@ impl Tree {
                             // and they have no children of
                             // their own).
                             let new_idx = nodes.len() as u32;
-                            let parent_path = nodes[cursor as usize].path.as_str();
-                            let full_path = join_path(parent_path, name);
                             nodes.push(TreeNode {
-                                name: name.to_string(),
-                                path: full_path,
+                                name: Box::from(name),
                                 kind: entry.entry_kind,
                                 parent: Some(cursor),
-                                children: Vec::new(),
+                                children_start: 0,
+                                children_count: 0,
                                 logical_size: entry.logical_size,
                                 allocated_size: entry.allocated_size,
-                                symlink_target: entry.symlink_target.clone(),
+                                symlink_target: entry
+                                    .symlink_target
+                                    .as_deref()
+                                    .map(Box::from),
                                 value_logical: entry.logical_size,
                                 value_allocated: entry.allocated_size,
                                 item_count: 1,
                             });
+                            // Leaves never push into their own
+                            // child slot — keep the Vec empty
+                            // so it doesn't allocate a heap
+                            // backing. Pre-sizing here would
+                            // waste 32 B × ~3M leaves on /.
+                            child_lists.push(Vec::new());
                             child_maps.push(None);
-                            nodes[cursor as usize].children.push(new_idx);
+                            child_lists[cursor as usize].push(new_idx);
                         }
                     }
                 } else {
@@ -207,15 +278,13 @@ impl Tree {
                         Some(idx) => idx,
                         None => {
                             let new_idx = nodes.len() as u32;
-                            let parent_path = nodes[cursor as usize].path.as_str();
-                            let full_path = join_path(parent_path, name);
-                            let name_owned = name.to_string();
+                            let name_box: Box<str> = Box::from(name);
                             nodes.push(TreeNode {
-                                name: name_owned.clone(),
-                                path: full_path,
+                                name: name_box.clone(),
                                 kind: EntryKind::Dir,
                                 parent: Some(cursor),
-                                children: Vec::new(),
+                                children_start: 0,
+                                children_count: 0,
                                 logical_size: 0,
                                 allocated_size: None,
                                 symlink_target: None,
@@ -223,10 +292,13 @@ impl Tree {
                                 value_allocated: None,
                                 item_count: 0,
                             });
-                            child_maps.push(Some(HashMap::new()));
-                            nodes[cursor as usize].children.push(new_idx);
+                            // Pre-sized dir child Vec (see
+                            // root-push comment for rationale).
+                            child_lists.push(Vec::with_capacity(8));
+                            child_maps.push(Some(FxChildMap::default()));
+                            child_lists[cursor as usize].push(new_idx);
                             if let Some(cm_mut) = &mut child_maps[cursor as usize] {
-                                cm_mut.insert(name_owned, new_idx);
+                                cm_mut.insert(name_box, new_idx);
                             }
                             new_idx
                         }
@@ -248,10 +320,41 @@ impl Tree {
         // tree via `node_index_for_path` instead — O(depth) +
         // O(siblings) per lookup, which is fine at the rates
         // those callers run.
-        let mut tree = Tree { nodes };
-        tree.finalize();
         drop(child_maps);
+
+        // Phase 2 — flatten the side-car `child_lists` into one
+        // contiguous `children_arena` and patch each TreeNode's
+        // placeholder `(children_start, children_count)` in
+        // place. Exactly `nodes.len() - 1` u32s total (every
+        // non-root node is a child of exactly one parent).
+        let total_children = nodes.len().saturating_sub(1);
+        let mut children_arena: Vec<u32> = Vec::with_capacity(total_children);
+        for (i, cl) in child_lists.iter().enumerate() {
+            nodes[i].children_start = children_arena.len() as u32;
+            nodes[i].children_count = cl.len() as u32;
+            children_arena.extend_from_slice(cl);
+        }
+        drop(child_lists);
+
+        let mut tree = Tree {
+            nodes,
+            children_arena,
+        };
+        tree.finalize();
         tree
+    }
+
+    /// Borrow this node's immediate-children indices. O(1) — a
+    /// pointer + length pair into `children_arena`. Returns an
+    /// empty slice for leaves and for out-of-range indices.
+    #[inline]
+    pub fn children_of(&self, idx: u32) -> &[u32] {
+        let Some(node) = self.nodes.get(idx as usize) else {
+            return &[];
+        };
+        let start = node.children_start as usize;
+        let end = start + node.children_count as usize;
+        &self.children_arena[start..end]
     }
 
     /// Compute `value_logical`, `value_allocated`, `item_count`
@@ -276,10 +379,11 @@ impl Tree {
             // Children pushed in order — `Vec::pop` pulls the
             // last one first, so reverse-iterate to keep the
             // left-to-right traversal stable.
-            let child_count = self.nodes[idx as usize].children.len();
-            for k in (0..child_count).rev() {
-                let c = self.nodes[idx as usize].children[k];
-                stack.push((c, false));
+            let node = &self.nodes[idx as usize];
+            let start = node.children_start as usize;
+            let end = start + node.children_count as usize;
+            for k in (start..end).rev() {
+                stack.push((self.children_arena[k], false));
             }
         }
 
@@ -296,11 +400,13 @@ impl Tree {
                 if is_dir { Some(0) } else { self.nodes[ni].allocated_size };
             let mut sum_items: u64 = if is_dir { 0 } else { 1 };
 
-            // Sum children. Re-borrow per-child to keep the
-            // borrow checker happy.
-            let child_count = self.nodes[ni].children.len();
-            for k in 0..child_count {
-                let child_idx = self.nodes[ni].children[k] as usize;
+            // Sum children. Walk the arena slice directly —
+            // contiguous u32s are cache-friendly, and we already
+            // know the range from the parent node's metadata.
+            let start = self.nodes[ni].children_start as usize;
+            let end = start + self.nodes[ni].children_count as usize;
+            for k in start..end {
+                let child_idx = self.children_arena[k] as usize;
                 let c = &self.nodes[child_idx];
                 sum_logical = sum_logical.saturating_add(c.value_logical);
                 sum_allocated = match (sum_allocated, c.value_allocated) {
@@ -353,10 +459,9 @@ impl Tree {
             // SAFETY: caller passes a UTF-8 path; ASCII '/'
             // boundaries leave each segment UTF-8-valid.
             let name = unsafe { std::str::from_utf8_unchecked(&bytes[seg_start..i]) };
-            let children = &self.nodes[cursor as usize].children;
             let mut found: Option<u32> = None;
-            for &child_idx in children {
-                if self.nodes[child_idx as usize].name == name {
+            for &child_idx in self.children_of(cursor) {
+                if &*self.nodes[child_idx as usize].name == name {
                     found = Some(child_idx);
                     break;
                 }
@@ -372,20 +477,58 @@ impl Tree {
     }
 }
 
-/// Build `parent/name` (or just `name` if parent is empty) into
-/// a `String` with the exact capacity reserved. Avoids the
-/// `format!()` macro's intermediate `Arguments` formatting
-/// machinery — that path was a measurable share of `Tree::build`
-/// time on /-class scans.
-fn join_path(parent: &str, name: &str) -> String {
-    if parent.is_empty() {
-        return name.to_string();
+impl Tree {
+    /// Materialise the absolute path for `idx` by walking the
+    /// parent chain. Returns `""` for the root (idx 0) and for
+    /// out-of-range indices.
+    ///
+    /// O(depth) in tree depth + path bytes. Typical paths on a
+    /// macOS volume are < 50 bytes and depth < 12, so each call
+    /// is a few hundred cycles. The FFI wraps this with a cache
+    /// keyed on `idx` so repeated queries (hover, click,
+    /// breadcrumb) don't repeat the walk.
+    pub fn compute_path(&self, idx: u32) -> Box<str> {
+        if (idx as usize) >= self.nodes.len() || idx == 0 {
+            return Box::from("");
+        }
+        // First pass: walk to root, summing byte length.
+        let mut total: usize = 0;
+        let mut cur = idx;
+        loop {
+            let node = &self.nodes[cur as usize];
+            total += node.name.len();
+            match node.parent {
+                // Add a separator for every step *between* names.
+                // Skip the leading slash for direct root children
+                // (parent == 0): the root's path is "", not "/".
+                Some(p) if p != 0 => total += 1,
+                _ => break,
+            }
+            cur = node.parent.unwrap();
+        }
+        // Second pass: build front-to-back into a sized String.
+        let mut s = String::with_capacity(total);
+        write_path_into(&self.nodes, idx, &mut s);
+        s.into_boxed_str()
     }
-    let mut s = String::with_capacity(parent.len() + 1 + name.len());
-    s.push_str(parent);
-    s.push('/');
-    s.push_str(name);
-    s
+}
+
+/// Recursively appends `nodes[idx]`'s ancestor path (excluding
+/// the synthetic root at index 0) into `out`. Recursion depth
+/// is bounded by the filesystem path depth (< 32 on real
+/// volumes), so stack use is fine.
+fn write_path_into(nodes: &[TreeNode], idx: u32, out: &mut String) {
+    if idx == 0 {
+        return;
+    }
+    let node = &nodes[idx as usize];
+    if let Some(p) = node.parent {
+        if p != 0 {
+            write_path_into(nodes, p, out);
+            out.push('/');
+        }
+    }
+    out.push_str(&node.name);
 }
 
 #[cfg(test)]
@@ -395,7 +538,7 @@ mod tests {
 
     fn entry(path: &str, kind: EntryKind, logical: u64, allocated: Option<u64>) -> NamespaceEntry {
         NamespaceEntry {
-            path: path.to_string(),
+            path: path.into(),
             entry_kind: kind,
             file_id: 0,
             logical_size: logical,

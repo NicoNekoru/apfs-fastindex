@@ -183,4 +183,23 @@ container-lock contention regime is real and starts at $T = 2 \times
 \texttt{min(hw.physicalcpu, 4)}.
 & validated-parallel-scaling \\
 
+EX-26 &
+Against the post-FFI workload (\texttt{/Users/kai/Projects},
+320k entries, T=4, warm cache), how much of the post-rewrite
+budget is structural rather than kernel-bound, and which
+structural rounds clear which fractions of it? Eight rounds
+landed against \texttt{TreeNode}, \texttt{NamespaceEntry},
+\texttt{Tree::build}, \texttt{build\_aggregates},
+\texttt{VisitedDirs}, and the CLI-only aggregates Vec; net
+$-32\%$ scan wall, $-50\%$ tree wall, $-28\%$ peak RSS,
+allocator pressure roughly halved (chapter~12 §
+Structural-Density Pass). Two candidates falsified in pass:
+\texttt{getattrlistbulk} buffer sizes 32~KiB through 2~MiB
+indistinguishable (4~MiB regresses), and the EX-24 vnode-rage
+hypothesis re-confirmed at the user-space layer. The bench
+artefacts (\texttt{examples/perf\_probe},
+\texttt{APFS\_PHASE\_TIMINGS}, \texttt{APFS\_BULK\_BUF\_KIB})
+remain in-tree for re-ablation.
+& validated-structural-density-pass \\
+
 \end{longtable}
