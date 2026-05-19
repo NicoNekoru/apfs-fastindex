@@ -25,11 +25,24 @@ struct ApfsFastindexApp: App {
         NativeBridge.validate()
     }
 
+    /// `APFS_NATIVE=1` swaps in the native (CoreGraphics +
+    /// Rust) renderer for this launch — opt-in while phases 5 +
+    /// 6 are still in flight. Default keeps the WKWebView path
+    /// so the user's everyday flow is unaffected.
+    private static var useNative: Bool {
+        ProcessInfo.processInfo.environment["APFS_NATIVE"] == "1"
+    }
+
     var body: some Scene {
         WindowGroup("apfs-fastindex") {
-            ContentView()
-                .environmentObject(controller)
-                .frame(minWidth: 900, minHeight: 600)
+            if Self.useNative {
+                NativeContentView()
+                    .frame(minWidth: 900, minHeight: 600)
+            } else {
+                ContentView()
+                    .environmentObject(controller)
+                    .frame(minWidth: 900, minHeight: 600)
+            }
         }
         .windowResizability(.contentSize)
     }
