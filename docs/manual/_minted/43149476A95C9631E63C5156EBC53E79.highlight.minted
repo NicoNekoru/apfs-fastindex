@@ -1,0 +1,13 @@
+\begin{MintedVerbatim}[commandchars=\\\{\}]
+\PYG{k}{def}\PYG{+w}{ }\PYG{n+nf}{logical\PYGZus{}size}\PYG{p}{(}\PYG{n}{inode}\PYG{p}{,} \PYG{n}{xattrs}\PYG{p}{):}
+    \PYG{k}{if} \PYG{n}{inode}\PYG{o}{.}\PYG{n}{internal\PYGZus{}flags} \PYG{o}{\PYGZam{}} \PYG{n}{INODE\PYGZus{}HAS\PYGZus{}UNCOMPRESSED\PYGZus{}SIZE}\PYG{p}{:}
+        \PYG{k}{return} \PYG{n}{inode}\PYG{o}{.}\PYG{n}{uncompressed\PYGZus{}size}
+    \PYG{k}{if} \PYG{n}{inode}\PYG{o}{.}\PYG{n}{dstream} \PYG{o+ow}{is} \PYG{o+ow}{not} \PYG{k+kc}{None}\PYG{p}{:}
+        \PYG{k}{return} \PYG{n}{inode}\PYG{o}{.}\PYG{n}{dstream}\PYG{o}{.}\PYG{n}{size}
+    \PYG{n}{decmpfs} \PYG{o}{=} \PYG{n}{xattrs}\PYG{o}{.}\PYG{n}{get}\PYG{p}{(}\PYG{l+s+s2}{\PYGZdq{}com.apple.decmpfs\PYGZdq{}}\PYG{p}{)}
+    \PYG{k}{if} \PYG{n}{decmpfs} \PYG{o+ow}{is} \PYG{o+ow}{not} \PYG{k+kc}{None}\PYG{p}{:}
+        \PYG{k}{return} \PYG{n}{decmpfs}\PYG{o}{.}\PYG{n}{header}\PYG{o}{.}\PYG{n}{uncompressed\PYGZus{}size}
+    \PYG{k}{if} \PYG{n}{S\PYGZus{}ISLNK}\PYG{p}{(}\PYG{n}{inode}\PYG{o}{.}\PYG{n}{mode}\PYG{p}{):}
+        \PYG{k}{return} \PYG{n+nb}{len}\PYG{p}{(}\PYG{n}{xattrs}\PYG{p}{[}\PYG{l+s+s2}{\PYGZdq{}com.apple.fs.symlink\PYGZdq{}}\PYG{p}{]}\PYG{o}{.}\PYG{n}{payload}\PYG{p}{)}
+    \PYG{k}{return} \PYG{l+m+mi}{0}
+\end{MintedVerbatim}

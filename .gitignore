@@ -76,3 +76,10 @@ build/
 # App artifacts
 scan.json
 .build
+
+# Native bridge: artifacts copied by build-native.sh from
+# `target/release/` into the SwiftPM systemLibrary shim. Always
+# generated; never edit by hand.
+app/Sources/CApfsFastindex/libapfs_fastindex.a
+app/Sources/CApfsFastindex/libapfs_fastindex.dylib
+app/Sources/CApfsFastindex/apfs_fastindex.h

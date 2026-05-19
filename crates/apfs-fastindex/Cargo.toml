@@ -7,6 +7,12 @@ description = "Fail-closed APFS checkpoint scanner for detached sources"
 [lib]
 name = "apfs_fastindex"
 path = "src/lib.rs"
+# `staticlib` is the artifact Swift links into the native
+# renderer (no rpath / dylib-search-path headaches); `cdylib`
+# stays in case a future caller wants dynamic loading; `rlib`
+# keeps the in-tree binary + tests linking against the same
+# crate.
+crate-type = ["staticlib", "cdylib", "rlib"]
 
 [[bin]]
 name = "apfs-fastindex-scan"
@@ -16,6 +22,18 @@ path = "src/main.rs"
 plist = "1.8.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
+# MessagePack output for the viz integration. Keyed maps (named
+# fields) produce a payload shape that's a 1:1 swap for the JSON
+# encoding, just ~3× smaller on the wire and ~3-6× faster to
+# decode in WebKit. See docs/implementation/viz-perf-study.md
+# Lever B.
+rmp-serde = "1.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = "0.2"
+
+[build-dependencies]
+# Generates the C header Swift imports from the `#[no_mangle]
+# extern "C"` surface in `src/ffi.rs`. Runs at every `cargo
+# build`; output lands in `target/include/apfs_fastindex.h`.
+cbindgen = "0.27"

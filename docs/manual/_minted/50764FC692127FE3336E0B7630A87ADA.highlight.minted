@@ -1,0 +1,8 @@
+\begin{MintedVerbatim}[commandchars=\\\{\}]
+\PYG{k}{if}\PYG{+w}{ }\PYG{n}{blob\PYGZus{}header}\PYG{p}{.}\PYG{n}{xf\PYGZus{}used\PYGZus{}data}\PYG{+w}{ }\PYG{k}{as}\PYG{+w}{ }\PYG{k+kt}{usize}\PYG{+w}{ }\PYG{o}{!=}\PYG{+w}{ }\PYG{n}{padded\PYGZus{}total}\PYG{+w}{ }\PYG{p}{\PYGZob{}}
+\PYG{+w}{    }\PYG{k}{return}\PYG{+w}{ }\PYG{n+nb}{Err}\PYG{p}{(}\PYG{n}{ScanError}\PYG{p}{::}\PYG{n}{InvalidObject}\PYG{p}{(}\PYG{n+nf+fm}{format!}\PYG{p}{(}
+\PYG{+w}{        }\PYG{l+s}{\PYGZdq{}xf\PYGZus{}used\PYGZus{}data \PYGZob{}\PYGZcb{} disagrees with padded value\PYGZhy{}area sum \PYGZob{}\PYGZcb{}\PYGZdq{}}\PYG{p}{,}
+\PYG{+w}{        }\PYG{n}{blob\PYGZus{}header}\PYG{p}{.}\PYG{n}{xf\PYGZus{}used\PYGZus{}data}\PYG{p}{,}\PYG{+w}{ }\PYG{n}{padded\PYGZus{}total}\PYG{p}{,}
+\PYG{+w}{    }\PYG{p}{)));}
+\PYG{p}{\PYGZcb{}}
+\end{MintedVerbatim}

@@ -1,0 +1,13 @@
+// Module map exposing the cbindgen-generated apfs-fastindex C
+// header to the SwiftPM `ApfsFastindex` target.
+//
+// `link "apfs_fastindex"` tells the Swift compiler to pass
+// `-lapfs_fastindex` to the linker; combined with a -L flag in
+// the Package.swift linkerSettings pointing at this directory,
+// the static lib (libapfs_fastindex.a) gets baked into the
+// executable. No dylib loading at runtime, no rpath fiddling.
+module CApfsFastindex {
+    header "apfs_fastindex.h"
+    link "apfs_fastindex"
+    export *
+}

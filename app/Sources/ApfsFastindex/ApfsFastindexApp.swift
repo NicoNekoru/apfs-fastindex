@@ -12,16 +12,19 @@ struct ApfsFastindexApp: App {
     /// real `.app` bundle (see `make-app.sh`); these calls become
     /// no-ops there.
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var controller = ScanController()
 
     init() {
         NSApplication.shared.setActivationPolicy(.regular)
+        // Native-bridge sanity check. Logs the linked crate
+        // version to NSLog; if `apfs_hello` doesn't return 42
+        // the FFI is misconfigured (wrong linker order, wrong
+        // static-lib search path, name-mangling drift).
+        NativeBridge.validate()
     }
 
     var body: some Scene {
         WindowGroup("apfs-fastindex") {
-            ContentView()
-                .environmentObject(controller)
+            NativeContentView()
                 .frame(minWidth: 900, minHeight: 600)
         }
         .windowResizability(.contentSize)
