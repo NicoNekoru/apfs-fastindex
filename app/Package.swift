@@ -1,22 +1,20 @@
 // swift-tools-version:5.9
 import PackageDescription
 
-// The native renderer links a static Rust library
-// (libapfs_fastindex.a) via a system-library shim target. The
-// pre-build flow is:
+// The renderer is native: SwiftUI + an `NSView` subclass that
+// draws via Core Graphics, fed by an in-process Rust crate via
+// a static-library FFI bridge. No WKWebView, no bundled HTML.
 //
-//   1. `cargo build --release -p apfs-fastindex` (in the repo
-//      root) produces `target/release/libapfs_fastindex.a` and
-//      the cbindgen-generated header.
-//   2. A helper script (`build-native.sh` at the repo root) copies
-//      both into `Sources/CApfsFastindex/`.
+// Pre-build flow (run from the repo root):
+//
+//   1. `cargo build --release -p apfs-fastindex` produces
+//      `target/release/libapfs_fastindex.a` and the
+//      cbindgen-generated header.
+//   2. `build-native.sh` copies both into
+//      `Sources/CApfsFastindex/`.
 //   3. `swift build --package-path app` picks them up via the
-//      `.systemLibrary` shim below.
-//
-// Static linkage means the executable contains the full crate's
-// code (~17 MB today); no dylib loading, no rpath, no DYLD_*
-// env vars at run time. Future packaging tweaks can swap to
-// `.dylib` if size matters; the FFI surface is the same.
+//      `.systemLibrary` shim below and statically links the
+//      Rust code into the executable.
 let package = Package(
     name: "ApfsFastindex",
     platforms: [
@@ -31,9 +29,6 @@ let package = Package(
             name: "ApfsFastindex",
             dependencies: ["CApfsFastindex"],
             path: "Sources/ApfsFastindex",
-            resources: [
-                .copy("Resources/viz")
-            ],
             linkerSettings: [
                 // Tells the linker where to find
                 // `libapfs_fastindex.a` (named by the modulemap's

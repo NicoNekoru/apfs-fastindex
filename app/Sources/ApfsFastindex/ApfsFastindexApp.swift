@@ -12,37 +12,20 @@ struct ApfsFastindexApp: App {
     /// real `.app` bundle (see `make-app.sh`); these calls become
     /// no-ops there.
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var controller = ScanController()
 
     init() {
         NSApplication.shared.setActivationPolicy(.regular)
-        // Phase-1 native-bridge sanity check. Logs the linked
-        // crate version to NSLog; if `apfs_hello` doesn't return
-        // 42 the FFI is misconfigured (wrong linker order, wrong
-        // dylib search path, name-mangling drift). Returning
-        // here would stay quiet so the UI still launches —
-        // future phases will surface the failure in a dialog.
+        // Native-bridge sanity check. Logs the linked crate
+        // version to NSLog; if `apfs_hello` doesn't return 42
+        // the FFI is misconfigured (wrong linker order, wrong
+        // static-lib search path, name-mangling drift).
         NativeBridge.validate()
-    }
-
-    /// `APFS_NATIVE=1` swaps in the native (CoreGraphics +
-    /// Rust) renderer for this launch — opt-in while phases 5 +
-    /// 6 are still in flight. Default keeps the WKWebView path
-    /// so the user's everyday flow is unaffected.
-    private static var useNative: Bool {
-        ProcessInfo.processInfo.environment["APFS_NATIVE"] == "1"
     }
 
     var body: some Scene {
         WindowGroup("apfs-fastindex") {
-            if Self.useNative {
-                NativeContentView()
-                    .frame(minWidth: 900, minHeight: 600)
-            } else {
-                ContentView()
-                    .environmentObject(controller)
-                    .frame(minWidth: 900, minHeight: 600)
-            }
+            NativeContentView()
+                .frame(minWidth: 900, minHeight: 600)
         }
         .windowResizability(.contentSize)
     }
