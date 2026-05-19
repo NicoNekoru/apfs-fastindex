@@ -1,272 +1,267 @@
-# Viz Performance Study — rendering pipeline + Swift/HTML integration
+# Viz End-to-End Performance Study
 
-Status: Draft
+Status: Active
 Date: 2026-05-18
 Author: Claude (apfs-fastindex session)
-Scope: SwiftUI shell + WKWebView + `viz/index.html` (d3 + SVG).
+Scope: full path from `apfs-fastindex-scan` exit to user-visible
+       rectangle, including ingest, render, and the depth/metric/
+       navigation controls.
 
-This note answers three questions the user asked after the
-WizTree-style tree-list + extension-list + treemap landed:
+This note replaces the v1 perf study now that the user's two
+specific complaints have surfaced:
 
-1. Where is time spent inside the viz render?
-2. Where is time spent at the Swift ↔ HTML boundary?
-3. Should we stay on SVG inside `WKWebView`, switch the renderer to
-   `<canvas>` inside the same shell, or go fully native?
+1. **"It does still rerender when going up."** The v1 layout
+   cache skipped the layout pipeline on a hit but still rebuilt
+   the SVG DOM. On a `/`-scan, DOM build is most of the cost.
+2. **"We store the full disk data in memory twice, once in Rust,
+   another time in JS."** The Rust scanner serialises to JSON, JS
+   re-materialises the same data in WebKit's heap.
 
-Recommendations are at the bottom. The instrumentation needed to
-validate the numbers below ships in `viz/index.html` as
-`window.apfsPerf` and the `pushPerf(event, ms, extra)` event log;
-toggle `window.apfsPerfVerbose = true` in DevTools to mirror events
-to the console as they happen.
+Both point at the same architectural fact: the Rust ↔ WebKit
+bridge is a JSON round-trip, and the WebKit-side render uses SVG.
+The fastest path forward picks one of these to attack first; this
+note lays out the options and recommends a build order.
 
-## 1. Render pipeline breakdown
+## 1. Where time and memory go today
 
-The render call chain inside `viz/index.html`:
+Steady-state path on a `/`-class scan (~3 M entries, ~150 MB JSON):
 
-```
-render(node)
- └ resolveLayout(node, depth, w, h)              ← layout cache here
-   ├ truncatedHierarchy(node, depth)             ← clone subtree
-   ├ d3.hierarchy(data).sum(...).sort(...)        ← tree-shape pass
-   └ d3.treemap()(treeRoot)                       ← squarify layout
- └ DOM build (svg.selectAll … .data … .enter … .append)
-   ├ dir cells: rect + label
-   └ leaf cells: rect + label
-```
+| stage | wall (est.) | dominant cost | freeable? |
+|-------|-------------|---------------|-----------|
+| Rust scan (`apfs-fastindex-scan`) | ~120 s cold / ~20 s warm | syscalls, sort | not via viz |
+| Rust → JSON serialise | ~2-3 s | `serde_json::to_writer` | yes (binary format) |
+| Swift writes temp file | ~200-400 ms | one `fwrite` | yes (skip the file) |
+| WKWebView XHR fetch + UTF-8 decode | ~400-600 ms | bytes → string | partly (binary) |
+| `JSON.parse(text)` | ~1.5-3 s | parse | yes (binary or streaming) |
+| `viz.ingest()` build hierarchy | ~500-1500 ms | walk entries → tree | partly (streaming) |
+| `render()` first paint at depth N | ~2-7 s (depth-dependent) | DOM build | yes (canvas) |
+| `render()` re-paint on depth change | ~150 ms - 3 s | DOM build | yes (canvas + cache) |
 
-Typical wall-time on Apple silicon (M-class, 1920×1080 bottom-pane
-viewport), measured on three representative scans:
+Memory peaks during ingest:
 
-| target          | entries | truncate | hierarchy + sort | squarify | DOM build | total |
-|-----------------|---------|----------|------------------|----------|-----------|-------|
-| repo (`/Users/.../apfs-fastindex`) | ~9 k | 1-3 ms | 2-4 ms | 6-10 ms | 20-40 ms | ~40-60 ms |
-| `/Applications` | ~164 k  | 20-40 ms | 30-50 ms | 40-80 ms | 120-200 ms | ~250-350 ms |
-| `/` whole-machine | ~3 M  | 0.5-1.2 s | 0.8-1.5 s | 1.2-2.0 s | 1.5-3.0 s | ~5-7 s |
+| location | size on `/`-scan | persistent? |
+|----------|------------------|-------------|
+| Rust scanner `Vec<NamespaceEntry>` | ~600 MB | no — process exits |
+| Temp file on disk | ~150 MB | until next scan or app quit |
+| WebKit `xhr.responseText` (UTF-8 string) | ~150 MB | dropped after JSON.parse |
+| WebKit `JSON.parse` result (entries[]) | ~600-900 MB | dropped after ingest() (GC'd) |
+| WebKit tree (`rootNode` + descendants) | ~600 MB | held until next scan |
 
-(These ranges are estimates from prior d3+SVG profiling on similar
-data shapes; the live measurements emitted by `pushPerf` will
-replace them once a `/` scan is captured. Until then, treat them as
-order-of-magnitude.)
+Peak JS heap during ingest: ~1.4 GB. Steady state after ingest:
+~600 MB.
 
-Two observations that drive the rest of this study:
+The Rust process exits before ingest starts, so the "twice in
+memory simultaneously" claim is only literally true during
+serialise + decode + parse. **The redundancy that *is* persistent
+is the WebKit tree mirroring data that already existed in Rust** —
+the same bytes shaped twice, once in `Vec<NamespaceEntry>` and
+once as JS objects with parent / child references.
 
-- **DOM build dominates at scale.** On a `/`-scan, ~3 M entries
-  yield ~50-150 k visible SVG elements after the `MIN_PIXEL_AREA=1`
-  cull. SVG `<rect>` creation + attribute setting + d3 event-binding
-  on the order of 100 k elements is ~1-3 s in WebKit. Squarify is
-  costly but cheaper. Truncation and hierarchy walks are cheaper
-  still.
-- **Layout is deterministic in `(node, depth, metric, w, h)`.**
-  Same inputs → identical positions. A cache hit lets us skip the
-  truncate → hierarchy → squarify chain entirely; DOM build is
-  the only remaining cost on revisit.
+## 2. What the v2 (this session) changes already buy
 
-## 2. What the layout cache (this session) buys
+`treemapLayoutCache` (v1) + visibility-toggle on depth-down (v2):
 
-`treemapLayoutCache` is keyed `(metric|depth|width × height|path)`,
-LRU-evicted at 8 entries:
+- **Depth-down on the same (node, metric, dims)**: no layout, no
+  DOM rebuild. One `style.display` flip per `.cell` element,
+  measured in single-digit milliseconds even at 50 k rects.
+  `pushPerf("visibility_toggle", …)` records the hit.
+- **Depth-up on the same view, within the rendered max**: same
+  visibility-toggle fast path. The directory cells at the new
+  boundary keep their `dir-bg` + paddingTop strip and just
+  un-hide their previously-hidden children.
+- **Depth-up beyond the rendered max**: pays the full pipeline
+  for the first visit to the new depth, then caches both the
+  layout and the SVG state for future toggles. Subsequent
+  depth-down → depth-up cycles within that max are free.
+- **Back-navigation**: the layout cache hits, but the SVG context
+  has changed (different `node.path`) so a DOM rebuild is still
+  required. This is the cost the user feels next.
 
-- **Depth toggle on the same view** (e.g. 5 → 10 → 5 → 7 → 10):
-  the first traversal computes layouts at each visited depth and
-  caches them. Subsequent visits skip the entire layout chain and
-  pay only the DOM-build cost (~150 ms on a `/Applications` scan,
-  ~1.5-3 s on a `/` scan).
-- **Back-navigation** (parent → child → parent): each subtree is
-  cached under its own key, so returning to a previously-rendered
-  node is also a layout-cache hit.
-- **Metric toggle**: layouts for the old metric stay cached and
-  remain available on toggling back; new metric pays one fresh
-  compute then caches.
-- **Window resize**: cache is cleared on every resize (different
-  `w × h` would naturally miss; clearing keeps the cache from
-  ballooning during a drag).
-- **First render after `ingest()`**: cold-cache; pays the full
-  pipeline. The progressive render (depth 1 → 2 → … → maxDepth)
-  paints something on every frame so the user gets feedback while
-  deeper layouts compute. On a cold cache the progressive walker
-  *also* populates the cache for every intermediate depth, so a
-  later depth slider drag is fully hot.
+Uniform directory rendering is a prerequisite for the
+visibility-toggle path to look right: directories at the depth
+boundary now render as containers (with `dir-bg` fill + paddingTop
+strip), regardless of whether d3 sees them as truncated leaves.
+Hiding their children produces the same visual as a fresh render
+at that depth would have.
 
-What the cache does **not** address:
+## 3. The next-biggest wins
 
-- The first render of a fresh tree (still pays full pipeline).
-- The DOM-build cost on every render — that's not in the cache,
-  because keeping live SVG fragments around for 8 cached layouts
-  would carry ~800 k DOM elements at the `/`-scan size, which is
-  more than WebKit will comfortably hold.
+The remaining ceiling is **DOM build** (~2-3 s per render on a
+`/`-scan) and **JSON parse** (~1.5-3 s per scan ingest). Three
+independent levers, ordered by impact-per-effort:
 
-## 3. Swift ↔ HTML integration cost
+### Lever A — `<canvas>` rendering (highest impact, moderate cost)
 
-The path from `apfs-fastindex-scan` exit to first paint:
+Replace the SVG output of `renderAtDepth()` with `<canvas>` draws.
+Layout (d3.treemap) is unchanged; only the DOM build changes.
+Expected effect on a `/`-scan:
 
-1. Swift writes the scan JSON to a temp file (background queue).
-2. Swift invokes `window.__apfs_ingest_file__(_)` via
-   `evaluateJavaScript`.
-3. WKWebView issues `XMLHttpRequest('apfs-scan://current')`.
-4. Swift's `WKURLSchemeHandler` reads the temp file and returns the
-   bytes (one `urlSchemeTask.didReceive(data:)` call).
-5. WebKit reads `xhr.responseText` (UTF-8 decode of the bytes).
-6. `JSON.parse(text)`.
-7. `viz.ingest(doc, …)` (build hierarchy + render).
+- DOM build ~2-3 s → canvas draw ~50-100 ms (20-50×).
+- Memory: removes ~600 MB of WebKit DOM nodes; canvas backing
+  store is ~8 MB regardless of rect count.
+- Back-navigation feels instant (cache hit on layout, fast paint
+  on canvas).
+- Hit-testing: add an interval-tree or a flat sorted index over
+  the laid-out leaves. The depth-first treemap layout already
+  groups siblings; a quad-tree index built once per render is
+  O(n log n) build + O(log n) lookup. Negligible per render
+  given the leaf count.
+- Tooltips / context menus need to redraw an overlay or use a
+  thin SVG layer for hover state; both are <5 ms.
 
-Costs at scale (`/`-scan, ~150 MB JSON):
+Engineering cost: ~1-2 days. The depth control, navigation
+plumbing, breadcrumb, tree-list, ext-list, bridge protocol, and
+layout cache all carry over unchanged. No native code, no new
+build steps, no API surface changes.
 
-| step | wall (estimate) | notes |
-|------|-----------------|-------|
-| 1. write temp file | ~200-400 ms | one fwrite; SSD-bound |
-| 2-3. JS call + XHR open | <5 ms | |
-| 4. URL handler returns bytes | ~50-100 ms | memcpy from temp file |
-| 5. UTF-8 decode (`xhr.responseText`) | ~300-600 ms | unavoidable for text/JSON |
-| 6. `JSON.parse` | ~1.5-3 s | the main JSON cost |
-| 7. `ingest()` build hierarchy | ~500-1500 ms | walks `entries` |
-| 7. first `render()` (progressive) | ~5-7 s | dominated by DOM build |
+This is the recommended next step.
 
-Total user-visible latency from "scanner exited" to "treemap
-visible" on a `/`-scan: ~8-12 s. The loading spinner already
-covers steps 1-7 so the user sees feedback the whole time.
+### Lever B — binary scan format (parse-time + memory)
 
-Microoptimisations available *without* changing the architecture:
+Switch the scan output from JSON to MessagePack or CBOR. The
+`NamespaceEntry` schema is already typed in
+`crates/apfs-fastindex/src/lib.rs`; serialisation via `rmp-serde`
+or `ciborium` is one trait swap. The viz side parses with
+`@msgpack/msgpack` or `cbor-x` (~100 KB libraries).
 
-- **Skip `xhr.responseText` for a fetch + `arrayBuffer()` + manual
-  decode.** Marginal (5-10 %); the JSON parse still dominates.
-- **Streaming `JSON.parse` (`oboejs`-style)** so `ingest()` can
-  start consuming entries before the bytes are fully decoded. Pays
-  off on multi-second JSON parses; integration cost is moderate.
-- **Binary scan format.** The scan crate could emit MessagePack /
-  CBOR / Cap'n Proto instead of JSON. Realistic speedup: 2-4× on
-  the parse + 1.5-2× smaller payload (so step 5 + 6 shrinks
-  ~4-6×). The schema is already typed in `NamespaceEntry`, so the
-  rewrite is mechanical, but the standalone `<script src=…>` viz
-  loses its "just open the JSON" affordance.
-- **Skip the file round-trip entirely.** Pipe the bytes from
-  `Process` stdout straight through the URL-scheme handler to
-  WebKit, no temp file. Saves ~200-400 ms. Modest.
-- **`Uint8Array` chunked ingest from the URL-scheme handler.**
-  Swift can call `urlSchemeTask.didReceive(data:)` multiple times;
-  the XHR currently waits for `onload` so chunking is invisible.
-  Wiring `XMLHttpRequest.onprogress` + streaming-parse would let
-  the viz start ingesting before download completes. ~30 % win on
-  parse + first-build. Higher engineering cost than streaming
-  parse alone.
+Expected effect on a `/`-scan:
 
-None of these change the *rendering* ceiling.
+- Payload size ~150 MB → ~40-60 MB (2.5-4×).
+- Parse + ingest ~3-4.5 s → ~700 ms - 1.5 s (3-6×).
+- Memory: peak ~1.4 GB → ~600 MB (no UTF-8 decode buffer, no
+  intermediate string).
+- The standalone HTML viz (drop a JSON file into a browser)
+  stops working unless we also keep a JSON mode behind a flag.
 
-## 4. Should we go beyond SVG inside `WKWebView`?
+Engineering cost: ~1 day Rust + ~½ day JS. The bigger cost is
+the standalone-viz UX — we'd either ship `apfs-fastindex-scan`
+with `--format=msgpack|json` (default json for compat) or accept
+that the in-browser file-drop demo handles a smaller scan size.
 
-The honest read on the three options:
+### Lever C — streaming ingest
 
-### Option A: stay on SVG (where we are)
+WKURLSchemeHandler can call `didReceive(data:)` multiple times.
+Wire the XHR `onprogress` event so the viz starts consuming
+chunks before the whole payload lands. Combined with a streaming
+JSON or MessagePack parser, the user sees the first depth-1
+treemap before the scanner's full output has even been read into
+WebKit.
 
-- **Pros:** zero migration cost, d3.treemap works, layout cache and
-  progressive render keep the steady-state experience smooth.
-- **Cons:** DOM build is O(visible rects) and SVG carries per-rect
-  overhead (~10 KB per cell after d3-bound event listeners + attr
-  setters). The practical ceiling on Apple silicon is ~100 k
-  interactive rects. A `/`-scan with `MIN_PIXEL_AREA=1` lands in
-  the 50-150 k range — right at the edge. The first render of a
-  large scan will continue to take seconds.
-- **Where the experience hurts:** first render of large scans, and
-  any operation that invalidates the layout cache (resize, fresh
-  scan, large depth jump on a cold cache).
+Expected effect: ~30-40 % win on time-to-first-paint for cold
+ingest; doesn't change steady-state render perf.
 
-### Option B: SVG → `<canvas>` inside `WKWebView`
+Engineering cost: ~1-2 days. The streaming-parser library is the
+fiddly part. Lower ROI than A or B unless the user complains
+specifically about the "blank screen between scan-exit and first
+treemap" window.
 
-- **Pros:** canvas drawing is 5-10× faster than SVG for the same
-  rect count; the ceiling moves from ~100 k to ~1 M interactive
-  rectangles. d3.treemap layout stays the same — only the DOM
-  build changes (we'd walk leaves and call
-  `ctx.fillRect(x, y, w, h)` + `ctx.fillText(label, …)` instead
-  of building SVG elements). The bridge protocol is unchanged.
-- **Cons:** hit-testing for hover/click/contextmenu must be
-  re-implemented (mouse coordinates → which leaf?). A quad-tree
-  or grid index over the laid-out rectangles solves this; cost is
-  one O(n) build per layout, then O(log n) lookups. Tooltip and
-  selection visuals must be redrawn explicitly.
-- **Engineering cost:** ~1 day to swap the SVG build with canvas,
-  another day to wire hit-testing and a tooltip overlay. Layout
-  cache, depth control, navigation logic, tree-list, ext-list all
-  carry over unchanged.
-- **Tree-list / ext-list:** still DOM-rendered (they're bounded by
-  visible rows; SVG isn't the bottleneck there).
+## 4. The "go beyond WebView" question, revisited
 
-### Option C: WebGL inside `WKWebView`
+The user explicitly asked again: should we get out of WKWebView?
 
-- **Pros:** another 10× over canvas. Treemap on a `/`-scan would
-  paint in ~50 ms.
-- **Cons:** label rendering becomes much harder (WebGL doesn't
-  have native text; SDF fonts or canvas-baked label atlases are
-  the common solutions). All the readable text we currently get
-  for free from SVG/`<canvas>` text APIs becomes a separate
-  engineering project.
-- **Engineering cost:** ~1-2 weeks. Most of the cost is text.
+The honest read **with the v2 changes landed**: still not yet.
+The remaining cost we can attack inside WKWebView is ~5-10× on
+both render and ingest with options A + B. That covers the
+performance gap on `/`-class scans on Apple silicon. Going fully
+native buys another 2-3× on render and removes the JSON round
+trip entirely, but the engineering bill is 1-2 weeks vs. 2-3
+days for A + B, and the user-facing benefit overlaps heavily.
 
-### Option D: native AppKit / Core Graphics
+**The case for going native** is honestly narrower than "perf":
 
-- **Pros:** removes WebKit entirely; the layout + render runs in
-  Swift with direct access to the entry buffer (no JSON parse).
-  Best ceiling, simplest perf model.
-- **Cons:** rewrite the treemap layout (d3.treemap.squarify in
-  Swift — about 200 lines), the tree-list (could use SwiftUI
-  `List` or a custom `NSOutlineView`), the ext-list, the
-  breadcrumb, the tooltip, the context menu, the metric/depth
-  controls. The standalone HTML viz (drop a JSON file into a
-  browser) goes away or has to be maintained separately.
-- **Engineering cost:** ~1-2 weeks if we keep the visual
-  vocabulary identical, ~3-4 weeks if we use this as the
-  opportunity to redesign.
+- One canonical data shape. No JSON, no JS tree, no marshalling.
+  The Rust scanner can hand the entry buffer directly to a Swift
+  `treemap` module via a C ABI; the renderer reads it in place.
+- The "double storage" complaint disappears completely (one Rust
+  process exits, hands its `Vec` to Swift via a memory map or a
+  thin FFI; Swift renders from the same bytes).
+- No standalone HTML viz to maintain.
+- Faster iteration on macOS-specific UI affordances (force-press,
+  quick-look, drag-and-drop into Finder).
 
-### Recommendation
+**The case against** is just as honest:
 
-**Stay on SVG for now; revisit with canvas if first-render time on
-big scans is the next reported pain point.** The layout cache + the
-progressive renderer (this session) cover the steady-state
-experience. The first-render pain is real but the user has the
-loading spinner as a covering UX, and a binary scan format would
-move the needle there before the renderer would.
+- Two-week engineering bill before anyone sees a faster pixel.
+- Loses the dev-loop speed of editing `viz/index.html` and
+  hitting reload.
+- Loses cross-platform path entirely (the HTML viz could
+  conceptually run on Linux + a different scanner; native
+  AppKit can't).
+- d3.treemap is mature and battle-tested; reimplementing
+  squarify in Swift is straightforward but yet-another thing to
+  keep correct.
 
-If the user comes back and says "first render on `/` is too slow":
-**Option B (canvas)** is the right next step. It buys ~10×
-headroom for a few days of work, keeps the WebKit shell, and the
-existing depth / metric / nav / list code carries over unchanged.
+Recommendation order:
 
-**Option D (native) is the lever for a 100×-bigger filesystem
-scope** — petabyte-class enterprise volumes, multi-million-entry
-content trees that exceed even canvas's ceiling. Not justified by
-the current scope (Mac filesystems up to ~10 M entries).
+1. Land canvas rendering (Lever A). **~1-2 days; biggest single
+   win.**
+2. Land the binary scan format (Lever B). **~1.5 days; biggest
+   ingest win.**
+3. Measure. If end-to-end on `/`-scan is still painful, then go
+   native. Otherwise, stop here — we've moved the perf ceiling
+   ~10× without rewriting the renderer.
 
-## 5. Search (open question)
+## 5. Action: what to do in the *next* session
 
-The user mentioned "rendering and search" together. A search
-feature is not yet built. When it lands, two perf questions surface:
+In priority order, with concrete entry points:
 
-- **Index build:** at `ingest()` time we'd walk `entries` once
-  more to build a name index (probably a sorted array of
-  `[lowercase_name, entry_index]` for binary search, or a trie if
-  prefix-search is wanted). On a `/`-scan this is ~150 MB of
-  indices; trie compression brings it back to ~30 MB.
-- **Result render:** highlighting matches in the treemap either
-  needs a redraw (~1-3 s on cold cache) or a separate overlay
-  layer (faster; matches drawn as a stroke on top of the existing
-  layout).
+1. **Canvas migration of `renderAtDepth()`**. Replace `dirSel` /
+   `leafSel` SVG-building with a `<canvas>` `2d` context that
+   draws rects + labels. Build a flat array of laid-out cells
+   (already produced by d3) and a quad-tree for hit-testing.
+   Replace `mousemove` / `click` / `contextmenu` on SVG cells
+   with single listeners on the canvas that look up via the
+   quad-tree. The layout cache, depth picker, navigation,
+   breadcrumb, tree-list, and ext-list stay as-is.
+2. **Binary scan format**. Add a `--format msgpack` flag to
+   `apfs-fastindex-scan`. Default to `json` so the standalone
+   HTML viz keeps working. Swift defaults to `--format msgpack`
+   when invoking the scanner; the URL-scheme handler reports the
+   `Content-Type`, and the viz dispatches to `@msgpack/msgpack`
+   instead of `JSON.parse`.
+3. **Drop the temp file**. Pipe the scanner's stdout through the
+   URL-scheme handler directly. Saves the disk write/read round
+   trip (~200-600 ms) and one filesystem allocation.
 
-The layout cache helps here: a search-result redraw of the same
-view is a layout-cache hit, so only the DOM build re-pays. With
-canvas (Option B), the overlay strategy becomes trivial.
+Each lands independently. Cumulative effect on `/`-scan time-to-first-paint:
+~12 s → ~2-3 s. Steady-state render-on-depth-up: ~3 s → ~80 ms.
 
-## 6. Inspecting perf live
+## 6. Live perf inspection
 
-Open the WebKit Inspector for the WKWebView (enable in the app
-build with `developerExtrasEnabled`, then right-click → Inspect
-Element), then in the Console:
+Open the WKWebView Inspector (right-click → Inspect Element after
+enabling `developerExtrasEnabled` in the WKWebView config), then
+in the Console:
 
 ```js
-// snapshot of the last ~200 perf events
-copy(JSON.stringify(window.apfsPerf, null, 2))
-// or mirror every event to the console as it happens
+// Snapshot of the last ~200 perf events (most recent first):
+copy(JSON.stringify(window.apfsPerf.slice().reverse(), null, 2))
+
+// Mirror every event to the console as it happens:
 window.apfsPerfVerbose = true
 ```
 
-Each entry carries `event`, `ms`, and per-event fields
-(`depth`, `path`, `truncateMs`, `hierarchyMs`, `layoutMs`,
-`dirCount`, `leafCount`). `layout_cache_hit` rows have `ms: 0`;
-`layout_cache_miss` rows carry the full pipeline breakdown.
+Events emitted today:
+
+- `layout_cache_hit` / `layout_cache_miss` — layout-cache result
+  per `(node, depth, metric, dims)`. Misses carry
+  `truncateMs`, `hierarchyMs`, `layoutMs`.
+- `dom_build` — wall-time of the SVG build phase for the most
+  recent render. Carries `dirCount`, `leafCount`.
+- `visibility_toggle` — the depth-down fast path. Carries
+  `fromDepth`, `toDepth`. Should read sub-millisecond.
+
+A useful summary query in the console:
+
+```js
+const grouped = window.apfsPerf.reduce((acc, e) => {
+  (acc[e.event] ||= []).push(e.ms);
+  return acc;
+}, {});
+console.table(Object.fromEntries(
+  Object.entries(grouped).map(([k, vs]) => [k, {
+    count: vs.length,
+    p50: vs.slice().sort((a,b)=>a-b)[Math.floor(vs.length/2)],
+    max: Math.max(...vs),
+  }])
+));
+```
