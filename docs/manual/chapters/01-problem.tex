@@ -117,18 +117,26 @@ allowlist the indexer falls back to a supported API.
 
 \section{What This Manual Does Not Promise}
 
-Three product properties are out of scope for this manual, not because
-they are unimportant but because the project has not yet validated
-them. They appear later, in the open-questions chapter, as named
-research lanes:
+Three product properties are partially or wholly out of v1 scope, not
+because they are unimportant but because the project has not yet
+validated them end to end. They appear later, in the open-questions
+chapter, as named research lanes:
 
 \begin{itemize}
-  \item physical, exclusive, or shared bytes per file,
+  \item per-file allocated bytes for the five case classes that v1 can
+    defend, and the two cases (sparse, decmpfs) that fail closed ---
+    R2-A, the lane that landed under chapter~13;
+  \item exclusive and shared bytes per inode, snapshot-retained bytes,
+    and any size column that requires the extent-reference tree to be
+    joined with per-inode extents --- still open;
   \item persistent incremental caches that reuse prior subtree
-    summaries,
+    summaries --- still open;
   \item the Finder-visible "/" namespace assembled from system and
     data volumes, firmlinks, and snapshots on a modern macOS startup
-    disk.
+    disk --- still open, except for the conservative firmlink-overlay
+    dedup the fallback walker performs to avoid double-counting paths
+    that exist under both \texttt{/Users} and
+    \texttt{/System/Volumes/Data/Users}.
 \end{itemize}
 
 A claim from this manual extends only to the things the manual

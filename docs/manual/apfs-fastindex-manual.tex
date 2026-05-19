@@ -8,9 +8,10 @@
 \usepackage{booktabs}
 \usepackage{url}
 \usepackage{xurl}
+\usepackage{amsmath}
 \usepackage{graphicx}
 \usepackage{tikz}
-\usetikzlibrary{positioning,arrows.meta,shapes.geometric,fit,backgrounds,calc}
+\usetikzlibrary{positioning,arrows.meta,shapes.geometric,fit,backgrounds,calc,decorations.pathreplacing}
 \usepackage[newfloat]{minted}
 \setminted{
   fontsize=\small,
@@ -19,6 +20,9 @@
   baselinestretch=1.1,
   breaklines=true,
   breakanywhere=true,
+  linenos=true,
+  numbersep=6pt,
+  xleftmargin=12pt,
 }
 \usemintedstyle{tango}
 
@@ -34,7 +38,7 @@
 
 \title{Reading APFS\\Notes Toward a Fast Index of an Apple File System Volume}
 \author{apfs-fastindex project}
-\date{2026-05-15}
+\date{2026-05-16}
 
 \begin{document}
 

@@ -1,0 +1,8 @@
+\begin{Verbatim}[commandchars=\\\{\}]
+tmutil\PYG{+w}{ }localsnapshot\PYG{+w}{ }/
+tmutil\PYG{+w}{ }listlocalsnapshots\PYG{+w}{ }/
+sudo\PYG{+w}{ }mkdir\PYG{+w}{ }\PYGZhy{}p\PYG{+w}{ }/tmp/apfsfi\PYGZhy{}ex23\PYGZhy{}snap
+sudo\PYG{+w}{ }mount\PYGZus{}apfs\PYG{+w}{ }\PYGZhy{}s\PYG{+w}{ }\PYGZlt{}snapshot\PYGZhy{}name\PYGZgt{}\PYG{+w}{ }/\PYG{+w}{ }/tmp/apfsfi\PYGZhy{}ex23\PYGZhy{}snap
+python3\PYG{+w}{ }docs/research/experiments/EX\PYGZhy{}23\PYGZhy{}snapshot\PYGZhy{}shape\PYGZhy{}parity/artifacts/probe\PYGZus{}ex23.py
+sudo\PYG{+w}{ }umount\PYG{+w}{ }/tmp/apfsfi\PYGZhy{}ex23\PYGZhy{}snap
+\end{Verbatim}

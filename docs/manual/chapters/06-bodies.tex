@@ -37,61 +37,51 @@ the padded sum is malformed.
 \centering
 \begin{tikzpicture}[
   every node/.style={font=\footnotesize},
-  byte/.style={draw, minimum width=0.7cm, minimum height=0.75cm,
-               align=center, inner sep=1pt},
-  blob/.style={byte, fill=gray!15},
-  meta/.style={byte, fill=blue!15},
-  val/.style={byte, fill=green!18},
-  pad/.style={byte, fill=red!15, font=\scriptsize\itshape},
-  brace/.style={decorate, decoration={brace, amplitude=4pt,
-                                       raise=1pt, mirror}},
+  region/.style={draw, minimum height=0.95cm, align=center, inner sep=2pt},
+  blob/.style={region, fill=gray!18},
+  meta/.style={region, fill=blue!15},
+  val/.style={region, fill=green!18},
+  pad/.style={region, fill=red!18, font=\scriptsize\itshape},
+  label/.style={font=\scriptsize, align=center},
 ]
-  % blob header
-  \node[blob] (b0) {};
-  \node[blob, right=0pt of b0] (b1) {};
-  \node[blob, right=0pt of b1] (b2) {};
-  \node[blob, right=0pt of b2] (b3) {};
+  % Widths are proportional to bytes but compressed so the whole
+  % tail fits the page. 4/12/11/5/40/8 = 80 bytes total. Scale ~0.18 cm/B.
+  \node[blob, minimum width=0.72cm] (blob)
+    {\texttt{xf\_blob\_t}\\\scriptsize 4 B};
+  \node[meta, minimum width=2.16cm, right=0pt of blob] (meta)
+    {metadata table\\\scriptsize 3 $\times$ 4 B};
+  \node[val,  minimum width=1.98cm, right=0pt of meta] (v1)
+    {value 1 (NAME)\\\scriptsize \texttt{x\_size = 11}};
+  \node[pad,  minimum width=0.90cm, right=0pt of v1] (v1p)
+    {pad\\\scriptsize 5 B};
+  \node[val,  minimum width=2.40cm, right=0pt of v1p] (v2)
+    {value 2 (DSTREAM)\\\scriptsize \texttt{x\_size = 40}};
+  \node[val,  minimum width=1.30cm, right=0pt of v2] (v3)
+    {value 3 (SPARSE)\\\scriptsize \texttt{x\_size = 8}};
 
-  % metadata table -- 3 entries
-  \node[meta, right=0.06cm of b3] (m0) {};
-  \foreach \i [evaluate=\i as \prev using {int(\i-1)}] in {1,...,11} {
-    \node[meta, right=0pt of m\prev] (m\i) {};
-  }
+  % "round_up" annotations under each value+pad pair
+  \draw[decorate, decoration={brace, amplitude=4pt, mirror}]
+    ($(v1.south west) + (0,-0.08)$) -- ($(v1p.south east) + (0,-0.08)$)
+    node[midway, below=4pt, label] {padded 16 B};
+  \draw[decorate, decoration={brace, amplitude=4pt, mirror}]
+    ($(v2.south west) + (0,-0.08)$) -- ($(v2.south east) + (0,-0.08)$)
+    node[midway, below=4pt, label] {40 B};
+  \draw[decorate, decoration={brace, amplitude=4pt, mirror}]
+    ($(v3.south west) + (0,-0.08)$) -- ($(v3.south east) + (0,-0.08)$)
+    node[midway, below=4pt, label] {8 B};
 
-  % value 1: x_size=11, padded to 16
-  \node[val, right=0.06cm of m11] (v0) {};
-  \foreach \i [evaluate=\i as \prev using {int(\i-1)}] in {1,...,10} {
-    \node[val, right=0pt of v\prev] (v\i) {};
-  }
-  \foreach \i [evaluate=\i as \prev using {int(\i-1)}] in {11,...,15} {
-    \node[pad, right=0pt of v\prev] (v\i) {p};
-  }
-
-  % value 2: x_size=40 (we show a compressed view)
-  \node[val, right=0.06cm of v15, minimum width=2.1cm] (val2) {value 2 (40\,B)};
-
-  % value 3: x_size=8 (padded to 8 -- no pad needed)
-  \node[val, right=0.06cm of val2, minimum width=0.95cm] (val3) {8};
-
-  % labels
-  \node[above=0.05cm of b1.east, anchor=south, font=\scriptsize]
-    {\texttt{xf\_blob\_t}};
-  \node[above=0.05cm of m5.east, anchor=south, font=\scriptsize]
-    {metadata: 3 $\times$ 4 B};
-  \node[above=0.05cm of v3.east, anchor=south, font=\scriptsize]
-    {value 1 (11\,B + 5\,B padding)};
-
-  % cursor marker
-  \draw[-Stealth, thick] ($(m11.south east) + (0, -0.55)$)
-    -- ($(m11.south east) + (0, -0.05)$)
-    node[below=0.55cm, font=\scriptsize, align=center]
+  % Cursor-start arrow
+  \draw[-Stealth, thick]
+    ($(meta.south east) + (0,-1.45)$) -- ($(meta.south east) + (0,-0.55)$)
+    node[below=1.45cm, label]
       {cursor starts here\\(no extra alignment)};
 \end{tikzpicture}
-\caption{The xfield tail for the sparse inode at OID 23
-  (\texttt{xf\_num\_exts=3}, sizes 11/40/8). The value cursor starts
-  immediately after the metadata table; each value advances by
-  \texttt{round\_up(x\_size, 8)} bytes. Total padded value-area length
-  is $16+40+8 = 64$, matching \texttt{xf\_used\_data}.}
+\caption{The xfield tail for the sparse inode at OID~23
+  (\texttt{xf\_num\_exts=3}, sizes 11/40/8). The cell widths are
+  proportional to bytes. The value cursor starts immediately after the
+  metadata table; each value advances by \texttt{round\_up(x\_size, 8)}.
+  Total padded value-area length is $16 + 40 + 8 = 64$~B, matching
+  \texttt{xf\_used\_data}.}
 \end{figure}
 
 The rule fits in a few lines of code:

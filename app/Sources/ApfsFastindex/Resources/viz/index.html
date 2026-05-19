@@ -12,6 +12,7 @@
     --muted: #8b93a5;
     --accent: #4f8cff;
     --hover: rgba(255, 255, 255, 0.08);
+    --row-selected: rgba(79, 140, 255, 0.22);
   }
   * { box-sizing: border-box; }
   html, body {
@@ -87,6 +88,57 @@
     cursor: not-allowed;
   }
   header button:disabled { opacity: 0.5; cursor: not-allowed; }
+  /* Depth picker. `−` / `+` step the value, the input lets the user
+     type any integer in 1-20. The viz progressively renders deeper
+     levels up to this cap; deeper subtrees collapse to a single
+     rectangle keyed off their aggregate size. Default 10 covers
+     virtually any real-world filesystem from one viewport. */
+  header .depth-control {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  header .depth-control label {
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    font-size: 11px;
+    margin-right: 2px;
+  }
+  header .depth-control button {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  header .depth-control button:hover {
+    background: var(--hover);
+    border-color: var(--accent);
+  }
+  header .depth-control input {
+    width: 44px;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 3px 6px;
+    font-size: 12px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+  /* Hide native number-spinner arrows; we provide our own +/−
+     buttons that hit a more practical hit target on dense
+     toolbars. */
+  header .depth-control input::-webkit-inner-spin-button,
+  header .depth-control input::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
   #drop-zone {
     flex: 1;
     display: flex;
@@ -149,22 +201,267 @@
      pixels below the native one, so hide it entirely in native
      shell mode. */
   .apfs-native-shell #status-bar { display: none !important; }
+
+  /* ──────────────────────────────────────────────────────────────
+     Three-pane layout (WizTree-style):
+       top-pane  = breadcrumb + (tree-list ◧ ext-list)
+       bottom-pane = treemap
+     Splitters between top/bottom (horizontal) and tree/ext (vertical)
+     are drag-resizable. The page-wide `<body>` is already a flex
+     column (header / main / status-bar); `#main` becomes a nested
+     flex column once a scan is loaded.
+     ────────────────────────────────────────────────────────────── */
+  #main {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  #top-pane {
+    height: 45%;
+    min-height: 120px;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+    flex-shrink: 0;
+  }
+  #top-split {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+    overflow: hidden;
+  }
+  #tree-list-pane {
+    flex: 1;
+    min-width: 220px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+  }
+  #ext-list-pane {
+    width: 38%;
+    min-width: 200px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--panel);
+  }
+  .splitter-h {
+    height: 5px;
+    background: var(--border);
+    cursor: ns-resize;
+    flex-shrink: 0;
+    position: relative;
+  }
+  .splitter-v {
+    width: 5px;
+    background: var(--border);
+    cursor: ew-resize;
+    flex-shrink: 0;
+    align-self: stretch;
+  }
+  .splitter-h:hover, .splitter-v:hover { background: var(--accent); }
+  #bottom-pane {
+    flex: 1;
+    min-height: 120px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .pane-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    padding: 6px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    flex-shrink: 0;
+  }
+  .pane-header .pane-subtitle {
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: 0;
+    color: var(--muted);
+    margin-left: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+  }
+
+  /* Column header (Name / % of parent / Size / Items). Sits between
+     the pane header and the scrollable body so the columns line up
+     with the scrolled rows underneath. */
+  .col-header {
+    display: flex;
+    align-items: center;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--muted);
+    padding: 4px 8px 4px 4px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .col-header .indent-spacer { width: 22px; flex-shrink: 0; }
+  .col-header .ch-name { flex: 1; overflow: hidden; }
+  .col-header .ch-pct  { width: 110px; text-align: left; padding-left: 6px; }
+  .col-header .ch-size { width: 78px; text-align: right; padding-left: 6px; }
+  .col-header .ch-items { width: 64px; text-align: right; padding-left: 6px; }
+
+  .pane-body {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    background: var(--panel);
+  }
+  .pane-body:focus { outline: none; }
+
+  /* Each row is a single flex container so the columns line up
+     across rows of different depth. The indent space comes from
+     `padding-left` on the row itself; the disclosure triangle is
+     always the first child so its position never depends on
+     indent. */
+  .row {
+    display: flex;
+    align-items: center;
+    padding: 2px 8px 2px 0;
+    font-size: 12px;
+    cursor: pointer;
+    border-bottom: 1px solid transparent;
+    user-select: none;
+  }
+  .row:hover { background: var(--hover); }
+  .row.selected { background: var(--row-selected); }
+  .row .disclosure {
+    width: 16px;
+    height: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted);
+    flex-shrink: 0;
+    font-size: 10px;
+    transition: transform 90ms;
+  }
+  .row .disclosure.expanded { transform: rotate(90deg); }
+  .row .disclosure.empty { visibility: hidden; }
+  .row .icon {
+    width: 14px;
+    height: 14px;
+    margin-right: 4px;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+  }
+  .row .icon.dir { color: #f4d35e; }
+  .row .icon.file { color: var(--muted); }
+  .row .icon.symlink { color: #7d8a99; }
+  .row .name {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text);
+  }
+  .row .pct-cell {
+    width: 110px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+    padding-left: 6px;
+  }
+  .row .pct-bar {
+    flex: 1;
+    height: 8px;
+    background: var(--bg);
+    border-radius: 2px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  .row .pct-bar > div {
+    height: 100%;
+    background: var(--accent);
+  }
+  .row .pct-num {
+    width: 42px;
+    text-align: right;
+    font: 11px ui-monospace, Menlo, monospace;
+    color: var(--muted);
+  }
+  .row .size {
+    width: 78px;
+    text-align: right;
+    font: 11px ui-monospace, Menlo, monospace;
+    color: var(--text);
+    flex-shrink: 0;
+    padding-left: 6px;
+  }
+  .row .size.unclaimed { color: #fbbf24; font-style: italic; }
+  .row .items {
+    width: 64px;
+    text-align: right;
+    font: 11px ui-monospace, Menlo, monospace;
+    color: var(--muted);
+    flex-shrink: 0;
+    padding-left: 6px;
+  }
+  .row.row-more {
+    color: var(--muted);
+    font-style: italic;
+    justify-content: center;
+    padding: 4px 8px;
+    cursor: pointer;
+  }
+  .row.row-more:hover { color: var(--accent); }
+
+  /* Extension row: same skeleton but no disclosure / item-count
+     column. We reuse `.row` plus this overlay so visuals stay
+     consistent with the folder tree. */
+  #ext-list-body .row .name { font: 12px ui-monospace, Menlo, monospace; }
+  #ext-list-body .row .icon-ext {
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+    flex-shrink: 0;
+    margin: 0 6px 0 6px;
+  }
+
+  /* Breadcrumb lives at the top of the top-pane so the user always
+     knows where they are without having to look down at the
+     status bar. Hidden in standalone mode until the first scan
+     lands; the .visible toggle is set in JS. */
   #breadcrumb {
-    padding: 8px 16px;
+    padding: 6px 12px;
     background: var(--panel);
     border-bottom: 1px solid var(--border);
     display: none;
     overflow-x: auto;
     white-space: nowrap;
     flex-shrink: 0;
+    font-size: 12px;
   }
+  #breadcrumb.visible { display: block; }
   #breadcrumb span.crumb {
     cursor: pointer;
     color: var(--accent);
   }
   #breadcrumb span.crumb:hover { text-decoration: underline; }
   #breadcrumb .sep { color: var(--muted); margin: 0 6px; }
-  #main { flex: 1; position: relative; overflow: hidden; }
+
   svg { display: block; width: 100%; height: 100%; }
   .cell rect {
     cursor: pointer;
@@ -267,7 +564,9 @@
     gap: 10px;
     padding: 3px 0;
     border-bottom: 1px dashed var(--border);
+    cursor: default;
   }
+  #skips-list .row:hover { background: transparent; }
   #skips-list .row:last-child { border-bottom: none; }
   #skips-list .reason {
     color: #fbbf24;
@@ -290,11 +589,17 @@
             title="Size rectangles by allocated bytes (st_blocks*512)"
             disabled>Allocated</button>
   </div>
+  <div class="depth-control" title="Max depth to render below the current folder. Deeper levels collapse into a single rectangle.">
+    <label for="depth-input">Depth</label>
+    <button id="depth-dec" type="button" aria-label="Decrease depth">−</button>
+    <input id="depth-input" type="number" min="1" max="20" step="1" value="10"
+           inputmode="numeric">
+    <button id="depth-inc" type="button" aria-label="Increase depth">+</button>
+  </div>
   <button id="load-btn">Open JSON…</button>
   <button id="reset-btn" class="secondary" disabled>Reset zoom</button>
   <input type="file" id="file-input" accept=".json,application/json" hidden>
 </header>
-<div id="breadcrumb"></div>
 <div id="drop-zone">
   <div>Drop a JSON file produced by <code>apfs-fastindex-scan</code> here,</div>
   <div>or click <strong>Open JSON…</strong> above.</div>
@@ -307,8 +612,45 @@
   </div>
 </div>
 <div id="main" hidden>
-  <svg id="treemap"></svg>
-  <div id="tooltip"></div>
+  <div id="top-pane">
+    <div id="breadcrumb"></div>
+    <div id="top-split">
+      <div id="tree-list-pane">
+        <div class="pane-header">
+          <span>Folder tree</span>
+          <span class="pane-subtitle" id="tree-list-subtitle"></span>
+        </div>
+        <div class="col-header">
+          <span class="indent-spacer"></span>
+          <span class="ch-name">Name</span>
+          <span class="ch-pct">% of parent</span>
+          <span class="ch-size">Size</span>
+          <span class="ch-items">Items</span>
+        </div>
+        <div class="pane-body" id="tree-list-body" tabindex="0"></div>
+      </div>
+      <div class="splitter-v" id="splitter-v"></div>
+      <div id="ext-list-pane">
+        <div class="pane-header">
+          <span>By extension</span>
+          <span class="pane-subtitle" id="ext-list-subtitle"></span>
+        </div>
+        <div class="col-header">
+          <span class="indent-spacer"></span>
+          <span class="ch-name">Extension</span>
+          <span class="ch-pct">% of view</span>
+          <span class="ch-size">Size</span>
+          <span class="ch-items">Files</span>
+        </div>
+        <div class="pane-body" id="ext-list-body"></div>
+      </div>
+    </div>
+  </div>
+  <div class="splitter-h" id="splitter-h"></div>
+  <div id="bottom-pane">
+    <svg id="treemap"></svg>
+    <div id="tooltip"></div>
+  </div>
 </div>
 <div id="status-bar" hidden>
   <span><span class="pill" id="status-mode">—</span></span>
@@ -352,11 +694,35 @@ const skipsClose = document.getElementById("skips-close");
 const skipsList = document.getElementById("skips-list");
 const skipsTitle = document.getElementById("skips-title");
 const tooltip = document.getElementById("tooltip");
+const bottomPane = document.getElementById("bottom-pane");
+const topPane = document.getElementById("top-pane");
+const treeListBody = document.getElementById("tree-list-body");
+const extListBody = document.getElementById("ext-list-body");
+const treeListSubtitle = document.getElementById("tree-list-subtitle");
+const extListSubtitle = document.getElementById("ext-list-subtitle");
+const splitterH = document.getElementById("splitter-h");
+const splitterV = document.getElementById("splitter-v");
+const treeListPane = document.getElementById("tree-list-pane");
 const svg = d3.select("#treemap");
 let currentSkips = [];
 
 let rootNode = null;
 let currentNode = null;
+
+/// Set of node references that are currently expanded in the
+/// folder tree-list. We key by node reference (not path) because
+/// references are stable across the lifetime of a loaded scan and
+/// path comparisons would be O(n × depth) on every redraw.
+const expandedNodes = new WeakSet();
+
+/// The most recently-rendered flat row list, kept so click handlers
+/// can find the row corresponding to a node without re-walking.
+let treeListRows = [];
+
+/// Soft cap on visible children per directory in the tree-list to
+/// keep redraw cheap for pathological cases like /usr/share with
+/// thousands of files. The row-more row exposes the remainder.
+const TREE_LIST_CHILDREN_CAP = 400;
 
 /// Which size metric drives the treemap layout.
 /// "logical" -> `entry.logical_size` (always present; SR-017).
@@ -369,6 +735,19 @@ let activeMetric = "logical";
 /// Older scans (pre-R2-A) don't carry it; in that case we hide the
 /// Allocated toggle entirely.
 let allocatedAvailable = false;
+
+/// Max-depth cap exposed via the toolbar depth picker. Treemap
+/// renders progressively from depth 1 up to this; anything below
+/// collapses into a single rectangle keyed off the directory's
+/// aggregate. Declared up here (not next to the render function)
+/// because the depth-input wiring runs as the top-level script
+/// proceeds, before the render block is reached, and `let`
+/// declarations are TDZ-locked until that line executes.
+let maxDepth = 10;
+/// rAF handle for the in-flight progressive render. Cleared on
+/// completion or on a fresh `render()` call so we never paint into
+/// a navigated-away tree.
+let progressiveRafHandle = null;
 
 loadBtn.addEventListener("click", () => fileInput.click());
 fileInput.addEventListener("change", (ev) => {
@@ -394,6 +773,30 @@ resetBtn.addEventListener("click", () => {
 metricLogicalBtn.addEventListener("click", () => setActiveMetric("logical"));
 metricAllocatedBtn.addEventListener("click", () => setActiveMetric("allocated"));
 
+const depthInput = document.getElementById("depth-input");
+const depthDec = document.getElementById("depth-dec");
+const depthInc = document.getElementById("depth-inc");
+maxDepth = clampDepth(parseInt(depthInput.value, 10));
+depthInput.value = String(maxDepth);
+function clampDepth(v) {
+  if (!Number.isFinite(v)) return 10;
+  return Math.max(1, Math.min(20, v | 0));
+}
+function setMaxDepth(v) {
+  const next = clampDepth(v);
+  if (next === maxDepth) {
+    depthInput.value = String(next);
+    return;
+  }
+  maxDepth = next;
+  depthInput.value = String(next);
+  if (currentNode) render(currentNode);
+}
+depthInput.addEventListener("change", () => setMaxDepth(parseInt(depthInput.value, 10)));
+depthInput.addEventListener("blur", () => { depthInput.value = String(maxDepth); });
+depthDec.addEventListener("click", () => setMaxDepth(maxDepth - 1));
+depthInc.addEventListener("click", () => setMaxDepth(maxDepth + 1));
+
 function setActiveMetric(metric) {
   if (metric === activeMetric) return;
   if (metric === "allocated" && !allocatedAvailable) return;
@@ -405,6 +808,12 @@ function setActiveMetric(metric) {
     applyActiveMetric(rootNode);
     statusTotal.textContent = `logical: ${formatBytes(rootNode.valueLogical)}`;
     statusTotalAllocated.textContent = `allocated: ${formatAllocated(rootNode.valueAllocated)}`;
+    // The metric switch changes percentages, sort order, and the
+    // "unclaimed" rendering of allocated-null rows. Tree-list and
+    // ext-list both depend on `value`, so re-render both before
+    // the treemap.
+    renderTreeList();
+    renderExtList();
     navigate(currentNode);
   }
 }
@@ -442,7 +851,11 @@ statusSkips.addEventListener("click", () => {
   skipsModal.style.display = "flex";
 });
 skipsClose.addEventListener("click", () => { skipsModal.style.display = "none"; });
-window.addEventListener("resize", () => { if (currentNode) navigate(currentNode); });
+// Window resize re-lays out the treemap only. The tree-list and
+// ext-list use flex sizing and don't depend on viewport pixels, so
+// rebuilding their DOM on every resize tick (formerly via
+// `navigate(currentNode)`) was wasted work.
+window.addEventListener("resize", () => { if (currentNode) render(currentNode); });
 
 function loadFile(file) {
   const reader = new FileReader();
@@ -528,6 +941,11 @@ function ingest(doc, filename) {
   // not on window by default; explicit assignment is the contract.
   window.rootNode = rootNode;
   window.allocatedAvailable = allocatedAvailable;
+  // Start with the root expanded so the user sees top-level children
+  // without having to click. Any node the user later expands is
+  // remembered in `expandedNodes` until the next scan replaces
+  // `rootNode`, after which the WeakSet entries become unreachable.
+  expandedNodes.add(rootNode);
   navigate(rootNode);
 }
 // Expose `ingest` on the global scope so the native shell shim can call
@@ -548,14 +966,18 @@ function buildHierarchy(entries, aggregates) {
     for (let i = 0; i < parts.length - 1; i++) {
       const name = parts[i];
       if (!cursor.children.has(name)) {
-        cursor.children.set(name, newDirNode(name, parts.slice(0, i + 1).join("/")));
+        const child = newDirNode(name, parts.slice(0, i + 1).join("/"));
+        child.parent = cursor;
+        cursor.children.set(name, child);
       }
       cursor = cursor.children.get(name);
     }
     const leafName = parts[parts.length - 1];
     if (entry.entry_kind === "dir") {
       if (!cursor.children.has(leafName)) {
-        cursor.children.set(leafName, newDirNode(leafName, entry.path));
+        const child = newDirNode(leafName, entry.path);
+        child.parent = cursor;
+        cursor.children.set(leafName, child);
       }
     } else {
       // File / symlink / other: contribute size as a leaf. `allocated_size`
@@ -573,12 +995,14 @@ function buildHierarchy(entries, aggregates) {
         name: leafName,
         kind: entry.entry_kind,
         path: entry.path,
+        parent: cursor,
         logicalSize: entry.logical_size || 0,
         allocatedSize,
         // `value` is set by `applyActiveMetric` so a metric switch
         // doesn't have to rebuild the tree.
         value: 0,
         symlinkTarget: entry.symlink_target || null,
+        itemCount: 1,
       });
     }
   }
@@ -590,12 +1014,14 @@ function buildHierarchy(entries, aggregates) {
     if (!node.children) {
       node.valueLogical = node.logicalSize || 0;
       node.valueAllocated = node.allocatedSize;
+      node.itemCount = 1;
       return;
     }
     const arr = [];
     let logical = 0;
     let allocated = 0;
     let allocatedCollapsed = false;
+    let items = 0;
     for (const child of node.children.values()) {
       finalize(child);
       logical += child.valueLogical;
@@ -604,11 +1030,13 @@ function buildHierarchy(entries, aggregates) {
       } else if (!allocatedCollapsed) {
         allocated += child.valueAllocated;
       }
+      items += child.itemCount;
       arr.push(child);
     }
     node.children = arr;
     node.valueLogical = logical;
     node.valueAllocated = allocatedCollapsed ? null : allocated;
+    node.itemCount = items;
   }
   finalize(root);
   return root;
@@ -619,12 +1047,14 @@ function newDirNode(name, path) {
     name,
     kind: "dir",
     path,
+    parent: null,
     children: new Map(),
     value: 0,
     logicalSize: 0,
     allocatedSize: null,
     valueLogical: 0,
     valueAllocated: 0,
+    itemCount: 0,
   };
 }
 
@@ -632,16 +1062,28 @@ function navigate(node) {
   currentNode = node;
   statusCurrent.textContent = node.path === "." ? "/" : "/" + node.path;
   renderBreadcrumb(node);
+  // Expand every ancestor so the navigated row is visible in the
+  // tree-list without the user having to click through. Skip if
+  // the row was already expanded (idempotent).
+  let cursor = node.parent;
+  while (cursor) {
+    expandedNodes.add(cursor);
+    cursor = cursor.parent;
+  }
+  expandedNodes.add(node);
+  renderTreeList();
+  renderExtList();
   render(node);
+  scrollSelectedIntoView();
 }
 
 function renderBreadcrumb(node) {
-  breadcrumb.style.display = "block";
+  breadcrumb.classList.add("visible");
   const ancestors = [];
   let cursor = node;
   while (cursor) {
     ancestors.unshift(cursor);
-    cursor = findParent(rootNode, cursor.path);
+    cursor = cursor.parent;
   }
   breadcrumb.innerHTML = "";
   ancestors.forEach((n, i) => {
@@ -659,42 +1101,341 @@ function renderBreadcrumb(node) {
   });
 }
 
-function findParent(root, targetPath) {
-  if (targetPath === "." || targetPath === "") return null;
-  const parts = targetPath.split("/");
-  parts.pop();
-  if (parts.length === 0) return root;
-  const parentPath = parts.join("/");
-  return findByPath(root, parentPath);
-}
-
-function findByPath(node, path) {
-  if (node.path === path) return node;
-  if (!node.children) return null;
-  for (const child of node.children) {
-    if (path === child.path || path.startsWith(child.path + "/")) {
-      const hit = findByPath(child, path);
-      if (hit) return hit;
+/// Walk the rootNode and emit one row record per visible row (root,
+/// its expanded descendants' children, and so on). `value` is read
+/// off the node so the rendered sort order follows the active
+/// metric. Children with `value === 0` still render (for the
+/// "unclaimed allocated" case) but sort to the bottom.
+function buildTreeRows() {
+  treeListRows = [];
+  if (!rootNode) return;
+  function walk(node, depth) {
+    treeListRows.push({ node, depth });
+    if (!node.children || node.children.length === 0) return;
+    if (!expandedNodes.has(node)) return;
+    // Sort children by current `value` descending; stable on name
+    // so identical-size entries don't shuffle between renders.
+    const sorted = node.children.slice().sort((a, b) => {
+      const av = a.value || 0;
+      const bv = b.value || 0;
+      if (bv !== av) return bv - av;
+      return a.name.localeCompare(b.name);
+    });
+    const visible = sorted.length > TREE_LIST_CHILDREN_CAP
+      ? sorted.slice(0, TREE_LIST_CHILDREN_CAP)
+      : sorted;
+    for (const child of visible) {
+      walk(child, depth + 1);
+    }
+    if (sorted.length > visible.length) {
+      treeListRows.push({
+        node,
+        depth: depth + 1,
+        moreCount: sorted.length - visible.length,
+      });
     }
   }
-  return null;
+  walk(rootNode, 0);
 }
 
-// Render the whole subtree at once (WizTree-style): every leaf gets its
-// own rectangle, every directory is a labeled container around its
-// children. d3.treemap lays the entire hierarchy in one pass; we then
-// walk descendants and skip rectangles whose pixel area is below a
-// threshold so SVG stays interactive on 100k+ entry scans.
-const DIR_LABEL_HEIGHT = 18;
-const MIN_PIXEL_AREA = 4; // px^2; drop slivers smaller than this
-const MIN_LEAF_LABEL_W = 50;
-const MIN_LEAF_LABEL_H = 16;
-const MIN_DIR_LABEL_W = 60;
+function renderTreeList() {
+  buildTreeRows();
+  if (!rootNode) {
+    treeListBody.innerHTML = "";
+    treeListSubtitle.textContent = "";
+    return;
+  }
+  treeListSubtitle.textContent = "";
+  const frag = document.createDocumentFragment();
+  for (const row of treeListRows) {
+    frag.appendChild(buildTreeRowEl(row));
+  }
+  treeListBody.replaceChildren(frag);
+}
+
+function buildTreeRowEl(row) {
+  const { node, depth, moreCount } = row;
+  const el = document.createElement("div");
+  el.className = "row";
+  // 14px per indent level matches the disclosure column's width and
+  // keeps tree lines readable up to ~12 levels of depth before
+  // ellipsis would kick in.
+  el.style.paddingLeft = `${depth * 14}px`;
+  if (typeof moreCount === "number") {
+    el.classList.add("row-more");
+    el.textContent = `… and ${moreCount.toLocaleString()} more (showing top ${TREE_LIST_CHILDREN_CAP})`;
+    return el;
+  }
+  if (node === currentNode) el.classList.add("selected");
+
+  // Disclosure triangle (▶). Only directories with children get one;
+  // leaves use an `empty` placeholder so the column lines up.
+  const disc = document.createElement("span");
+  disc.className = "disclosure";
+  const isExpandable = node.kind === "dir" && node.children && node.children.length > 0;
+  if (!isExpandable) {
+    disc.classList.add("empty");
+  } else if (expandedNodes.has(node)) {
+    disc.classList.add("expanded");
+  }
+  disc.textContent = isExpandable ? "▶" : "";
+  if (isExpandable) {
+    disc.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      if (expandedNodes.has(node)) {
+        expandedNodes.delete(node);
+      } else {
+        expandedNodes.add(node);
+      }
+      renderTreeList();
+    });
+  }
+  el.appendChild(disc);
+
+  const icon = document.createElement("span");
+  icon.className = "icon " + (node.kind === "dir" ? "dir" : node.kind === "symlink" ? "symlink" : "file");
+  icon.textContent = node.kind === "dir" ? "▮" : node.kind === "symlink" ? "↪" : "·";
+  el.appendChild(icon);
+
+  const name = document.createElement("span");
+  name.className = "name";
+  name.textContent = node === rootNode ? "/" : node.name;
+  el.appendChild(name);
+
+  const pctCell = document.createElement("span");
+  pctCell.className = "pct-cell";
+  const parentValue = node.parent ? (node.parent.value || 0) : (node.value || 0);
+  const pct = parentValue > 0 ? Math.min(1, (node.value || 0) / parentValue) : 0;
+  const bar = document.createElement("span");
+  bar.className = "pct-bar";
+  const fill = document.createElement("div");
+  fill.style.width = `${(pct * 100).toFixed(2)}%`;
+  bar.appendChild(fill);
+  const pctNum = document.createElement("span");
+  pctNum.className = "pct-num";
+  pctNum.textContent = node === rootNode ? "—" : `${(pct * 100).toFixed(1)}%`;
+  pctCell.appendChild(bar);
+  pctCell.appendChild(pctNum);
+  el.appendChild(pctCell);
+
+  const size = document.createElement("span");
+  size.className = "size";
+  const allocatedUnclaimed = activeMetric === "allocated" &&
+    (node.valueAllocated === null || (node.kind !== "dir" && node.allocatedSize === null));
+  if (allocatedUnclaimed) {
+    size.classList.add("unclaimed");
+    size.textContent = "unclaimed";
+  } else {
+    size.textContent = formatBytes(node.value || 0);
+  }
+  el.appendChild(size);
+
+  const items = document.createElement("span");
+  items.className = "items";
+  if (node.kind === "dir") {
+    items.textContent = (node.itemCount || 0).toLocaleString();
+  } else {
+    items.textContent = "";
+  }
+  el.appendChild(items);
+
+  el.addEventListener("click", () => {
+    if (node.kind === "dir") {
+      navigate(node);
+    } else {
+      // For a file/symlink row, surface the selection to the host
+      // shell the same way a treemap leaf click would.
+      emitSelected(node);
+    }
+  });
+  el.addEventListener("contextmenu", (ev) => emitContextMenu(ev, node));
+  el.addEventListener("dblclick", () => {
+    if (node.kind === "dir") {
+      navigate(node);
+    }
+  });
+  return el;
+}
+
+function scrollSelectedIntoView() {
+  // Defer one frame so the DOM is laid out before `scrollIntoView`
+  // reads heights. Otherwise the auto-scroll runs against the
+  // pre-render layout and lands at the wrong row.
+  requestAnimationFrame(() => {
+    const sel = treeListBody.querySelector(".row.selected");
+    if (sel) sel.scrollIntoView({ block: "nearest", behavior: "auto" });
+  });
+}
+
+/// Aggregate the subtree of `node` by file extension. Built lazily on
+/// navigation and memoized on the node itself so revisiting a
+/// previously-shown directory is free. The cache key embeds the
+/// active metric so a metric switch invalidates the cached totals
+/// for the affected views automatically.
+function extSummaryFor(node) {
+  const cacheKey = `_extCache_${activeMetric}`;
+  if (node[cacheKey]) return node[cacheKey];
+  const byExt = new Map();
+  let totalSize = 0;
+  let unclaimed = false;
+  function walk(n) {
+    if (n.children && n.children.length > 0) {
+      for (const c of n.children) walk(c);
+      return;
+    }
+    if (n.kind === "dir") return; // empty directory leaf
+    let size;
+    if (activeMetric === "allocated") {
+      if (n.allocatedSize === null || n.allocatedSize === undefined) {
+        unclaimed = true;
+        size = 0;
+      } else {
+        size = Number(n.allocatedSize) || 0;
+      }
+    } else {
+      size = Number(n.logicalSize) || 0;
+    }
+    const ext = extensionOf(n.name, n.kind);
+    if (!byExt.has(ext)) {
+      byExt.set(ext, { ext, size: 0, count: 0 });
+    }
+    const slot = byExt.get(ext);
+    slot.size += size;
+    slot.count += 1;
+    totalSize += size;
+  }
+  walk(node);
+  const rows = Array.from(byExt.values()).sort((a, b) => {
+    if (b.size !== a.size) return b.size - a.size;
+    return a.ext.localeCompare(b.ext);
+  });
+  const summary = { rows, totalSize, unclaimed };
+  node[cacheKey] = summary;
+  return summary;
+}
+
+function extensionOf(name, kind) {
+  if (kind === "symlink") return "(symlink)";
+  if (kind !== "file") return `(${kind || "other"})`;
+  const dotIdx = name.lastIndexOf(".");
+  if (dotIdx <= 0 || dotIdx === name.length - 1) return "(no ext)";
+  return name.slice(dotIdx).toLowerCase();
+}
+
+function renderExtList() {
+  if (!currentNode) {
+    extListBody.innerHTML = "";
+    extListSubtitle.textContent = "";
+    return;
+  }
+  const summary = extSummaryFor(currentNode);
+  extListSubtitle.textContent = summary.rows.length === 0
+    ? "no files"
+    : `${summary.rows.length.toLocaleString()} ext, ${formatBytes(summary.totalSize)}` +
+      (summary.unclaimed ? " · some unclaimed" : "");
+
+  const frag = document.createDocumentFragment();
+  for (const r of summary.rows) {
+    frag.appendChild(buildExtRowEl(r, summary.totalSize));
+  }
+  extListBody.replaceChildren(frag);
+}
+
+function buildExtRowEl(r, totalSize) {
+  const el = document.createElement("div");
+  el.className = "row";
+  el.style.paddingLeft = "4px";
+
+  // Color chip uses the same palette as the treemap leaves so the
+  // user can match an extension's rectangles to its list row at a
+  // glance.
+  const chip = document.createElement("span");
+  chip.className = "icon-ext";
+  chip.style.background = colorForExt(r.ext);
+  el.appendChild(chip);
+
+  const name = document.createElement("span");
+  name.className = "name";
+  name.textContent = r.ext;
+  el.appendChild(name);
+
+  const pctCell = document.createElement("span");
+  pctCell.className = "pct-cell";
+  const pct = totalSize > 0 ? r.size / totalSize : 0;
+  const bar = document.createElement("span");
+  bar.className = "pct-bar";
+  const fill = document.createElement("div");
+  fill.style.width = `${(pct * 100).toFixed(2)}%`;
+  bar.appendChild(fill);
+  const pctNum = document.createElement("span");
+  pctNum.className = "pct-num";
+  pctNum.textContent = `${(pct * 100).toFixed(1)}%`;
+  pctCell.appendChild(bar);
+  pctCell.appendChild(pctNum);
+  el.appendChild(pctCell);
+
+  const size = document.createElement("span");
+  size.className = "size";
+  size.textContent = formatBytes(r.size);
+  el.appendChild(size);
+
+  const items = document.createElement("span");
+  items.className = "items";
+  items.textContent = r.count.toLocaleString();
+  el.appendChild(items);
+  return el;
+}
+
+/// Borrow the leaf palette so the extension chips colour-match the
+/// treemap. Symlinks / directories use the same swatches as their
+/// leaf rendering.
+function colorForExt(ext) {
+  if (ext === "(symlink)") return "#7d8a99";
+  if (ext.startsWith("(")) return "#5b6779";
+  const raw = ext.startsWith(".") ? ext.slice(1) : ext;
+  if (EXT_COLORS[raw]) return EXT_COLORS[raw];
+  return hashColor(raw);
+}
+
+// Render the whole subtree at once (WizTree-style): every leaf gets
+// its own rectangle, every directory is a labeled container around
+// its children. d3.treemap lays the entire hierarchy in one pass;
+// we then walk descendants and skip rectangles whose pixel area is
+// below a threshold so SVG stays interactive on 100k+ entry scans.
+//
+// Padding constants were tuned down from the original layout: tight
+// padding closes the dir-bg "gutters" between children that
+// otherwise read as wasted space on a screen-filling treemap. The
+// label-height reservation is conditional on the parent being big
+// enough to actually fit the label (handled in `paddingTop` below)
+// so small directories don't bleed a label-strip-shaped hole into
+// the layout. `MIN_PIXEL_AREA` is 1 so every culled sliver becomes
+// at most one pixel of empty space instead of a four-pixel patch.
+const DIR_LABEL_HEIGHT = 14;
+const MIN_PIXEL_AREA = 1;
+const MIN_LEAF_LABEL_W = 40;
+const MIN_LEAF_LABEL_H = 14;
+const MIN_DIR_LABEL_W = 48;
+
+/// Progressive render state. The current treemap is built up in
+/// passes — pass 1 lays out depth-1 children of `currentNode`, pass
+/// 2 adds the second level, …, up to `maxDepth`. Each pass replaces
+/// the SVG (d3.treemap squarifies in one shot; partial-tree
+/// incremental layout would require a custom packer), but the
+/// outer rectangles' positions are stable between passes because
+/// d3 sizes them off subtree totals which don't change with depth.
+/// `maxDepth` and `progressiveRafHandle` are declared near the top
+/// of the script so the depth-input wiring above can assign to
+/// them without TDZ-tripping `let`.
 
 function render(node) {
+  if (progressiveRafHandle !== null) {
+    cancelAnimationFrame(progressiveRafHandle);
+    progressiveRafHandle = null;
+  }
   svg.selectAll("*").remove();
-  const width = main.clientWidth;
-  const height = main.clientHeight;
+  const width = bottomPane.clientWidth;
+  const height = bottomPane.clientHeight;
   svg.attr("viewBox", `0 0 ${width} ${height}`);
 
   if (!node.children || node.children.length === 0) {
@@ -705,23 +1446,69 @@ function render(node) {
     return;
   }
 
-  const treeRoot = d3.hierarchy(node, d => d.children)
-    .sum(d => d.children ? 0 : d.value)
+  // Progressive: start at depth 1 for fast first paint, then walk
+  // down to `maxDepth`. A small tree might finish at d < maxDepth
+  // when there's nothing left to subdivide.
+  const targetDepth = Math.max(1, Math.min(20, maxDepth | 0));
+  renderAtDepth(node, 1, width, height);
+  if (targetDepth > 1) scheduleNextDepth(node, 2, targetDepth, width, height);
+}
+
+function scheduleNextDepth(node, depth, targetDepth, width, height) {
+  progressiveRafHandle = requestAnimationFrame(() => {
+    renderAtDepth(node, depth, width, height);
+    if (depth < targetDepth) {
+      scheduleNextDepth(node, depth + 1, targetDepth, width, height);
+    } else {
+      progressiveRafHandle = null;
+    }
+  });
+}
+
+function renderAtDepth(node, depth, width, height) {
+  const data = truncatedHierarchy(node, depth);
+  // Empty subtree (extremely rare past depth>1 because we already
+  // bail at the top-level dir check, but defensive).
+  if (!data.children || data.children.length === 0) return;
+  svg.selectAll("*").remove();
+
+  const treeRoot = d3.hierarchy(data, d => d.children)
+    .sum(d => d.children ? 0 : (d.value || 0))
     .sort((a, b) => b.value - a.value);
   d3.treemap()
     .size([width, height])
-    .paddingInner(1)
-    .paddingOuter(2)
-    .paddingTop(d => (d.depth === 0 || (d.children && d.children.length > 0))
-      ? DIR_LABEL_HEIGHT
-      : 0)
-    .tile(d3.treemapSquarify)(treeRoot);
+    .paddingInner(0.5)
+    .paddingOuter(1)
+    // Only reserve label space inside directories that are going
+    // to be large enough to *use* it. A pre-layout estimate is
+    // impossible (paddingTop drives the layout), but we know the
+    // total area each subtree will get from .value; the heuristic
+    // is "reserve label height iff this subtree's area share is
+    // at least one row-height of pixels". That keeps tiny dirs
+    // from carving a 14px-tall band out of a 30×4 rectangle.
+    .paddingTop(d => {
+      if (!(d.children && d.children.length > 0)) return 0;
+      // The root's label is the breadcrumb above the treemap — no
+      // need to reserve a strip at y=0 for it. Reclaiming this row
+      // is the single biggest empty-space win at the top of the
+      // viewport.
+      if (d.depth === 0) return 0;
+      const total = treeRoot.value || 1;
+      const share = (d.value || 0) / total;
+      const approxArea = share * width * height;
+      return approxArea > (DIR_LABEL_HEIGHT * MIN_DIR_LABEL_W * 1.5)
+        ? DIR_LABEL_HEIGHT
+        : 0;
+    })
+    .tile(d3.treemapSquarify.ratio(1.4))(treeRoot);
 
   // Directory containers (every non-leaf node except root).
   const dirNodes = treeRoot.descendants().filter(d =>
     d.depth > 0 && d.children && d.children.length > 0 && pixelArea(d) >= MIN_PIXEL_AREA);
 
-  // Leaf rectangles (files/symlinks; size > 0 or shown anyway for tiny ones).
+  // Leaf rectangles (files/symlinks/truncated-dirs; size > 0 or
+  // shown anyway for tiny ones — the MIN_PIXEL_AREA=1 keeps every
+  // visible pixel filled instead of fading into the dir-bg).
   const leafNodes = treeRoot.leaves().filter(d => pixelArea(d) >= MIN_PIXEL_AREA);
 
   // Draw directories first so leaves sit on top.
@@ -742,16 +1529,17 @@ function render(node) {
     .on("mousemove", (event, d) => showTooltip(event, d.data))
     .on("mouseleave", hideTooltip)
     .on("click", (_, d) => {
-      if (d.data.kind === "dir" && d.data.children && d.data.children.length > 0) {
-        navigate(d.data);
+      const original = d.data._original || d.data;
+      if (original.kind === "dir" && original.children && original.children.length > 0) {
+        navigate(original);
       }
     })
-    .on("contextmenu", (event, d) => emitContextMenu(event, d.data));
+    .on("contextmenu", (event, d) => emitContextMenu(event, d.data._original || d.data));
 
   dirCell.append("text")
     .attr("class", "dir-label")
     .attr("x", 4)
-    .attr("y", 12)
+    .attr("y", 11)
     .attr("fill", "#cfd6e4")
     .attr("font-size", 11)
     .text(d => dirLabel(d))
@@ -774,13 +1562,23 @@ function render(node) {
     .attr("fill", d => leafColor(d.data))
     .on("mousemove", (event, d) => showTooltip(event, d.data))
     .on("mouseleave", hideTooltip)
-    .on("click", (_, d) => emitSelected(d.data))
-    .on("contextmenu", (event, d) => emitContextMenu(event, d.data));
+    .on("click", (_, d) => {
+      // A truncated directory leaf navigates instead of "selects" —
+      // clicking it means "drill in", which matches what a dir-bg
+      // click does for non-truncated dirs.
+      const original = d.data._original || d.data;
+      if (d.data._isTruncatedDir) {
+        navigate(original);
+      } else {
+        emitSelected(original);
+      }
+    })
+    .on("contextmenu", (event, d) => emitContextMenu(event, d.data._original || d.data));
 
   leafCell.append("text")
     .attr("x", 4)
-    .attr("y", 12)
-    .attr("fill", "#0b0d12")
+    .attr("y", 11)
+    .attr("fill", d => d.data._isTruncatedDir ? "#e4e7ee" : "#0b0d12")
     .attr("font-size", 10)
     .text(d => leafLabel(d))
     .each(function (d) {
@@ -788,6 +1586,53 @@ function render(node) {
         d3.select(this).remove();
       }
     });
+}
+
+/// Walk `node`'s subtree and produce a shallow copy where any
+/// directory at depth >= `maxD` is rewritten into a leaf carrying
+/// the directory's full subtree value plus an `_isTruncatedDir`
+/// flag. The original node reference is stored on `_original` so
+/// click / context-menu handlers can navigate back into the
+/// uncopied data. Returned objects share `name` / `path` /
+/// `valueLogical` / `valueAllocated` / `kind` with the originals
+/// so existing label and tooltip helpers keep working.
+function truncatedHierarchy(node, maxD) {
+  function walk(n, depth) {
+    if (depth >= maxD || !n.children || n.children.length === 0) {
+      // Leaf or truncated dir: no children for d3.treemap to
+      // recurse into. `value` is already metric-adjusted by
+      // applyActiveMetric() so we can copy it verbatim.
+      return {
+        name: n.name,
+        kind: n.kind,
+        path: n.path,
+        value: n.value || 0,
+        valueLogical: n.valueLogical,
+        valueAllocated: n.valueAllocated,
+        logicalSize: n.logicalSize,
+        allocatedSize: n.allocatedSize,
+        symlinkTarget: n.symlinkTarget,
+        itemCount: n.itemCount,
+        _isTruncatedDir: n.kind === "dir" && n.children && n.children.length > 0,
+        _original: n,
+      };
+    }
+    return {
+      name: n.name,
+      kind: n.kind,
+      path: n.path,
+      value: n.value || 0,
+      valueLogical: n.valueLogical,
+      valueAllocated: n.valueAllocated,
+      logicalSize: n.logicalSize,
+      allocatedSize: n.allocatedSize,
+      symlinkTarget: n.symlinkTarget,
+      itemCount: n.itemCount,
+      _original: n,
+      children: n.children.map(c => walk(c, depth + 1)),
+    };
+  }
+  return walk(node, 0);
 }
 
 function pixelArea(d) {
@@ -803,6 +1648,12 @@ function dirLabel(d) {
 }
 
 function leafLabel(d) {
+  if (d.data._isTruncatedDir) {
+    // Trailing slash + bytes is the visual cue that this rectangle
+    // is a *folded-up* directory; clicking it navigates instead of
+    // selecting a file.
+    return `${d.data.name}/ · ${formatBytes(d.value)}`;
+  }
   return d.data.name;
 }
 
@@ -835,10 +1686,21 @@ function leafColor(data) {
   // A leaf with no allocated_size under the active "allocated" metric
   // is a SR-019 fail-closed row (sparse / decmpfs). Render it muted
   // so the user can see *where* the unclaimed rows are rather than
-  // wondering why their treemap shrank.
-  if (activeMetric === "allocated" && data.allocatedSize === null) {
-    return "#3b3f4a";
+  // wondering why their treemap shrank. Truncated-directory leaves
+  // check their aggregate (`valueAllocated`) instead of their own
+  // `allocatedSize` (which is always null for directories).
+  if (activeMetric === "allocated") {
+    if (data._isTruncatedDir) {
+      if (data.valueAllocated === null) return "#3b3f4a";
+    } else if (data.allocatedSize === null) {
+      return "#3b3f4a";
+    }
   }
+  // A truncated directory deserves its own swatch so the user can
+  // tell it apart from files at a glance. Slightly bluer than
+  // `dir-bg` (rgba(30, 35, 45, 0.55)) so it reads as "still a
+  // folder, just folded shut" rather than "background".
+  if (data._isTruncatedDir) return "#3e4a5e";
   if (data.kind === "symlink") return "#7d8a99";
   if (data.kind !== "file") return "#5b6779";
   const name = data.name || "";
@@ -879,7 +1741,7 @@ function showTooltip(event, data) {
   }
   tooltip.innerHTML = lines.join("");
   const margin = 12;
-  const rect = main.getBoundingClientRect();
+  const rect = bottomPane.getBoundingClientRect();
   let x = event.clientX - rect.left + margin;
   let y = event.clientY - rect.top + margin;
   const tw = tooltip.offsetWidth;
@@ -958,6 +1820,60 @@ function formatAllocated(value) {
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]);
 }
+
+// ──────────────────────────────────────────────────────────────────
+// Splitter drag handling. Two splitters: horizontal (resizes top
+// vs. bottom by adjusting `#top-pane.height`) and vertical (resizes
+// tree-list vs. ext-list by adjusting `#tree-list-pane.flex` / width).
+// Both follow the same pattern: mousedown captures the start
+// dimensions, mousemove updates the styled size, mouseup releases.
+// ──────────────────────────────────────────────────────────────────
+
+(function setupSplitters() {
+  let dragging = null;
+  let startCoord = 0;
+  let startSize = 0;
+  let containerSize = 0;
+
+  splitterH.addEventListener("mousedown", (e) => {
+    dragging = "h";
+    startCoord = e.clientY;
+    startSize = topPane.getBoundingClientRect().height;
+    containerSize = main.getBoundingClientRect().height;
+    document.body.style.cursor = "ns-resize";
+    e.preventDefault();
+  });
+  splitterV.addEventListener("mousedown", (e) => {
+    dragging = "v";
+    startCoord = e.clientX;
+    startSize = treeListPane.getBoundingClientRect().width;
+    containerSize = document.getElementById("top-split").getBoundingClientRect().width;
+    document.body.style.cursor = "ew-resize";
+    e.preventDefault();
+  });
+  document.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    if (dragging === "h") {
+      const delta = e.clientY - startCoord;
+      const newH = Math.max(120, Math.min(containerSize - 140, startSize + delta));
+      topPane.style.height = `${newH}px`;
+      // Treemap depends on `bottomPane.clientWidth/clientHeight`, so
+      // re-render whenever its area changes.
+      if (currentNode) render(currentNode);
+    } else if (dragging === "v") {
+      const delta = e.clientX - startCoord;
+      const newW = Math.max(220, Math.min(containerSize - 200, startSize + delta));
+      treeListPane.style.flex = "none";
+      treeListPane.style.width = `${newW}px`;
+    }
+  });
+  document.addEventListener("mouseup", () => {
+    if (dragging) {
+      dragging = null;
+      document.body.style.cursor = "";
+    }
+  });
+})();
 </script>
 </body>
 </html>
