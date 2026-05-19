@@ -84,10 +84,11 @@ enum NativeBridge {
                     lsIdx.map(String.init) ?? "nil",
                     nonsenseIdx.map(String.init) ?? "nil"
                 )
-                // Phase-3b probe: lay out the scan into a
-                // 1000×1000 viewport and report cell stats.
+                // Phase-3b/c probe: lay out the scan into a
+                // 1000×1000 viewport, dump cell stats, and
+                // hit-test the centre point as a smoke check.
                 let tLayout0 = Date()
-                let layout = scan.renderCells(
+                let layout = scan.layout(
                     rootedAt: 0,
                     maxDepth: 0,
                     metric: .logical,
@@ -110,8 +111,21 @@ enum NativeBridge {
                         "[native phase3b probe] %d cells (%d dirs, %d leaves) in %.1f ms; area range %.2f-%.2f px²",
                         layout.count, dirCount, leafCount, layoutMs, minArea, maxArea
                     )
+                    let tHit0 = Date()
+                    let hit = layout.hitTest(x: 500, y: 500)
+                    let hitMs = Date().timeIntervalSince(tHit0) * 1000.0
+                    if let hit, hit < UInt32(layout.count) {
+                        let c = layout.cells[Int(hit)]
+                        let path = scan.path(of: c.node_index) ?? "(no path)"
+                        NSLog(
+                            "[native phase3c probe] hit at (500,500): cell %u depth %u path=%@ in %.3f ms",
+                            hit, c.depth, path, hitMs
+                        )
+                    } else {
+                        NSLog("[native phase3c probe] hit at (500,500): no cell in %.3f ms", hitMs)
+                    }
                 } else {
-                    NSLog("[native phase3b probe] renderCells returned nil")
+                    NSLog("[native phase3b probe] layout returned nil")
                 }
             } else {
                 NSLog("[native phase2 probe] \(probePath): FAILED")
@@ -287,47 +301,64 @@ final class Scan {
         case allocated = 1
     }
 
-    /// Owning wrapper around a `Vec<ApfsCell>` produced by
-    /// `apfs_render_cells`. `deinit` calls `apfs_render_cells_free`
-    /// so Swift can hold the slice for as long as the NSView
-    /// needs it without leaking.
-    final class CellLayout {
-        fileprivate let slice: ApfsCellSlice
-        var count: Int { Int(slice.count) }
+    /// Owning wrapper around an `ApfsLayout` — the Rust handle
+    /// that holds both the laid-out cells and the spatial-hash
+    /// hit-test grid. `deinit` calls `apfs_layout_free`. Swift
+    /// keeps a `Layout` alive for as long as the NSView needs
+    /// it (one per (node, depth, metric, dims) request).
+    final class Layout {
+        fileprivate let handle: OpaquePointer
+        let count: Int
 
-        /// Read access to the cells as a Swift
+        /// Read access to the laid-out cells as
         /// `UnsafeBufferPointer<ApfsCell>` — `forEach`, `for…in`,
         /// random indexing all work. Pointer + count come
-        /// straight from the Rust slice with no copy.
+        /// straight from the Rust slice with no copy; valid for
+        /// the lifetime of this `Layout`.
         var cells: UnsafeBufferPointer<ApfsCell> {
-            UnsafeBufferPointer(start: slice.cells, count: Int(slice.count))
+            let slice = apfs_layout_cells(handle)
+            return UnsafeBufferPointer(start: slice.cells, count: Int(slice.count))
         }
 
-        fileprivate init(slice: ApfsCellSlice) {
-            self.slice = slice
+        fileprivate init(handle: OpaquePointer, count: Int) {
+            self.handle = handle
+            self.count = count
         }
 
         deinit {
-            apfs_render_cells_free(slice)
+            apfs_layout_free(handle)
+        }
+
+        /// Sentinel matching `APFS_CELL_INVALID` (`u32::MAX`).
+        static let cellInvalid: UInt32 = UInt32.max
+
+        /// Hit-test the layout at the given CSS-pixel point.
+        /// Returns the index of the deepest cell containing
+        /// `(x, y)`, or `nil` if no cell does. Sub-millisecond
+        /// on a /-scan thanks to the Rust-side 64×64 spatial
+        /// hash; safe to call every mousemove.
+        func hitTest(x: Float, y: Float) -> UInt32? {
+            let idx = apfs_layout_hit_test(handle, x, y)
+            return idx == Layout.cellInvalid ? nil : idx
         }
     }
 
     /// Lay out the subtree rooted at `nodeIndex` into a viewport
     /// of CSS-pixel `width × height`. `maxDepth = 0` is the
     /// unlimited sentinel (matches the depth-picker behaviour).
-    /// Returns nil when the slice is empty (e.g. the subtree
-    /// has no children with positive value).
-    func renderCells(
+    /// Returns nil when the subtree has nothing to draw (no
+    /// children with positive value).
+    func layout(
         rootedAt nodeIndex: UInt32,
         maxDepth: UInt32,
         metric: Metric,
         width: Float,
         height: Float
-    ) -> CellLayout? {
-        let slice = apfs_render_cells(handle, nodeIndex, maxDepth, metric.rawValue, width, height)
-        guard slice.cells != nil, slice.count > 0 else {
-            return nil
-        }
-        return CellLayout(slice: slice)
+    ) -> Layout? {
+        guard let handle = apfs_layout_new(
+            self.handle, nodeIndex, maxDepth, metric.rawValue, width, height
+        ) else { return nil }
+        let count = Int(apfs_layout_cell_count(handle))
+        return Layout(handle: handle, count: count)
     }
 }

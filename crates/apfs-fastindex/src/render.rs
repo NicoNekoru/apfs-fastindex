@@ -414,6 +414,91 @@ fn palette_lookup(ext_bytes: &[u8]) -> Option<u32> {
     }
 }
 
+/// 64×64 axis-aligned spatial hash for sub-millisecond
+/// hit-testing on a laid-out cell array. Each cell is inserted
+/// into every bucket it overlaps; buckets are then sorted
+/// depth-descending so the first containing match the
+/// `hit_test` loop sees is always the deepest cell at that
+/// point.
+pub struct HitGrid {
+    /// `HIT_GRID_N * HIT_GRID_N` buckets in row-major order,
+    /// each holding indices into the cell array the grid was
+    /// built against.
+    buckets: Vec<Vec<u32>>,
+    cell_w: f32,
+    cell_h: f32,
+}
+
+const HIT_GRID_N: usize = 64;
+
+impl HitGrid {
+    /// Build a grid over `cells` covering the rect `(0, 0) →
+    /// (width, height)`. Pass the same dimensions the layout
+    /// was constructed with.
+    pub fn build(cells: &[ApfsCell], width: f32, height: f32) -> Self {
+        let cell_w = (width / HIT_GRID_N as f32).max(f32::EPSILON);
+        let cell_h = (height / HIT_GRID_N as f32).max(f32::EPSILON);
+        let mut buckets: Vec<Vec<u32>> = (0..(HIT_GRID_N * HIT_GRID_N))
+            .map(|_| Vec::new())
+            .collect();
+        for (idx, c) in cells.iter().enumerate() {
+            let gx0 = ((c.x0 / cell_w) as i32).max(0).min((HIT_GRID_N - 1) as i32);
+            let gy0 = ((c.y0 / cell_h) as i32).max(0).min((HIT_GRID_N - 1) as i32);
+            // Subtract epsilon from the high edge so a cell that
+            // exactly aligns with a grid boundary doesn't fan
+            // into the next bucket unnecessarily.
+            let gx1 = (((c.x1 - 0.0001) / cell_w) as i32)
+                .max(0)
+                .min((HIT_GRID_N - 1) as i32);
+            let gy1 = (((c.y1 - 0.0001) / cell_h) as i32)
+                .max(0)
+                .min((HIT_GRID_N - 1) as i32);
+            for gy in gy0..=gy1 {
+                let row = (gy as usize) * HIT_GRID_N;
+                for gx in gx0..=gx1 {
+                    buckets[row + gx as usize].push(idx as u32);
+                }
+            }
+        }
+        for bucket in &mut buckets {
+            bucket.sort_by(|&a, &b| {
+                cells[b as usize].depth.cmp(&cells[a as usize].depth)
+            });
+        }
+        HitGrid { buckets, cell_w, cell_h }
+    }
+
+    /// Find the deepest cell containing `(x, y)`. Returns
+    /// `None` if no cell does or `(x, y)` is outside the
+    /// laid-out rect.
+    pub fn hit_test(&self, x: f32, y: f32, cells: &[ApfsCell]) -> Option<u32> {
+        if x < 0.0 || y < 0.0 {
+            return None;
+        }
+        let gx = ((x / self.cell_w) as usize).min(HIT_GRID_N - 1);
+        let gy = ((y / self.cell_h) as usize).min(HIT_GRID_N - 1);
+        let bucket = &self.buckets[gy * HIT_GRID_N + gx];
+        for &idx in bucket {
+            let c = &cells[idx as usize];
+            if x >= c.x0 && x < c.x1 && y >= c.y0 && y < c.y1 {
+                return Some(idx);
+            }
+        }
+        None
+    }
+}
+
+/// Opaque handle representing a treemap layout. Owns both the
+/// laid-out cells and the spatial-hash index used for
+/// hit-testing. Constructed via `apfs_layout_new`, freed via
+/// `apfs_layout_free`. The FFI consumer (Swift) holds the
+/// handle for as long as it needs to render or hit-test against
+/// the layout.
+pub struct ApfsLayout {
+    pub(crate) cells: Box<[ApfsCell]>,
+    pub(crate) hit_grid: HitGrid,
+}
+
 /// FNV-1a hash → HSL → RGB. Same shape as the JS `hashColor`
 /// helper so an unknown extension renders in the same hue across
 /// both renderers (until the standalone HTML viz is dropped in
@@ -508,5 +593,26 @@ mod tests {
         assert_eq!(cells.len(), 1);
         assert_eq!(cells[0].depth, 1);
         assert_eq!(cells[0].flags & CELL_FLAG_DIR, CELL_FLAG_DIR);
+    }
+
+    #[test]
+    fn hit_grid_finds_deepest_cell_under_point() {
+        let entries = vec![
+            entry("a", EntryKind::Dir, 0),
+            entry("a/b.txt", EntryKind::File, 100),
+        ];
+        let tree = Tree::build(&entries);
+        let cells = render_cells(&tree, 0, 0, Metric::Logical, 1000.0, 1000.0);
+        let grid = HitGrid::build(&cells, 1000.0, 1000.0);
+        // Pick a point well inside `a` (the only top-level
+        // dir). Hit-test should return the deeper `b.txt`
+        // cell — not `a` — because the grid sorts each
+        // bucket depth-descending.
+        let b_idx = cells.iter().position(|c| c.depth == 2).unwrap() as u32;
+        let b = cells[b_idx as usize];
+        let x = (b.x0 + b.x1) * 0.5;
+        let y = (b.y0 + b.y1) * 0.5;
+        let hit = grid.hit_test(x, y, &cells);
+        assert_eq!(hit, Some(b_idx));
     }
 }

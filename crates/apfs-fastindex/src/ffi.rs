@@ -27,7 +27,7 @@ use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::ptr;
 
-use crate::render::{render_cells, ApfsCell, Metric};
+use crate::render::{render_cells, ApfsCell, ApfsLayout, HitGrid, Metric};
 use crate::tree::{Tree, NODE_INVALID};
 use crate::{fallback_scan_path_with_options, FallbackOptions};
 
@@ -339,18 +339,17 @@ pub extern "C" fn apfs_scan_node_name(scan: *const ApfsScan, idx: u32) -> ApfsPa
 }
 
 // ─────────────────────────────────────────────────────────────
-// Phase 3b: treemap render — laid-out cell slice
+// Phase 3b/c: treemap layout — opaque handle + hit-test
 // ─────────────────────────────────────────────────────────────
 
 // Re-export the cell record under the C ABI so cbindgen picks
 // up the symbol. The actual struct lives in `crate::render`.
 pub use crate::render::ApfsCell as ApfsCellRecord;
 
-/// Borrowed slice of laid-out cells. Lifetime is tied to the
-/// `ApfsCellSlice` itself — the underlying `Box<[ApfsCell]>` is
-/// reclaimed when Swift calls `apfs_render_cells_free` with
-/// this slice. Swift reads via
-/// `UnsafeBufferPointer<ApfsCellRecord>(start: cells, count: count)`.
+/// Borrowed view over a laid-out cell array. Valid for the
+/// lifetime of the enclosing `ApfsLayout`; Swift reads via
+/// `UnsafeBufferPointer<ApfsCell>(start: cells, count: count)`
+/// without a copy.
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct ApfsCellSlice {
@@ -358,29 +357,33 @@ pub struct ApfsCellSlice {
     pub count: u64,
 }
 
+/// Sentinel returned by `apfs_layout_hit_test` when no cell
+/// covers the point. Matches `crate::tree::NODE_INVALID`
+/// (`u32::MAX`).
+pub const APFS_CELL_INVALID: u32 = u32::MAX;
+
 /// Lay out the subtree rooted at `node_idx` inside a viewport of
 /// (`width`, `height`) CSS pixels. `max_depth = 0` is the
-/// no-truncation sentinel (matches the JS depth picker — render
-/// every descendant, cull only by min pixel area).
+/// no-truncation sentinel (render every descendant; cull only by
+/// `MIN_PIXEL_AREA = 1`).
 ///
 /// `metric`:
 ///   - `0` → logical
 ///   - `1` → allocated
 ///
-/// The returned slice owns its memory. Pair every successful
-/// call with `apfs_render_cells_free(slice)` once the Swift
-/// renderer has drawn from it.
+/// The returned handle owns both the cell array and the
+/// `HitGrid` for hit-testing. Always pair with
+/// `apfs_layout_free`.
 #[no_mangle]
-pub extern "C" fn apfs_render_cells(
+pub extern "C" fn apfs_layout_new(
     scan: *const ApfsScan,
     node_idx: u32,
     max_depth: u32,
     metric: u32,
     width: f32,
     height: f32,
-) -> ApfsCellSlice {
-    let empty = ApfsCellSlice { cells: ptr::null(), count: 0 };
-    let Some(s) = (unsafe { scan.as_ref() }) else { return empty; };
+) -> *mut ApfsLayout {
+    let Some(s) = (unsafe { scan.as_ref() }) else { return ptr::null_mut(); };
     let metric_enum = if metric == 1 { Metric::Allocated } else { Metric::Logical };
     let cells = render_cells(
         &s.tree,
@@ -391,32 +394,64 @@ pub extern "C" fn apfs_render_cells(
         height as f64,
     );
     if cells.is_empty() {
-        return empty;
+        return ptr::null_mut();
     }
-    // Move the Vec into a fixed-size boxed slice so the pointer
-    // stays stable while Swift reads it. Free path reconstructs
-    // the box from `(cells, count)`.
     let boxed: Box<[ApfsCell]> = cells.into_boxed_slice();
-    let count = boxed.len() as u64;
-    let ptr = Box::into_raw(boxed) as *mut ApfsCell;
-    ApfsCellSlice { cells: ptr, count }
+    let hit_grid = HitGrid::build(&boxed, width, height);
+    let layout = Box::new(ApfsLayout {
+        cells: boxed,
+        hit_grid,
+    });
+    Box::into_raw(layout)
 }
 
-/// Reclaim a slice previously returned by `apfs_render_cells`.
+/// Reclaim a layout previously returned by `apfs_layout_new`.
 /// Idempotent on NULL.
 #[no_mangle]
-pub extern "C" fn apfs_render_cells_free(slice: ApfsCellSlice) {
-    if slice.cells.is_null() || slice.count == 0 {
+pub extern "C" fn apfs_layout_free(layout: *mut ApfsLayout) {
+    if layout.is_null() {
         return;
     }
-    // SAFETY: `cells` came from `Box::into_raw` over a slice
-    // of length `count`; reconstruct + drop.
+    // SAFETY: caller obtained `layout` from `apfs_layout_new`
+    // and has not yet freed it. Box drop releases cells +
+    // hit_grid in one shot.
     unsafe {
-        drop(Box::from_raw(std::slice::from_raw_parts_mut(
-            slice.cells as *mut ApfsCell,
-            slice.count as usize,
-        )));
+        drop(Box::from_raw(layout));
     }
+}
+
+/// Borrow the laid-out cells. Pointer lifetime is tied to the
+/// enclosing `ApfsLayout`; Swift must not retain the slice past
+/// the layout handle's lifetime.
+#[no_mangle]
+pub extern "C" fn apfs_layout_cells(layout: *const ApfsLayout) -> ApfsCellSlice {
+    let empty = ApfsCellSlice { cells: ptr::null(), count: 0 };
+    let Some(l) = (unsafe { layout.as_ref() }) else { return empty; };
+    ApfsCellSlice {
+        cells: l.cells.as_ptr(),
+        count: l.cells.len() as u64,
+    }
+}
+
+/// Number of cells in the layout. Convenience accessor — the
+/// same value is on `ApfsCellSlice.count`.
+#[no_mangle]
+pub extern "C" fn apfs_layout_cell_count(layout: *const ApfsLayout) -> u64 {
+    let Some(l) = (unsafe { layout.as_ref() }) else { return 0; };
+    l.cells.len() as u64
+}
+
+/// Find the deepest cell containing `(x, y)`. Returns
+/// `APFS_CELL_INVALID` (`u32::MAX`) if no cell does or
+/// `(x, y)` is outside the laid-out rect. Sub-millisecond on a
+/// /-class scan thanks to the 64×64 spatial hash; OK to call
+/// every mousemove.
+#[no_mangle]
+pub extern "C" fn apfs_layout_hit_test(layout: *const ApfsLayout, x: f32, y: f32) -> u32 {
+    let Some(l) = (unsafe { layout.as_ref() }) else { return APFS_CELL_INVALID; };
+    l.hit_grid
+        .hit_test(x, y, &l.cells)
+        .unwrap_or(APFS_CELL_INVALID)
 }
 
 /// `true` iff at least one entry has `allocated_size = Some(_)`.
