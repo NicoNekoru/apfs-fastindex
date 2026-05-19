@@ -1055,20 +1055,31 @@ window.ingest = ingest;
 /// canvas is actually painted (so the loading spinner stays up
 /// until the user sees the result), or to `false` on a decode /
 /// ingest failure (already logged via `console.error`).
+///
+/// Three Content-Type branches:
+///   - `application/x-msgpack-stream` → streaming ingest:
+///     decode-and-insert one entry record at a time, periodic
+///     re-renders so the user sees a growing treemap before all
+///     bytes have been consumed.
+///   - `application/x-msgpack` → bulk msgpack: `decodeMsgpack` →
+///     `ingest(doc)`.
+///   - anything else (default JSON) → `TextDecoder` + `JSON.parse`
+///     → `ingest(doc)`.
 window.ingestRawBytes = function(buffer, contentType, filename) {
   if (!buffer || buffer.byteLength === 0) {
     console.error("ingestRawBytes: empty payload");
     return Promise.resolve(false);
   }
+  const ct = contentType || "";
+  if (ct.indexOf("msgpack-stream") !== -1) {
+    return ingestStreaming(buffer, filename || "native://current-scan");
+  }
   const t0 = performance.now();
   let doc;
   try {
-    if (contentType && contentType.indexOf("msgpack") !== -1) {
+    if (ct.indexOf("msgpack") !== -1) {
       doc = decodeMsgpack(buffer);
     } else {
-      // Default to JSON: UTF-8 decode then parse. TextDecoder is
-      // ~2× faster than `xhr.responseText` because we avoid an
-      // intermediate JS string the engine then has to UTF-16-up.
       const text = new TextDecoder("utf-8").decode(buffer);
       doc = JSON.parse(text);
     }
@@ -1079,8 +1090,8 @@ window.ingestRawBytes = function(buffer, contentType, filename) {
   const t1 = performance.now();
   pushPerf("ingest_decode", t1 - t0, {
     bytes: buffer.byteLength,
-    contentType: contentType || "(none)",
-    encoding: (contentType && contentType.indexOf("msgpack") !== -1) ? "msgpack" : "json",
+    contentType: ct || "(none)",
+    encoding: ct.indexOf("msgpack") !== -1 ? "msgpack" : "json",
   });
   try {
     const ret = ingest(doc, filename || "native://current-scan");
@@ -1096,6 +1107,284 @@ window.ingestRawBytes = function(buffer, contentType, filename) {
     return Promise.resolve(false);
   }
 };
+
+/// Streaming ingest: process the msgpack-stream byte buffer in
+/// chunks, inserting one entry at a time into a growing tree,
+/// and triggering re-renders periodically so the user sees the
+/// treemap fill in. Resolves to `true` after the stream's
+/// trailer record has been seen and the final render has
+/// painted.
+function ingestStreaming(buffer, filename) {
+  const tStart = performance.now();
+  // Reset all the state `ingest()` would normally clear. We
+  // build the tree incrementally below so we can't share the
+  // bulk path's "clear cache after building" timing.
+  treemapLayoutCache.clear();
+  apfsPerfLog.length = 0;
+  cells = [];
+  cellsContextKey = null;
+  cellsMaxDepth = 0;
+  currentDepthFilter = 0;
+  hitGrid = null;
+  hitGridStale = true;
+  lastHoverCell = null;
+  updateHoverOverlay(null);
+
+  rootNode = newDirNode(".", ".");
+  currentNode = rootNode;
+  currentSkips = [];
+  allocatedAvailable = false;
+  window.rootNode = rootNode;
+  window.allocatedAvailable = allocatedAvailable;
+  window.scanSource = null;
+  // Top-level children should be visible in the tree-list from the
+  // first render onward; without this, the tree-list shows just
+  // the root and the user has to click to expand.
+  expandedNodes.add(rootNode);
+  skipsModal.style.display = "none";
+
+  // Initial empty UI state so the user sees the chrome appear
+  // before the first entries land.
+  dropZone.hidden = true;
+  main.hidden = false;
+  statusBar.hidden = false;
+  resetBtn.disabled = false;
+  statusEntries.textContent = "0 entries";
+  statusTotal.textContent = "logical: 0 B";
+  statusTotalAllocated.textContent = "allocated: 0 B";
+  statusTotalAllocated.style.display = "none";
+  claim.textContent = "(loading stream…)";
+  statusMode.textContent = "fallback";
+  statusSkips.hidden = true;
+
+  const decoder = createStreamingMsgpackDecoder();
+
+  let entriesIngested = 0;
+  let lastRenderCount = 0;
+  let lastRenderTime = 0;
+  let renderedOnce = false;
+  let headerSeen = false;
+  // First paint trips at this entry count — early enough to
+  // give the user feedback well before the full scan lands.
+  const FIRST_RENDER_AT_N = 5000;
+  // Subsequent re-renders are throttled to this cadence (entries
+  // or wall time, whichever comes first) so we don't redraw on
+  // every chunk.
+  const RENDER_EVERY_N_ENTRIES = 25000;
+  const RENDER_EVERY_MS = 350;
+  // Bytes per processing slice; the JS task yields between slices
+  // so the spinner / status bar can repaint.
+  const CHUNK_BYTES = 512 * 1024;
+
+  function handleRecord(record) {
+    if (!Array.isArray(record) || record.length < 2) return;
+    const kind = record[0];
+    const payload = record[1];
+    if (kind === "header") {
+      headerSeen = true;
+      const mode = (payload && payload.mode) || "fallback";
+      claim.textContent = (payload && payload.correctness_claim) || filename;
+      statusMode.textContent = mode;
+      window.scanSource = (payload && payload.source) || null;
+      currentSkips = []; // walk_skips not in header today
+      if (payload && Array.isArray(payload.not_claimed) && payload.not_claimed.length > 0) {
+        // Surface the SR-019 not-claimed list as a skips pill
+        // even before any entries have arrived.
+        statusSkips.hidden = false;
+        statusSkips.textContent = `${payload.not_claimed.length.toLocaleString()} not_claimed`;
+      }
+    } else if (kind === "entry") {
+      // Read `activeMetric` *per call* so a metric toggle mid-
+      // stream lands cleanly. `setActiveMetric` re-walks the
+      // partial tree to fix already-ingested nodes; from this
+      // call onward we sum into the same metric basis.
+      insertEntryIncremental(payload, activeMetric === "allocated");
+      entriesIngested++;
+    } else if (kind === "trailer") {
+      // Trailing record; let the stream-completion path render.
+    }
+  }
+
+  return new Promise((resolve) => {
+    let offset = 0;
+
+    function processSlice() {
+      if (offset >= buffer.byteLength) {
+        // Stream complete. Flush any pending state into a final
+        // render so the user sees the full tree. `navigate`
+        // rebuilds the breadcrumb / tree-list / ext-list and
+        // calls `render` — same path the bulk ingest takes via
+        // `ingest()` → `navigate(rootNode)`.
+        statusEntries.textContent = `${entriesIngested.toLocaleString()} entries`;
+        statusTotal.textContent = `logical: ${formatBytes(rootNode.valueLogical)}`;
+        statusTotalAllocated.textContent =
+          `allocated: ${formatAllocated(rootNode.valueAllocated)}`;
+        statusTotalAllocated.style.display = allocatedAvailable ? "" : "none";
+        const renderPromise = navigate(rootNode, { immediate: true });
+        pushPerf("ingest_streaming_complete", performance.now() - tStart, {
+          entries: entriesIngested,
+          bytes: buffer.byteLength,
+        });
+        renderPromise.then(() => resolve(true));
+        return;
+      }
+      const sliceStart = performance.now();
+      const end = Math.min(offset + CHUNK_BYTES, buffer.byteLength);
+      const chunk = new Uint8Array(buffer, offset, end - offset);
+      offset = end;
+
+      decoder.feed(chunk);
+      let rec;
+      // eslint-disable-next-line no-cond-assign
+      while ((rec = decoder.next()) !== null) {
+        handleRecord(rec);
+      }
+
+      const now = performance.now();
+      const sinceCount = entriesIngested - lastRenderCount;
+      const sinceMs = now - lastRenderTime;
+      const shouldRender =
+        (!renderedOnce && entriesIngested >= FIRST_RENDER_AT_N) ||
+        (renderedOnce && (sinceCount >= RENDER_EVERY_N_ENTRIES || sinceMs >= RENDER_EVERY_MS));
+      if (shouldRender) {
+        renderedOnce = true;
+        lastRenderCount = entriesIngested;
+        lastRenderTime = now;
+        statusEntries.textContent = `${entriesIngested.toLocaleString()} entries`;
+        statusTotal.textContent = `logical: ${formatBytes(rootNode.valueLogical)}`;
+        statusTotalAllocated.textContent =
+          `allocated: ${formatAllocated(rootNode.valueAllocated)}`;
+        statusTotalAllocated.style.display = allocatedAvailable ? "" : "none";
+        renderTreeList();
+        renderExtList();
+        // immediate=true so we don't pay an extra rAF tick per
+        // mid-stream paint; the user already sees the spinner
+        // dismiss when the canvas first paints.
+        render(currentNode, { immediate: true });
+        pushPerf("ingest_streaming_slice", performance.now() - sliceStart, {
+          entries: entriesIngested,
+          sliceBytes: chunk.byteLength,
+        });
+      }
+      // Yield to the event loop so any pending UI work (status
+      // bar text, depth picker, tooltip) can paint between
+      // slices. setTimeout 0 is enough — we don't need rAF
+      // alignment for these progressive paints.
+      setTimeout(processSlice, 0);
+    }
+
+    processSlice();
+  });
+}
+
+/// Append one entry to the in-progress tree. Mirrors
+/// `buildHierarchy`'s charCode path-walk + lookup, but maintains
+/// aggregate `value*` / `itemCount` fields up the ancestor chain
+/// as we go so the renderer can read a coherent tree at any
+/// point. `metricAllocated` is captured per stream (the active
+/// metric at ingest start) — changing the metric mid-stream is
+/// handled by a full re-walk on completion via `setActiveMetric`.
+function insertEntryIncremental(entry, metricAllocated) {
+  if (!entry || typeof entry.path !== "string") return;
+  const path = entry.path;
+  const pathLen = path.length;
+  let cursor = rootNode;
+  let segStart = 0;
+
+  // Pre-compute the leaf's typed sizes so we don't redo this
+  // work in the per-segment loop.
+  const entryKind = entry.entry_kind;
+  const isLeaf = entryKind !== "dir";
+  const logicalSize = isLeaf ? (entry.logical_size || 0) : 0;
+  const rawAllocated = Object.prototype.hasOwnProperty.call(entry, "allocated_size")
+    ? entry.allocated_size
+    : undefined;
+  const allocatedSize = isLeaf
+    ? (rawAllocated === null || rawAllocated === undefined
+        ? null
+        : Number(rawAllocated) || 0)
+    : 0;
+
+  // First time we see an allocated_size key in *any* entry, flip
+  // the global flag so the status bar / metric toggle pick it up
+  // on the next render.
+  if (!allocatedAvailable
+      && Object.prototype.hasOwnProperty.call(entry, "allocated_size")) {
+    allocatedAvailable = true;
+    window.allocatedAvailable = true;
+    metricAllocatedBtn.disabled = false;
+  }
+
+  for (let i = 0; i <= pathLen; i++) {
+    const isSep = (i === pathLen) || (path.charCodeAt(i) === 47);
+    if (!isSep) continue;
+    if (i === segStart) { segStart = i + 1; continue; }
+    const isLast = (i === pathLen);
+    const name = path.slice(segStart, i);
+
+    if (isLast) {
+      if (entryKind === "dir") {
+        if (!cursor.childMap.has(name)) {
+          const fullPath = cursor.path === "."
+            ? name : cursor.path + "/" + name;
+          const child = newDirNode(name, fullPath);
+          child.parent = cursor;
+          cursor.childMap.set(name, child);
+          cursor.children.push(child);
+          // New dir contributes 0 logical/allocated for now;
+          // its eventual children will bump.
+        }
+      } else {
+        const fullPath = cursor.path === "."
+          ? name : cursor.path + "/" + name;
+        const leaf = {
+          name,
+          kind: entryKind,
+          path: fullPath,
+          parent: cursor,
+          logicalSize,
+          allocatedSize,
+          valueLogical: logicalSize,
+          valueAllocated: allocatedSize,
+          value: metricAllocated
+            ? (allocatedSize === null ? 0 : allocatedSize)
+            : logicalSize,
+          symlinkTarget: entry.symlink_target || null,
+          itemCount: 1,
+        };
+        cursor.childMap.set(name, leaf);
+        cursor.children.push(leaf);
+        // Bump every ancestor's aggregate state.
+        let p = cursor;
+        while (p) {
+          p.valueLogical += logicalSize;
+          if (allocatedSize === null) {
+            p.valueAllocated = null;
+          } else if (p.valueAllocated !== null) {
+            p.valueAllocated += allocatedSize;
+          }
+          p.itemCount += 1;
+          p.value = metricAllocated
+            ? (p.valueAllocated === null ? 0 : p.valueAllocated)
+            : p.valueLogical;
+          p = p.parent;
+        }
+      }
+    } else {
+      let child = cursor.childMap.get(name);
+      if (!child) {
+        const fullPath = cursor.path === "."
+          ? name : cursor.path + "/" + name;
+        child = newDirNode(name, fullPath);
+        child.parent = cursor;
+        cursor.childMap.set(name, child);
+        cursor.children.push(child);
+      }
+      cursor = child;
+    }
+    segStart = i + 1;
+  }
+}
 
 /// Inline MessagePack decoder. Handles the subset rmp-serde
 /// emits for our schema: nil/bool, int (fixint + uint/int 8-64),
@@ -1195,23 +1484,167 @@ function decodeMsgpack(buffer) {
 }
 window.decodeMsgpack = decodeMsgpack;
 
+/// Streaming msgpack decoder. Accepts bytes incrementally via
+/// `feed(chunk)` and emits one decoded top-level value at a time
+/// via `next()`. Returns `null` from `next()` when there aren't
+/// enough bytes for another complete value — feed more, try
+/// again. The `--format msgpack-stream` Rust output is a sequence
+/// of top-level msgpack values (each a `[kind, payload]`
+/// fixarray), so this is the only piece needed to decode the
+/// stream incrementally.
+///
+/// Approach: a single contiguous `Uint8Array` buffer accumulates
+/// unconsumed bytes. Each `next()` attempts a full top-level
+/// decode; if a per-byte `ensure(n)` check trips, we treat it as
+/// "not enough bytes" — restore the read cursor and return null.
+/// Throw-on-EOF is wasteful for partial parses (the partial work
+/// is discarded), but boundary failures happen at most once per
+/// chunk so the cost is bounded.
+function createStreamingMsgpackDecoder() {
+  let buf = new Uint8Array(0);
+  let view = new DataView(buf.buffer);
+  let pos = 0;
+  const decoder = new TextDecoder("utf-8");
+
+  // Sentinel for "ran past the end of the current buffer" — we
+  // throw-catch this instead of paying the branch cost in every
+  // read helper.
+  function NeedMore() {}
+  NeedMore.prototype = Object.create(Error.prototype);
+
+  function feed(chunk) {
+    if (!chunk || chunk.length === 0) return;
+    // Compact: drop the bytes we've already consumed from the
+    // front of the buffer so it doesn't grow without bound.
+    const remaining = buf.length - pos;
+    if (remaining === 0) {
+      buf = chunk instanceof Uint8Array
+        ? new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength)
+        : new Uint8Array(chunk);
+      pos = 0;
+    } else {
+      const next = new Uint8Array(remaining + chunk.length);
+      next.set(buf.subarray(pos), 0);
+      next.set(chunk, remaining);
+      buf = next;
+      pos = 0;
+    }
+    view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  }
+
+  function ensure(n) {
+    if (pos + n > buf.length) throw new NeedMore();
+  }
+
+  function readU8()  { ensure(1); return buf[pos++]; }
+  function readU16() { ensure(2); const v = view.getUint16(pos, false); pos += 2; return v; }
+  function readU32() { ensure(4); const v = view.getUint32(pos, false); pos += 4; return v; }
+  function readU64() {
+    ensure(8);
+    const hi = view.getUint32(pos, false);
+    const lo = view.getUint32(pos + 4, false);
+    pos += 8;
+    return hi * 4294967296 + lo;
+  }
+  function readI8()  { ensure(1); const v = view.getInt8(pos);   pos += 1; return v; }
+  function readI16() { ensure(2); const v = view.getInt16(pos, false); pos += 2; return v; }
+  function readI32() { ensure(4); const v = view.getInt32(pos, false); pos += 4; return v; }
+  function readI64() {
+    ensure(8);
+    const hi = view.getInt32(pos, false);
+    const lo = view.getUint32(pos + 4, false);
+    pos += 8;
+    return hi * 4294967296 + lo;
+  }
+  function readF32() { ensure(4); const v = view.getFloat32(pos, false); pos += 4; return v; }
+  function readF64() { ensure(8); const v = view.getFloat64(pos, false); pos += 8; return v; }
+  function readStr(n) {
+    ensure(n);
+    const s = decoder.decode(buf.subarray(pos, pos + n));
+    pos += n;
+    return s;
+  }
+  function readArray(n) {
+    const out = new Array(n);
+    for (let i = 0; i < n; i++) out[i] = decodeValue();
+    return out;
+  }
+  function readMap(n) {
+    const out = {};
+    for (let i = 0; i < n; i++) {
+      const k = decodeValue();
+      out[k] = decodeValue();
+    }
+    return out;
+  }
+  function decodeValue() {
+    const c = readU8();
+    if (c < 0x80) return c;
+    if (c < 0x90) return readMap(c & 0x0f);
+    if (c < 0xa0) return readArray(c & 0x0f);
+    if (c < 0xc0) return readStr(c & 0x1f);
+    if (c >= 0xe0) return c - 0x100;
+    switch (c) {
+      case 0xc0: return null;
+      case 0xc2: return false;
+      case 0xc3: return true;
+      case 0xca: return readF32();
+      case 0xcb: return readF64();
+      case 0xcc: return readU8();
+      case 0xcd: return readU16();
+      case 0xce: return readU32();
+      case 0xcf: return readU64();
+      case 0xd0: return readI8();
+      case 0xd1: return readI16();
+      case 0xd2: return readI32();
+      case 0xd3: return readI64();
+      case 0xd9: return readStr(readU8());
+      case 0xda: return readStr(readU16());
+      case 0xdb: return readStr(readU32());
+      case 0xdc: return readArray(readU16());
+      case 0xdd: return readArray(readU32());
+      case 0xde: return readMap(readU16());
+      case 0xdf: return readMap(readU32());
+      default:
+        throw new Error("msgpack stream: unsupported tag 0x" + c.toString(16));
+    }
+  }
+
+  function next() {
+    if (pos >= buf.length) return null;
+    const saved = pos;
+    try {
+      return decodeValue();
+    } catch (e) {
+      if (e instanceof NeedMore) {
+        pos = saved;
+        return null;
+      }
+      throw e;
+    }
+  }
+
+  return { feed, next };
+}
+
 function buildHierarchy(entries, aggregates) {
   // Walk every entry once and build a tree keyed by path
   // components. Hot-loop microopts vs. the original code:
   //
   // - No `split("/").filter(Boolean)` per entry. Splitting allocates
-  //   a fresh array of strings on every row (~5 entries per
-  //   row on average × 1 M rows = 5 M garbage strings on a
-  //   `/`-scan). We scan the path with charCode comparisons and
-  //   only `slice()` out the segment name when we need it (i.e.
-  //   when we have to create a new node).
+  //   a fresh array of strings on every row (~5 M garbage strings
+  //   on a `/`-scan). We scan the path with charCode comparisons
+  //   and only `slice()` out the segment name when we need it
+  //   (i.e. when we have to create a new node).
   // - Cumulative path is *not* recomputed per level. The parent
   //   directory already knows its full path; for an existing
   //   child we never need a path string at all, and for a new
   //   child we build it from the parent's `path` + "/" + name.
-  // - Direct array-index assignment into `cursor.children` (still
-  //   a Map for fast `get`/`has`) — we don't pre-check `has`
-  //   then `get`; one `get` + null-check covers both.
+  // - Each node holds children as an `Array` *and* a `Map`. We
+  //   look up via the Map and append to the Array as we go, so
+  //   the post-build `finalize` walk doesn't have to re-pack
+  //   anything — it just sums values up the tree and discards
+  //   the now-redundant Map.
   const root = newDirNode(".", ".");
   for (let ei = 0; ei < entries.length; ei++) {
     const entry = entries[ei];
@@ -1220,34 +1653,26 @@ function buildHierarchy(entries, aggregates) {
     let cursor = root;
     let segStart = 0;
     let i = 0;
-    // Walk every '/' boundary in `path`. At each boundary we
-    // either advance into an existing dir or create a new one.
-    // The last segment (at i === pathLen) is the leaf or
-    // terminal-dir node.
     for (i = 0; i <= pathLen; i++) {
       const isSep = (i === pathLen) || (path.charCodeAt(i) === 47);
       if (!isSep) continue;
       if (i === segStart) {
-        // empty segment (leading '/' or '//'); skip
         segStart = i + 1;
         continue;
       }
       const isLast = (i === pathLen);
       const name = path.slice(segStart, i);
       if (isLast) {
-        // Terminal segment — leaf or directory node.
         if (entry.entry_kind === "dir") {
-          if (!cursor.children.has(name)) {
+          if (!cursor.childMap.has(name)) {
             const fullPath = cursor.path === "."
               ? name : cursor.path + "/" + name;
             const child = newDirNode(name, fullPath);
             child.parent = cursor;
-            cursor.children.set(name, child);
+            cursor.childMap.set(name, child);
+            cursor.children.push(child);
           }
         } else {
-          // File / symlink / other. `allocated_size` may be
-          // missing (pre-R2-A scan: `undefined`) or null (SR-019
-          // fail-closed). Both render as "unclaimed" downstream.
           const rawAllocated = Object.prototype.hasOwnProperty.call(entry, "allocated_size")
             ? entry.allocated_size
             : undefined;
@@ -1256,29 +1681,29 @@ function buildHierarchy(entries, aggregates) {
             : Number(rawAllocated) || 0;
           const fullPath = cursor.path === "."
             ? name : cursor.path + "/" + name;
-          cursor.children.set(name, {
+          const leaf = {
             name,
             kind: entry.entry_kind,
             path: fullPath,
             parent: cursor,
             logicalSize: entry.logical_size || 0,
             allocatedSize,
-            // `value` is set in `finalize` so a metric switch
-            // doesn't have to rebuild the tree.
             value: 0,
             symlinkTarget: entry.symlink_target || null,
             itemCount: 1,
-          });
+          };
+          cursor.childMap.set(name, leaf);
+          cursor.children.push(leaf);
         }
       } else {
-        // Intermediate dir along the path. Get-or-create.
-        let child = cursor.children.get(name);
+        let child = cursor.childMap.get(name);
         if (!child) {
           const fullPath = cursor.path === "."
             ? name : cursor.path + "/" + name;
           child = newDirNode(name, fullPath);
           child.parent = cursor;
-          cursor.children.set(name, child);
+          cursor.childMap.set(name, child);
+          cursor.children.push(child);
         }
         cursor = child;
       }
@@ -1286,30 +1711,32 @@ function buildHierarchy(entries, aggregates) {
     }
   }
 
-  // Convert children Maps to arrays and compute per-node totals
-  // (logical, allocated, item count) **plus** the active-metric
-  // `value` field in the same walk. Folding `applyActiveMetric`
-  // into `finalize` halves the post-build tree-walk cost on big
-  // scans (was two O(n) passes over millions of nodes; now one).
-  // `valueAllocated === null` collapses up the tree (SR-019 / EX-22).
+  // Compute per-node totals (logical, allocated, item count)
+  // **plus** the active-metric `value` field in the same walk.
+  // Folding `applyActiveMetric` into `finalize` halves the
+  // post-build tree-walk cost on big scans (one O(n) walk).
+  // `valueAllocated === null` collapses up the tree (SR-019).
+  // `childMap` is discarded post-finalize — `children` (Array)
+  // is the only structure consumers need from here on.
   const metricAllocated = activeMetric === "allocated";
   function finalize(node) {
-    if (!node.children) {
+    const kids = node.children;
+    if (!kids || kids.length === 0) {
       node.valueLogical = node.logicalSize || 0;
       node.valueAllocated = node.allocatedSize;
-      node.itemCount = 1;
+      node.itemCount = node.kind === "dir" ? 0 : 1;
       node.value = metricAllocated
         ? (node.valueAllocated === null ? 0 : node.valueAllocated)
         : node.valueLogical;
+      node.childMap = null;
       return;
     }
-    const childIter = node.children.values();
-    const arr = [];
     let logical = 0;
     let allocated = 0;
     let allocatedCollapsed = false;
     let items = 0;
-    for (const child of childIter) {
+    for (let i = 0; i < kids.length; i++) {
+      const child = kids[i];
       finalize(child);
       logical += child.valueLogical;
       if (child.valueAllocated === null) {
@@ -1318,15 +1745,14 @@ function buildHierarchy(entries, aggregates) {
         allocated += child.valueAllocated;
       }
       items += child.itemCount;
-      arr.push(child);
     }
-    node.children = arr;
     node.valueLogical = logical;
     node.valueAllocated = allocatedCollapsed ? null : allocated;
     node.itemCount = items;
     node.value = metricAllocated
       ? (allocatedCollapsed ? 0 : allocated)
       : logical;
+    node.childMap = null;
   }
   finalize(root);
   return root;
@@ -1338,7 +1764,16 @@ function newDirNode(name, path) {
     kind: "dir",
     path,
     parent: null,
-    children: new Map(),
+    // `children` is always the array consumers (d3, tree-list,
+    // ext-list, render) iterate. `childMap` is a parallel lookup
+    // index used during *construction* — both the bulk
+    // `buildHierarchy` and the streaming `insertEntryIncremental`
+    // path need O(1) "do I already have a child named X?" while
+    // walking the path. After bulk `finalize`, `childMap` is set
+    // to null to free the Map; streaming keeps it because more
+    // entries may still arrive.
+    children: [],
+    childMap: new Map(),
     value: 0,
     logicalSize: 0,
     allocatedSize: null,

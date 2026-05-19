@@ -177,17 +177,32 @@ struct VizWebView: NSViewRepresentable {
         /// branches of the URL handler.
         func respondWith(data: Data, requestURL: URL, task: WKURLSchemeTask) {
             // Sniff the first byte to pick the right Content-Type.
-            // JSON output starts with `{` (0x7b); MessagePack
-            // output starts with a fixmap (0x80-0x8f) or
-            // map16/map32 (0xde/0xdf). Anything else is
-            // fail-closed — we'd rather the page show a parse
-            // error than mis-label the payload.
+            //   `{` (0x7b)                  → JSON (legacy / standalone).
+            //   `0x84-0x8f` fixmap or
+            //   `0xde / 0xdf` map16 / map32 → bulk msgpack (one envelope).
+            //   `0x92` fixarray-2           → msgpack-stream (the
+            //                                 viz's incremental
+            //                                 ingest format — the
+            //                                 first record's outer
+            //                                 array tag).
+            // Anything else fail-closes via the bulk msgpack path
+            // — the JS decoder will surface a parse error rather
+            // than the handler mis-labelling the payload.
             let firstByte = data.first ?? 0
             let isJson = firstByte == 0x7b // '{'
-            let mime = isJson ? "application/json" : "application/x-msgpack"
-            let contentType = isJson
-                ? "application/json; charset=utf-8"
-                : "application/x-msgpack"
+            let isStream = firstByte == 0x92
+            let mime: String
+            let contentType: String
+            if isJson {
+                mime = "application/json"
+                contentType = "application/json; charset=utf-8"
+            } else if isStream {
+                mime = "application/x-msgpack-stream"
+                contentType = "application/x-msgpack-stream"
+            } else {
+                mime = "application/x-msgpack"
+                contentType = "application/x-msgpack"
+            }
             // **CORS matters here.** The viz is loaded from a
             // `file://` URL (the SwiftPM resource bundle) and is
             // XHR'ing to `apfs-scan://`. Different schemes count
