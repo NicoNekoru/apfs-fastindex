@@ -239,7 +239,23 @@ pub(crate) fn walk_checkpoint_maps<R: Read + Seek>(
 
     for offset in 0..container.xp_desc_len {
         let position = (container.xp_desc_index + offset) % container.xp_desc_blocks;
-        let block_address = container.xp_desc_base + position as u64;
+        // `xp_desc_base + position` previously used wrapping
+        // arithmetic; a crafted NXSB with `xp_desc_base` near
+        // `u64::MAX` would wrap to a low paddr and direct the
+        // following `read_block` at attacker-chosen low bytes
+        // of the source file. Round-2 audit #Rust-10. The block
+        // address is bounded by the source size in `read_block`,
+        // so this is a confidentiality concern only — but the
+        // fix is one line.
+        let block_address = container
+            .xp_desc_base
+            .checked_add(position as u64)
+            .ok_or_else(|| {
+                ScanError::InvalidObject(format!(
+                    "xp_desc_base {} + position {} overflows u64",
+                    container.xp_desc_base, position
+                ))
+            })?;
         let block = read_block(reader, block_address, block_size as usize)?;
         let is_trailing = offset == container.xp_desc_len - 1;
         if is_trailing {
