@@ -119,7 +119,10 @@ The cbindgen header regenerates on every change to `crates/apfs-fastindex/src/ff
 ## Future Development
 Ultimately, I started working on this project because I missed WizTree, and wanted the efficient disk index/visualization experience for Mac. In its current form, the app is already quite usable for me, and without further impulse my development will stop here. However, I am open to feature requests, and there are still some things that I would like to spend at least a little bit of time on, of which I list a few here. For my other projects, check out [my website](https://kai.ichwan.rocks/).
 
-- Automatic updates
+- ~~Automatic updates~~ — done via Sparkle 2 + GitHub releases.
+  See [`docs/auto-update-setup.md`](docs/auto-update-setup.md)
+  for the one-time EdDSA-keygen setup and the per-release flow
+  (`make-release.sh --publish` updates the appcast).
 - Better coverage (?)
 - A live/watch mode (watch cache visualization during development)
 - Filtering/searching
