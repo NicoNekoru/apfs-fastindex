@@ -191,11 +191,24 @@ impl<'a> NamespaceIndex<'a> {
                 self.logical_size_and_target(child.file_id, child.entry_type);
             let allocated_size = self.allocated_size(child.file_id, child.entry_type);
             let is_dir = matches!(entry_kind, EntryKind::Dir);
-            if is_dir && visited.insert(child.file_id) {
-                // Recurse before the entry move so we can hand the
-                // child path in by reference; the parent path Vec push
-                // still consumes its own owned String afterwards.
-                self.walk_dir(child.file_id, &path, out, visited, depth + 1, truncated);
+            if is_dir {
+                if visited.insert(child.file_id) {
+                    // Recurse before the entry move so we can hand the
+                    // child path in by reference; the parent path Vec push
+                    // still consumes its own owned String afterwards.
+                    self.walk_dir(child.file_id, &path, out, visited, depth + 1, truncated);
+                } else {
+                    // DREC cycle detected — `visited` already
+                    // contains this file_id, so an ancestor in
+                    // the current walk already touched it. Pre-
+                    // r3 fix this was silently dropped; now we
+                    // emit a WalkSkip so the UI shows the
+                    // truncation (audit r3 #F3).
+                    truncated.push(crate::WalkSkip {
+                        path: path.clone(),
+                        reason: format!("drec_cycle(file_id={})", child.file_id),
+                    });
+                }
             }
             out.push(NamespaceEntry {
                 path: path.into_boxed_str(),
@@ -558,5 +571,142 @@ mod tests {
         assert_eq!(root.unique_inode_logical_total, 29);
         assert_eq!(root.unique_inode_allocated_total, Some(4096));
         assert_eq!(root.contributing_file_ids, vec![30]);
+    }
+
+    /// Build a stand-alone `NamespaceIndex` over a hand-rolled
+    /// drec-children map. Lets the depth / cycle tests below
+    /// drive `walk_into` without spinning a real
+    /// `FsRecordDump`.
+    fn make_index_with_chain(names: &[&'static str]) -> NamespaceIndex<'static> {
+        // Build a single-child chain: root → n0 → n1 → n2 → ...
+        // Each `child.file_id` = index + APFS_ROOT_DIR_OID + 1,
+        // ensuring no collisions with the root oid.
+        let mut drec: BTreeMap<u64, Vec<DrecChild<'static>>> = BTreeMap::new();
+        for (i, name) in names.iter().enumerate() {
+            // Parent of level i is the previous level's
+            // file_id. Level 0 has the synthetic root as
+            // parent.
+            let parent_id = if i == 0 {
+                APFS_ROOT_DIR_OID
+            } else {
+                APFS_ROOT_DIR_OID + i as u64
+            };
+            let child_file_id = APFS_ROOT_DIR_OID + (i as u64) + 1;
+            drec.entry(parent_id).or_default().push(DrecChild {
+                name,
+                file_id: child_file_id,
+                entry_type: DT_DIR,
+            });
+        }
+        NamespaceIndex {
+            drec_children: drec,
+            inode_by_id: BTreeMap::new(),
+            xattrs_by_id: BTreeMap::new(),
+        }
+    }
+
+    /// Audit r3 #F2: a 130-deep directory chain must hit the
+    /// `MAX_TREE_DEPTH = 128` cap and surface as a `WalkSkip`
+    /// row with `reason: "depth_cap_reached(128)"`. Pre-fix
+    /// this truncated silently.
+    #[test]
+    fn walk_dir_depth_cap_emits_walk_skip() {
+        // 130 nested dirs `d000` … `d129`. The cap fires at
+        // depth=128, so the subtree starting at d128 is skipped.
+        // Use leaked &'static str so the names live for the
+        // whole test (NamespaceIndex's drec_children borrows
+        // them by &'a str).
+        let names: Vec<&'static str> = (0..130)
+            .map(|i| -> &'static str { Box::leak(format!("d{:03}", i).into_boxed_str()) })
+            .collect();
+        let index = make_index_with_chain(&names);
+
+        let mut entries: Vec<NamespaceEntry> = Vec::new();
+        let mut truncated: Vec<crate::WalkSkip> = Vec::new();
+        index.walk_into(&mut entries, &mut truncated);
+
+        assert_eq!(
+            truncated.len(),
+            1,
+            "exactly one WalkSkip expected at the depth cap; got {:?}",
+            truncated
+        );
+        let skip = &truncated[0];
+        assert_eq!(skip.reason, "depth_cap_reached(128)");
+        assert!(
+            skip.path.contains("d127") || skip.path.contains("d128"),
+            "skip path should mention the cap-hitting dir; got: {}",
+            skip.path
+        );
+        // We should have emitted at least MAX_TREE_DEPTH entries
+        // before truncating (every nested dir up to the cap).
+        assert!(
+            entries.len() >= crate::MAX_TREE_DEPTH,
+            "expected at least {} entries before truncation; got {}",
+            crate::MAX_TREE_DEPTH,
+            entries.len()
+        );
+    }
+
+    /// Audit r3 #F3: a DREC cycle (a child whose file_id
+    /// references an ancestor already in `visited`) must
+    /// surface as a `WalkSkip` with
+    /// `reason: "drec_cycle(file_id=X)"`. Pre-fix this skipped
+    /// the recursion silently.
+    #[test]
+    fn walk_dir_drec_cycle_emits_walk_skip() {
+        // Build root → A → B, where B's drec entry points
+        // back at A's file_id. Walking A inserts file_id=3 into
+        // `visited`; when we reach B's child (also file_id=3),
+        // visited.insert returns false → emit a WalkSkip.
+        const A_ID: u64 = APFS_ROOT_DIR_OID + 1; // 3
+        const B_ID: u64 = APFS_ROOT_DIR_OID + 2; // 4
+
+        let mut drec: BTreeMap<u64, Vec<DrecChild<'static>>> = BTreeMap::new();
+        // root → A
+        drec.entry(APFS_ROOT_DIR_OID).or_default().push(DrecChild {
+            name: "A",
+            file_id: A_ID,
+            entry_type: DT_DIR,
+        });
+        // A → B
+        drec.entry(A_ID).or_default().push(DrecChild {
+            name: "B",
+            file_id: B_ID,
+            entry_type: DT_DIR,
+        });
+        // B → cycle back to A
+        drec.entry(B_ID).or_default().push(DrecChild {
+            name: "loop",
+            file_id: A_ID,
+            entry_type: DT_DIR,
+        });
+
+        let index = NamespaceIndex {
+            drec_children: drec,
+            inode_by_id: BTreeMap::new(),
+            xattrs_by_id: BTreeMap::new(),
+        };
+        let mut entries: Vec<NamespaceEntry> = Vec::new();
+        let mut truncated: Vec<crate::WalkSkip> = Vec::new();
+        index.walk_into(&mut entries, &mut truncated);
+
+        assert_eq!(
+            truncated.len(),
+            1,
+            "exactly one cycle WalkSkip expected; got {:?}",
+            truncated
+        );
+        let skip = &truncated[0];
+        assert!(
+            skip.reason.contains("drec_cycle"),
+            "reason should mention cycle; got: {}",
+            skip.reason
+        );
+        assert!(
+            skip.reason.contains(&format!("file_id={}", A_ID)),
+            "reason should mention the cyclic file_id; got: {}",
+            skip.reason
+        );
     }
 }
