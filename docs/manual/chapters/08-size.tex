@@ -197,26 +197,37 @@ file's content stream.
 \textbf{Observation.} For ordinary, cloned, hard-linked, and symlink
 cases the parser emits \texttt{j\_dstream\_t.alloced\_size} (or zero
 for symlinks) and the result matches macOS's \texttt{st\_blocks *
-512} oracle. Two cases must fail closed: sparse files (where
-\texttt{alloced\_size} overstates the actual allocation by the
-sparse-bytes hint) and decmpfs-compressed files (where no on-disk
-field has been validated against the macOS oracle).
+512} oracle. Two further cases used to fail closed --- sparse files
+and decmpfs-compressed files --- and were closed by EX-26 against
+the same \texttt{st\_blocks * 512} oracle. For sparse, the
+allocated bytes are \texttt{alloced\_size - sparse\_bytes}. For
+decmpfs, the allocated bytes are the sum of any stream-backed
+xattrs' \texttt{alloced\_size} values (the primary dstream is
+usually absent, and the compressed bytes live in either
+\texttt{com.apple.decmpfs} or \texttt{com.apple.ResourceFork}; an
+embedded xattr contributes zero because the bytes live inline in
+the xattr payload).
 
 \subsection{The Precedence Rule}
 
-\textbf{Observation.} Five branches, applied per inode:
+\textbf{Observation.} Six branches, applied per inode:
 
 \begin{enumerate}
   \item Regular file with a \texttt{j\_dstream\_t} xfield and no
-    \texttt{INO\_EXT\_TYPE\_SPARSE\_BYTES} xfield: emit
+    \texttt{INO\_EXT\_TYPE\_SPARSE\_BYTES} xfield and no
+    \texttt{com.apple.decmpfs} xattr: emit
     \texttt{Some(j\_dstream\_t.alloced\_size)}.
   \item Regular file with a \texttt{j\_dstream\_t} xfield and a
-    \texttt{SPARSE\_BYTES} xfield: emit \texttt{None}
-    (sparse fail-closed, see §\ref{ssec:sparse-bytes-gap}).
-  \item Regular file with no dstream and a \texttt{com.apple.decmpfs}
-    xattr: emit \texttt{None} (decmpfs fail-closed, see
-    §\ref{ssec:decmpfs-fail-closed}).
-  \item Symlinks and directories: emit \texttt{Some(0)}.
+    \texttt{SPARSE\_BYTES} xfield (no decmpfs): emit
+    \texttt{Some(alloced\_size - sparse\_bytes)} (EX-26 Hypothesis~A,
+    see §\ref{ssec:sparse-bytes-lift}).
+  \item Regular file with a \texttt{com.apple.decmpfs} xattr: emit
+    \texttt{Some(primary + decmpfs.stream\_dstream.alloced +
+    ResourceFork.stream\_dstream.alloced)} (each term defaults to
+    zero when absent or embedded; EX-26 Hypothesis~F, see
+    §\ref{ssec:decmpfs-lift}).
+  \item Symlinks: emit \texttt{Some(0)}.
+  \item Directories: emit \texttt{Some(0)}.
   \item Anything else: emit \texttt{None}.
 \end{enumerate}
 
@@ -256,8 +267,15 @@ write volumes that its companion checker flags as corrupt. The
 right oracle is the external public number
 (\texttt{st\_blocks * 512}), not internal field consistency.
 
-\subsection{The Sparse-File Fail-Closed Gap}
-\label{ssec:sparse-bytes-gap}
+\subsection{The Sparse-File Lift (EX-26 Hypothesis A)}
+\label{ssec:sparse-bytes-lift}
+
+EX-22 left this branch fail-closed because the fixture carried a
+single sparse shape and the observed identity
+\texttt{alloced\_size - sparse\_bytes = st\_blocks * 512} was a
+hypothesis worth a corpus-level probe before promoting to rule.
+EX-26 ran that probe on four sparse shapes and the identity held
+exactly across all of them.
 
 \textbf{Observation.} On the EX-22 fixture the sparse file carries:
 
@@ -279,60 +297,116 @@ sparse-bytes hint. APFS on macOS follows the
 therefore split the dstream case by presence of the
 \texttt{SPARSE\_BYTES} xfield.
 
-A worth-following-up hypothesis records that
-\texttt{alloced\_size} $-$ \texttt{sparse\_bytes} $= 24{,}576 =$
-\texttt{st\_blocks * 512} on this fixture, and Apple's own
-definition of \texttt{SPARSE\_BYTES} as the unallocated portion of
-the logical extent makes this an algebraic identity. A future
-sparse-corpus probe (leading hole, trailing hole, multi-hole,
-hole-larger-than-file) is the right vehicle for promoting this from
-Hypothesis to Observation; until it lands, sparse rows fail
-closed.
-
-\subsection{The decmpfs Fail-Closed Gap}
-\label{ssec:decmpfs-fail-closed}
-
-\textbf{Observation.} For decmpfs-compressed files the open-source
-readers disagree on what \texttt{st\_blocks * 512} should be.
-\texttt{linux-apfs-rw} publishes the rounded uncompressed size
-(decompressed bytes divided by 512), which macOS does not.
-\texttt{apfs-fuse} reports zero. macOS itself reports the number of
-blocks the kernel allocated for the decmpfs xattr (typically one
-block) plus the resource-fork bytes when present.
-
-No reader has been oracle-validated against macOS for the
-resource-fork-backed decmpfs path. The parser therefore refuses to
-emit a value for compressed files. The \texttt{--summary} register
-lists the column as \texttt{not\_claimed} for compressed rows and
-the visualisation greys the metric toggle out for those rows.
-
-The decmpfs row's \texttt{st\_blocks * 512} on the EX-22 fixture is
-4096 (one xattr block), which is a real number the kernel reports
-honestly, but is not derivable from any single on-disk field the
-parser has validated.
-
-\subsection{Per-Inode Results}
-
-\textbf{Observation.} On the EX-22 fixture:
+\textbf{EX-26 corpus result.} The identity
+\texttt{alloced\_size - sparse\_bytes = st\_blocks * 512} holds
+exactly across four sparse shapes:
 
 \begin{center}
-\begin{tabular}{lrlrr}
+\begin{tabular}{lrrrr}
 \toprule
-path & inode & step picked & value & st\_blocks * 512 \\
+shape & \texttt{alloced\_size} & \texttt{sparse\_bytes} & difference & \texttt{st\_blocks * 512} \\
 \midrule
-ordinary.txt   & 16 & \texttt{j\_dstream\_alloced\_size} & 4096    & 4096 \\
-clone.txt      & 20 & \texttt{j\_dstream\_alloced\_size} & 4096    & 4096 \\
-sparse.bin     & 19 & \texttt{None} (sparse)             & ---     & 24576 \\
-link.txt       & 23 & \texttt{zero}                      & 0       & 0 \\
-compressed.txt & 24 & \texttt{None} (decmpfs)            & ---     & 4096 \\
+1 MiB HEAD/TAIL hole          & 1{,}056{,}768  & 1{,}032{,}192  &    24{,}576 &    24{,}576 \\
+10 MiB hole                   & 10{,}485{,}760 & 10{,}452{,}992 &    32{,}768 &    32{,}768 \\
+50 MiB hole                   & 52{,}428{,}800 & 52{,}396{,}032 &    32{,}768 &    32{,}768 \\
+4 KiB-data-per-64 KiB chunked & 2{,}097{,}152  & 1{,}572{,}864  &   524{,}288 &   524{,}288 \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-Zero mismatches on the rows the rule emits; two rows fail closed by
-design. The hard-linked file \texttt{hard.txt} does not appear as a
-separate row because it shares inode~16 with \texttt{ordinary.txt}
-and contributes through the same per-inode rule.
+The branch now emits
+\texttt{Some(alloced\_size.saturating\_sub(sparse\_bytes))}, with
+saturation guarding the (not observed in practice but algebraically
+possible) case where the kernel's residue exceeds the dstream-
+reported allocation.
+
+\subsection{The decmpfs Lift (EX-26 Hypothesis F)}
+\label{ssec:decmpfs-lift}
+
+EX-22 left decmpfs fail-closed because none of the open-source
+readers agreed on the macOS-oracle number and the EX-22 fixture
+carried only one decmpfs case (the small-payload xattr-stream-
+stored shape). EX-26 added a second decmpfs variant (a 256~KiB
+compressible payload that ditto routes into the resource-fork-
+stored shape) and observed that both shapes are captured by a
+single rule: the allocated bytes are the sum of any stream-backed
+xattr \texttt{alloced\_size} values plus the (typically absent)
+primary dstream \texttt{alloced\_size}.
+
+\textbf{Observation.} On the EX-26 fixture the two decmpfs files
+carry:
+
+\begin{itemize}
+  \item \texttt{compressed.txt} (52~KiB compressible JSON): no
+    primary dstream; \texttt{com.apple.decmpfs} is
+    \emph{stream-backed} (flags = \texttt{0x01}) with
+    \texttt{stream\_dstream.alloced\_size = 4096};
+    \texttt{com.apple.ResourceFork} is stream-backed with
+    \texttt{stream\_dstream.alloced\_size = 0} (empty fork).
+    Sum: 4096. Oracle \texttt{st\_blocks * 512 = 4096}.
+  \item \texttt{compressed-big.bin} (256~KiB compressible binary):
+    no primary dstream; \texttt{com.apple.decmpfs} is
+    \emph{embedded} (flags = \texttt{0x02}) with payload
+    \texttt{fpmc} magic, \texttt{compression\_type = 8} (lzvn
+    resource-fork-stored), \texttt{uncompressed\_size = 262144};
+    \texttt{com.apple.ResourceFork} is stream-backed with
+    \texttt{stream\_dstream.alloced\_size = 4096}. Sum: 4096.
+    Oracle \texttt{st\_blocks * 512 = 4096}.
+\end{itemize}
+
+The on-disk reality is that the \texttt{compression\_type} byte in
+the decmpfs header tells you \emph{where} the compressed bytes
+live (xattr inline vs.\ resource fork), but the bytes themselves
+are always counted by summing the \texttt{stream\_dstream.alloced\_size}
+fields of every xattr that is stream-backed. Embedded xattrs
+contribute zero because their bytes live inline in the xattr
+payload, which is part of the inode body's storage and does not
+allocate separate extents.
+
+The disagreement between \texttt{linux-apfs-rw} (publishes
+uncompressed size / 512) and \texttt{apfs-fuse} (publishes zero)
+that EX-22 documented is now resolved against the macOS oracle:
+neither was right; the sum-of-stream-dstreams formula is the
+public on-disk rule that reproduces \texttt{st\_blocks * 512}
+exactly.
+
+A residual case the EX-26 fixture did not exercise is the
+\emph{incompressible-payload} shape, where ditto leaves
+\texttt{UF\_COMPRESSED} off and emits no \texttt{com.apple.decmpfs}
+xattr at all. Such files fall through to branch~1 (regular file
+with a primary dstream) and emit \texttt{Some(alloced\_size)}
+under the EX-22 baseline; on the EX-26 fixture the
+\texttt{compressed-random.bin} case did exactly this.
+
+\subsection{Per-Inode Results}
+
+\textbf{Observation.} On the EX-26 fixture, all ten rows match the
+\texttt{st\_blocks * 512} oracle exactly:
+
+\begin{center}
+\begin{tabular}{lllrr}
+\toprule
+path & branch & rule & picked & st\_blocks * 512 \\
+\midrule
+ordinary.txt          & 1 & \texttt{alloced\_size}                                              &      4096 &      4096 \\
+clone.txt             & 1 & \texttt{alloced\_size}                                              &      4096 &      4096 \\
+compressed-random.bin & 1 & \texttt{alloced\_size}                                              &  131{,}072 &  131{,}072 \\
+sparse.bin            & 2 & \texttt{alloced\_size - sparse\_bytes}                              &     24{,}576 &     24{,}576 \\
+sparse-medium.bin     & 2 & \texttt{alloced\_size - sparse\_bytes}                              &     32{,}768 &     32{,}768 \\
+sparse-large.bin      & 2 & \texttt{alloced\_size - sparse\_bytes}                              &     32{,}768 &     32{,}768 \\
+sparse-chunked.bin    & 2 & \texttt{alloced\_size - sparse\_bytes}                              &    524{,}288 &    524{,}288 \\
+compressed.txt        & 3 & \texttt{decmpfs.stream\_dstream.alloced} (xattr-stream-stored)      &      4096 &      4096 \\
+compressed-big.bin    & 3 & \texttt{ResourceFork.stream\_dstream.alloced} (resource-fork-stored)&      4096 &      4096 \\
+link.txt              & 4 & \texttt{zero} (symlink)                                              &         0 &         0 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Zero mismatches; every row picks a value the rule emits, against
+the macOS oracle. The hard-linked file \texttt{hard.txt} does not
+appear as a separate row because it shares its inode with
+\texttt{ordinary.txt} and contributes through the same per-inode
+rule.
 
 \section{Directory Aggregates}
 

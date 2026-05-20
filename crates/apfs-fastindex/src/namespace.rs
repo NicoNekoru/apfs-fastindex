@@ -20,12 +20,22 @@
 //! - SR-009 unique-inode per-directory aggregate policy (each directory's
 //!   total counts every contributing inode exactly once, mirroring
 //!   `src/apfs_fastindex/aggregate.py`),
-//! - SR-019 + EX-22 allocated-size precedence: regular + dstream + no
-//!   `INO_EXT_TYPE_SPARSE_BYTES` xfield -> `Some(alloced_size)`;
-//!   regular + dstream + sparse_bytes set -> `None` (EX-22 saw
-//!   `alloced_size` overstate the kernel's `st_blocks * 512` by
-//!   exactly `sparse_bytes`); regular + decmpfs xattr -> `None`;
-//!   symlink -> `Some(0)`; directory -> `Some(0)`; else -> `None`.
+//! - SR-019 + EX-22 + EX-26 allocated-size precedence:
+//!     - regular + dstream + no `INO_EXT_TYPE_SPARSE_BYTES` xfield ->
+//!       `Some(alloced_size)` (EX-22 baseline).
+//!     - regular + dstream + sparse_bytes set ->
+//!       `Some(alloced_size - sparse_bytes)` (EX-26 Hypothesis A,
+//!       validated 4/4 on the EX-26 fixture; EX-22 had observed this
+//!       relation on one fixture).
+//!     - regular + `com.apple.decmpfs` xattr -> sum of stream-backed
+//!       xattr `alloced_size` (primary_dstream + decmpfs xattr's
+//!       `stream_dstream.alloced` + ResourceFork xattr's
+//!       `stream_dstream.alloced`, each defaulting to 0; EX-26
+//!       Hypothesis F, validated 2/2). Covers both shapes ditto
+//!       produces: xattr-stream-stored compressed bytes
+//!       (decmpfs.stream_dstream) and resource-fork-stored
+//!       (ResourceFork.stream_dstream).
+//!     - symlink -> `Some(0)`; directory -> `Some(0)`; else -> `None`.
 //!   The directory aggregate's `unique_inode_allocated_total`
 //!   collapses to `None` if any contributing inode has
 //!   `allocated_size == None`.
@@ -48,6 +58,7 @@ const INODE_HAS_UNCOMPRESSED_SIZE: u64 = 0x0004_0000;
 
 const XATTR_SYMLINK_NAME: &str = "com.apple.fs.symlink";
 const XATTR_DECMPFS_NAME: &str = "com.apple.decmpfs";
+const XATTR_RFORK_NAME: &str = "com.apple.ResourceFork";
 
 /// Reconstruct `NamespaceEntry` rows and per-directory aggregates from one
 /// volume's `FsRecordDump.records`.
@@ -221,26 +232,11 @@ impl<'a> NamespaceIndex<'a> {
         }
     }
 
-    /// Apply the EX-22-amended SR-019 precedence per inode.
+    /// Apply the EX-26-amended SR-019 precedence per inode.
     fn allocated_size(&self, file_id: u64, entry_type: u8) -> Option<u64> {
-        match entry_type {
-            DT_LNK | DT_DIR => Some(0),
-            DT_REG => {
-                let inode = self.inode_by_id.get(&file_id).copied()?;
-                let xattrs = self.xattrs_by_id.get(&file_id);
-                let has_decmpfs = xattrs
-                    .map(|m| m.contains_key(XATTR_DECMPFS_NAME))
-                    .unwrap_or(false);
-                if has_decmpfs {
-                    return None;
-                }
-                if inode.sparse_bytes.is_some() {
-                    return None;
-                }
-                inode.dstream.as_ref().map(|dstream| dstream.alloced_size)
-            }
-            _ => None,
-        }
+        let inode = self.inode_by_id.get(&file_id).copied();
+        let xattrs = self.xattrs_by_id.get(&file_id);
+        compute_allocated_size(entry_type, inode, xattrs)
     }
 
     fn logical_size_and_target(&self, file_id: u64, entry_type: u8) -> (u64, Option<String>) {
@@ -309,6 +305,66 @@ fn entry_kind_from_drec(entry_type: u8) -> EntryKind {
         DT_REG => EntryKind::File,
         DT_LNK => EntryKind::Symlink,
         _ => EntryKind::Other,
+    }
+}
+
+/// EX-26-amended SR-019 allocated-size rule.
+///
+/// Free function so the tests can drive it without spinning up a real
+/// `FsRecordDump`. Returns `None` only for cases the rule explicitly
+/// does not emit (no inode for a regular file, or `entry_type` outside
+/// `{DT_REG, DT_LNK, DT_DIR}`).
+fn compute_allocated_size(
+    entry_type: u8,
+    inode: Option<&crate::fs_record_body::InodeBody>,
+    xattrs: Option<&BTreeMap<&str, &crate::fs_record_body::XattrBody>>,
+) -> Option<u64> {
+    match entry_type {
+        DT_LNK | DT_DIR => Some(0),
+        DT_REG => {
+            let inode = inode?;
+            let has_decmpfs = xattrs
+                .map(|m| m.contains_key(XATTR_DECMPFS_NAME))
+                .unwrap_or(false);
+            if has_decmpfs {
+                // EX-26 Hypothesis F: decmpfs allocated bytes are the sum of
+                // stream-backed xattr `alloced_size` plus the primary
+                // dstream (which is typically absent for decmpfs files).
+                // Both `com.apple.decmpfs` and `com.apple.ResourceFork`
+                // can be the carrier; an embedded (non-stream) xattr
+                // contributes 0 because the compressed bytes live inline
+                // in the xattr payload.
+                let primary = inode
+                    .dstream
+                    .as_ref()
+                    .map(|d| d.alloced_size)
+                    .unwrap_or(0);
+                let xattr_share = |name: &str| -> u64 {
+                    xattrs
+                        .and_then(|m| m.get(name))
+                        .and_then(|x| x.stream_dstream.as_ref())
+                        .map(|d| d.alloced_size)
+                        .unwrap_or(0)
+                };
+                let decmpfs_share = xattr_share(XATTR_DECMPFS_NAME);
+                let rfork_share = xattr_share(XATTR_RFORK_NAME);
+                return Some(primary + decmpfs_share + rfork_share);
+            }
+            if let Some(sparse_bytes) = inode.sparse_bytes {
+                // EX-26 Hypothesis A: sparse allocated = `alloced_size -
+                // sparse_bytes`. EX-22 saw this relation on one fixture;
+                // EX-26 validated it across four sparse shapes (small
+                // HEAD/TAIL hole, ~10 MiB, ~50 MiB, chunked-stride). The
+                // dstream is always present when `sparse_bytes` is set;
+                // we fail closed otherwise rather than guess.
+                return inode
+                    .dstream
+                    .as_ref()
+                    .map(|d| d.alloced_size.saturating_sub(sparse_bytes));
+            }
+            inode.dstream.as_ref().map(|d| d.alloced_size)
+        }
+        _ => None,
     }
 }
 
@@ -476,6 +532,183 @@ mod tests {
     fn decmpfs_size_rejects_short_payload() {
         let payload = "00000000";
         assert_eq!(decmpfs_uncompressed_size(payload), None);
+    }
+
+    /// Build a minimal `InodeBody` carrying just the fields the
+    /// EX-26 rule reads. All other fields take sensible defaults; the
+    /// helper exists so the tests below stay focused on the dstream
+    /// and `sparse_bytes` axes.
+    fn make_inode(
+        dstream: Option<crate::fs_record_body::DstreamFields>,
+        sparse_bytes: Option<u64>,
+    ) -> crate::fs_record_body::InodeBody {
+        crate::fs_record_body::InodeBody {
+            parent_id: 0,
+            private_id: 0,
+            internal_flags: 0,
+            nchildren_or_nlink: 1,
+            bsd_flags: 0,
+            owner: 0,
+            group: 0,
+            mode: 0o100_644,
+            uncompressed_size: 0,
+            has_uncompressed_size: false,
+            xfields: vec![],
+            xfield_used_data: 0,
+            xfield_padded_total: 0,
+            xfield_unused_trailing_bytes: 0,
+            dstream,
+            sparse_bytes,
+            inode_name: None,
+        }
+    }
+
+    fn make_dstream(alloced_size: u64) -> crate::fs_record_body::DstreamFields {
+        crate::fs_record_body::DstreamFields {
+            size: 0,
+            alloced_size,
+            default_crypto_id: 0,
+            total_bytes_written: 0,
+            total_bytes_read: 0,
+        }
+    }
+
+    fn make_xattr_stream(alloced_size: u64) -> crate::fs_record_body::XattrBody {
+        crate::fs_record_body::XattrBody {
+            flags: 0x0001, // XATTR_DATA_STREAM
+            xdata_len: 48,
+            embedded: false,
+            stream: true,
+            payload_hex: String::new(),
+            payload_utf8: None,
+            stream_xattr_obj_id: Some(0),
+            stream_dstream: Some(make_dstream(alloced_size)),
+        }
+    }
+
+    fn make_xattr_embedded() -> crate::fs_record_body::XattrBody {
+        crate::fs_record_body::XattrBody {
+            flags: 0x0002, // XATTR_DATA_EMBEDDED
+            xdata_len: 16,
+            embedded: true,
+            stream: false,
+            // `fpmc` magic + compression_type=8 (lzvn fork-stored) +
+            // uncompressed_size=0x400; the field values are not read
+            // by the rule but realistic content keeps the fixture
+            // close to what `ditto --hfsCompression` produces.
+            payload_hex: "66706d63080000000004000000000000".to_string(),
+            payload_utf8: None,
+            stream_xattr_obj_id: None,
+            stream_dstream: None,
+        }
+    }
+
+    /// EX-26 Hypothesis A: sparse regular file allocated bytes are
+    /// `alloced_size - sparse_bytes`. Was fail-closed under SR-019 v1.
+    #[test]
+    fn ex26_sparse_subtracts_sparse_bytes_from_alloced() {
+        let inode = make_inode(Some(make_dstream(1_056_768)), Some(1_032_192));
+        let picked = compute_allocated_size(DT_REG, Some(&inode), None);
+        assert_eq!(picked, Some(24_576));
+    }
+
+    /// EX-26 sparse with `alloced_size < sparse_bytes` (pathological,
+    /// not seen in practice): saturate at 0 rather than panic on
+    /// underflow.
+    #[test]
+    fn ex26_sparse_underflow_saturates_at_zero() {
+        let inode = make_inode(Some(make_dstream(4096)), Some(8192));
+        let picked = compute_allocated_size(DT_REG, Some(&inode), None);
+        assert_eq!(picked, Some(0));
+    }
+
+    /// EX-22 baseline preserved: regular + dstream + no sparse_bytes
+    /// emits the raw `alloced_size`.
+    #[test]
+    fn ex26_regular_emits_dstream_alloced_size() {
+        let inode = make_inode(Some(make_dstream(4096)), None);
+        let picked = compute_allocated_size(DT_REG, Some(&inode), None);
+        assert_eq!(picked, Some(4096));
+    }
+
+    /// EX-26 Hypothesis F (xattr-stream-stored compressed bytes):
+    /// `com.apple.decmpfs` is stream-backed; allocated = its
+    /// `stream_dstream.alloced_size`. EX-26 fixture `compressed.txt`.
+    #[test]
+    fn ex26_decmpfs_xattr_stream_stored() {
+        let inode = make_inode(None, None);
+        let decmpfs = make_xattr_stream(4096);
+        let mut map: BTreeMap<&str, &crate::fs_record_body::XattrBody> = BTreeMap::new();
+        map.insert(XATTR_DECMPFS_NAME, &decmpfs);
+        let picked = compute_allocated_size(DT_REG, Some(&inode), Some(&map));
+        assert_eq!(picked, Some(4096));
+    }
+
+    /// EX-26 Hypothesis F (fork-stored compressed bytes):
+    /// `com.apple.decmpfs` is embedded (carries the `fpmc` header
+    /// inline) and `com.apple.ResourceFork` is stream-backed; the
+    /// resource fork's `stream_dstream.alloced_size` is the answer.
+    /// EX-26 fixture `compressed-big.bin`.
+    #[test]
+    fn ex26_decmpfs_resource_fork_stored() {
+        let inode = make_inode(None, None);
+        let decmpfs = make_xattr_embedded();
+        let rfork = make_xattr_stream(4096);
+        let mut map: BTreeMap<&str, &crate::fs_record_body::XattrBody> = BTreeMap::new();
+        map.insert(XATTR_DECMPFS_NAME, &decmpfs);
+        map.insert(XATTR_RFORK_NAME, &rfork);
+        let picked = compute_allocated_size(DT_REG, Some(&inode), Some(&map));
+        assert_eq!(picked, Some(4096));
+    }
+
+    /// EX-26 Hypothesis F with both xattrs stream-backed (defensive:
+    /// observed in `compressed.txt` where ditto kept the empty
+    /// resource-fork stream alongside the decmpfs stream). The two
+    /// allocated sizes add.
+    #[test]
+    fn ex26_decmpfs_both_streams_sum() {
+        let inode = make_inode(None, None);
+        let decmpfs = make_xattr_stream(4096);
+        let rfork = make_xattr_stream(8192);
+        let mut map: BTreeMap<&str, &crate::fs_record_body::XattrBody> = BTreeMap::new();
+        map.insert(XATTR_DECMPFS_NAME, &decmpfs);
+        map.insert(XATTR_RFORK_NAME, &rfork);
+        let picked = compute_allocated_size(DT_REG, Some(&inode), Some(&map));
+        assert_eq!(picked, Some(12_288));
+    }
+
+    /// EX-26 Hypothesis F with both xattrs embedded: compressed
+    /// bytes live entirely inline; the file has no extents. Picks 0.
+    #[test]
+    fn ex26_decmpfs_all_embedded_picks_zero() {
+        let inode = make_inode(None, None);
+        let decmpfs = make_xattr_embedded();
+        let mut map: BTreeMap<&str, &crate::fs_record_body::XattrBody> = BTreeMap::new();
+        map.insert(XATTR_DECMPFS_NAME, &decmpfs);
+        let picked = compute_allocated_size(DT_REG, Some(&inode), Some(&map));
+        assert_eq!(picked, Some(0));
+    }
+
+    /// Symlinks and directories emit `Some(0)` unconditionally.
+    #[test]
+    fn ex26_symlink_and_dir_emit_zero() {
+        let inode = make_inode(None, None);
+        assert_eq!(
+            compute_allocated_size(DT_LNK, Some(&inode), None),
+            Some(0)
+        );
+        assert_eq!(
+            compute_allocated_size(DT_DIR, Some(&inode), None),
+            Some(0)
+        );
+    }
+
+    /// A regular file with no inode record at all (parse anomaly):
+    /// fail closed.
+    #[test]
+    fn ex26_regular_without_inode_returns_none() {
+        let picked = compute_allocated_size(DT_REG, None, None);
+        assert_eq!(picked, None);
     }
 
     /// SR-019 / EX-22 aggregate None-collapse: a directory whose

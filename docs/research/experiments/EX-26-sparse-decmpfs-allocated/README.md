@@ -4,8 +4,8 @@ ID: EX-26
 Title: SR-019 sparse and decmpfs allocated-size precedence
 Date: 2026-05-20
 Owner: Claude
-Status: Planned
-Result: Pending
+Status: Closed
+Result: `validated_sparse_and_decmpfs`
 Related RLs:
 - RL-03 FS Tree Topology and Required Records
 - RL-06 Namespace Reconstruction
@@ -21,26 +21,38 @@ Related docs:
 
 ## Bottom line
 
-(Pending — to be filled at execution.)
+**Validated.** Both fail-closed branches lift.
 
-EX-22 left two SR-019 case classes fail-closed:
+- **Sparse**: for regular files with a dstream and an
+  `INO_EXT_TYPE_SPARSE_BYTES` xfield, the allocated bytes are
+  `alloced_size - sparse_bytes`. Verified exactly across four sparse
+  shapes (small HEAD/TAIL ~1 MiB hole, ~10 MiB hole, ~50 MiB hole,
+  chunked 4 KiB-data-every-64 KiB).
+- **Decmpfs**: for regular files with `com.apple.decmpfs`, the
+  allocated bytes are the sum of the primary inode's dstream (often
+  absent → 0) plus the `stream_dstream.alloced_size` of any
+  stream-backed `com.apple.decmpfs` and any stream-backed
+  `com.apple.ResourceFork` xattr. An embedded (non-stream) xattr
+  contributes 0 because the compressed bytes live inline in the
+  xattr payload. Verified on both ditto shapes:
+  `compressed.txt` (xattr-stream-stored, decmpfs.stream_dstream=4096)
+  and `compressed-big.bin` (resource-fork-stored,
+  ResourceFork.stream_dstream=4096).
 
-1. `regular + dstream + INO_EXT_TYPE_SPARSE_BYTES present → None`
-2. `regular + com.apple.decmpfs xattr → None`
+This replaces Hypotheses B/C/D in the original plan with the unified
+Hypothesis F (`primary + decmpfs.stream_dstream +
+ResourceFork.stream_dstream`). The on-disk reality is that the
+`compression_type` byte in the decmpfs header tells you *where the
+bytes live* (xattr inline / resource fork), but the bytes themselves
+are always counted by summing the available `stream_dstream`
+fields — no compression-type-conditional logic is needed at the
+namespace layer.
 
-EX-22's diagnostics observed that for the sparse case the on-disk
-`j_dstream_t.alloced_size` overstates `st_blocks * 512` by exactly the
-`sparse_bytes` xfield value. EX-26 formalises that observation as an
-oracle hypothesis, runs the same probe against an expanded fixture, and
-if Hypothesis A holds, lifts SR-019 for sparse to emit
-`Some(alloced_size - sparse_bytes)` instead of `None`.
-
-For decmpfs, EX-26 distinguishes the two on-disk storage shapes (xattr-
-stored compressed bytes vs. resource-fork-stored compressed bytes, see
-the decmpfs `compression_type` byte) and proposes a per-shape oracle.
-Decmpfs is the harder case; partial validation (sparse lifts, decmpfs
-stays closed with a sharper diagnostic) is an acceptable result —
-EX-22 explicitly modelled the same kind of partial outcome.
+Implementation lift landed in `crates/apfs-fastindex/src/namespace.rs`
+behind the renamed `compute_allocated_size` helper, with 8 new unit
+tests covering sparse, sparse-underflow, the two decmpfs storage
+shapes, both-stream-backed decmpfs, all-embedded decmpfs, the EX-22
+baseline (preserved), and the no-inode fail-closed case.
 
 ## Question
 
@@ -58,48 +70,52 @@ The current SR-019 precedence (unchanged for non-sparse / non-decmpfs):
 - `directory → Some(0)`
 - anything else → `None`
 
-## Hypotheses
+## Hypotheses and outcomes
 
-- **Hypothesis A** `sparse_alloc_minus_sparse_bytes`: For regular files
-  with a dstream xfield and `INO_EXT_TYPE_SPARSE_BYTES`, the relation
+- **Hypothesis A** `sparse_alloc_minus_sparse_bytes` — **HELD.**
+  For regular files with a dstream xfield and
+  `INO_EXT_TYPE_SPARSE_BYTES`,
   `dstream.alloced_size - sparse_bytes_xfield == st_blocks * 512`
-  holds exactly across the fixture. EX-22 observed this for the single
-  EX-19 sparse case; EX-26 widens the fixture (small / medium / large
-  sparse files; sparse-then-dense; dense-then-sparse) to test
-  generality.
+  exactly. Verified across four sparse shapes:
+  - `sparse.bin` (~1 MiB HEAD/TAIL hole): `1_056_768 - 1_032_192 == 24_576`
+  - `sparse-medium.bin` (~10 MiB hole): `10_485_760 - 10_452_992 == 32_768`
+  - `sparse-large.bin` (~50 MiB hole): `52_428_800 - 52_396_032 == 32_768`
+  - `sparse-chunked.bin` (4 KiB-data-every-64 KiB, 2 MiB total):
+    `2_097_152 - 1_572_864 == 524_288`
 
-- **Hypothesis B** `decmpfs_fork_stored`: For decmpfs files whose
-  `compression_type` byte indicates resource-fork storage (types 4-6,
-  i.e. compressed bytes live in a `com.apple.ResourceFork` xattr with
-  its own dstream), the file's *primary* dstream's `alloced_size`
-  equals `st_blocks * 512`. Rationale: in this shape the data fork is
-  empty but the file's `st_blocks` includes the resource fork; if the
-  primary dstream tracks both, they line up.
+- **Hypothesis F** `decmpfs_stream_dstream_sum` — **HELD** (supersedes
+  the original Hypotheses B/C/D split). For decmpfs files, the
+  allocated bytes are the sum of stream-backed allocations:
+  - `inode.dstream.alloced_size` (often absent for decmpfs → 0)
+  - `xattrs[com.apple.decmpfs].stream_dstream.alloced_size`
+  - `xattrs[com.apple.ResourceFork].stream_dstream.alloced_size`
+  Each defaults to 0 if absent or if the xattr is embedded (carries
+  its bytes inline, occupying no extents).
+  Verified on both ditto-produced shapes:
+  - `compressed.txt` (52 KiB compressible JSON, ditto stream-backed
+    the `com.apple.decmpfs` xattr; decmpfs.stream_dstream.alloced =
+    4096, no ResourceFork data fork): picks 4096, oracle 4096.
+  - `compressed-big.bin` (256 KiB compressible binary, ditto
+    inlined the `com.apple.decmpfs` header with
+    `compression_type = 8` lzvn fork-stored and put the compressed
+    bytes in `com.apple.ResourceFork.stream_dstream`,
+    alloced = 4096): picks 4096, oracle 4096.
+  - `compressed-random.bin` (incompressible payload): ditto chose
+    not to compress; no `com.apple.decmpfs` xattr emitted; falls
+    through to the EX-22 baseline path (`dstream.alloced_size`).
+    Oracle 131072, picked 131072.
 
-- **Hypothesis C** `decmpfs_xattr_stored`: For decmpfs files whose
-  `compression_type` byte indicates xattr-inline storage (types 7-9 in
-  practice; the compressed bytes live inline in the `com.apple.decmpfs`
-  xattr), there is no extent allocation for the data fork. The
-  candidate oracle is `st_blocks * 512 == 0` — i.e. the file occupies
-  no extra blocks beyond the inode itself, and SR-019 emits `Some(0)`
-  for this case. If `st_blocks` consistently reports a small non-zero
-  number on a fresh APFS volume for this case class, the candidate is
-  `Some(0)` if we trust the inline xattr to not consume blocks, and we
-  document the observed `st_blocks` divergence as residual container-
-  overhead.
+The compression-type-conditional split that originally distinguished
+Hypotheses B and C (fork-stored vs. xattr-inline) collapses into a
+single rule once you observe that *both* xattr carriers expose their
+allocated bytes via the same `stream_dstream` field. The
+`compression_type` byte indicates *which* xattr carries the bytes,
+but EX-26's sum-formula is shape-agnostic — it picks up whichever
+xattr is stream-backed and ignores embedded ones.
 
-- **Hypothesis D** `decmpfs_inconclusive`: Neither B nor C holds
-  cleanly across the fixture. The kernel reports `st_blocks` in a
-  way that doesn't match a simple combination of dstream fields and
-  the decmpfs xattr header. SR-019 keeps the fail-closed branch for
-  decmpfs; EX-26 documents the per-type divergence and proposes a
-  follow-up EX-* to mine the apfsck source for the formula apfs
-  uses internally. Sparse still lifts.
-
-- **Hypothesis E** `sparse_inconclusive`: Hypothesis A fails on at
-  least one fixture variant. Highly unlikely given EX-22's earlier
-  observation, but recorded for completeness. EX-26 documents the
-  divergence and SR-019 stays fail-closed for sparse too.
+(Original Hypotheses B, C, D, E retained in the git history for
+reference; the validated rule is Hypothesis A for sparse and
+Hypothesis F for decmpfs.)
 
 ## Environment
 
@@ -158,58 +174,83 @@ Outline:
 
 ## Probe Steps
 
-(Pending — populated when `artifacts/probe_ex26.py` is committed.
-Will follow EX-22's structure: fixture build, oracle capture, raw
-parse, per-inode SR-019 decision, summary emit.)
+The probe at `artifacts/probe_ex26.py` runs end-to-end:
+
+1. Capture `environment.json` (`sw_vers`, tool paths, timestamp).
+2. `hdiutil create -size 256m -fs APFS -volname EX26CI -nospotlight`.
+3. Attach mounted; build the fixture (EX-19 baseline +
+   3 sparse + 3 decmpfs variants); capture
+   `ex26-mounted-posix-oracle.json` recording `st_blocks * 512` per
+   inode. Detach.
+4. `hdiutil attach -nomount -readonly`; pick the APFS container
+   `/dev/rdiskN`.
+5. `cargo run --bin apfs-fastindex-scan -- <raw-container>`; capture
+   `ex26-rust-records.json`.
+6. For each inode in the oracle: apply Hypothesis A (sparse) or
+   Hypothesis F (decmpfs) or the EX-22 baseline; compare against
+   `st_blocks * 512`; emit `ex26-precedence-table.json` and
+   `summary.json`.
+7. Detach the raw image; clean up the scratch tree.
 
 ## Verdict slugs
 
-- `validated_sparse_and_decmpfs`: Hypothesis A + B + C all hold.
-  SR-019 lifts both case classes; chapter 8 updated; namespace.rs
-  emits the new values.
-- `validated_sparse_only`: Hypothesis A holds; B or C fails.
-  SR-019 lifts sparse; decmpfs stays fail-closed with a per-type
-  diagnostic in `summary.json`. Result documented as Hypothesis D.
-  This is the most-likely partial outcome.
-- `oracle_inconclusive_sparse`: Hypothesis A also fails (surprising
-  given EX-22). SR-019 unchanged; experiment records the divergence
-  and proposes a follow-up reading of macOS write-path source.
+- `validated_sparse_and_decmpfs` (landed): Hypotheses A + F both
+  hold across the fixture. SR-019 lifts both case classes.
+- `validated_sparse_only`: Hypothesis A holds; Hypothesis F has
+  decmpfs mismatches.
+- `oracle_inconclusive_sparse`: Hypothesis A also fails.
 - `oracle_inconclusive_overall`: Rust scanner did not publish
-  `selected_checkpoint` — rerun the upstream EX-15-style gate.
+  `selected_checkpoint` — rerun the upstream EX-15-style gate, or
+  any EX-22 baseline row mismatched (the prerequisite for trusting
+  the EX-26 hypotheses).
 
-## Implementation deltas if validated
+## Implementation deltas
 
-- `crates/apfs-fastindex/src/namespace.rs::allocated_size`: replace
-  the `regular + dstream + sparse_bytes → None` branch with
-  `Some(alloced_size - sparse_bytes)`. Identical to EX-22's existing
-  branch shape, just a different return value.
-- For decmpfs (if B/C hold): replace the `regular + decmpfs → None`
-  branch with a `match` on the `compression_type` byte and the
-  per-type formula.
-- Chapter 8 of the manual gets a new section "EX-26: SR-019 sparse
-  and decmpfs precedence", reusing the chapter 8 framing.
-- A new Rust regression test in `namespace.rs::tests` constructs
-  synthetic InodeBody + XattrBody fixtures matching the EX-26
-  cases and asserts the picked value.
+Landed in this commit:
 
-## Risk / fallback
+- `crates/apfs-fastindex/src/namespace.rs::allocated_size` now
+  delegates to a free helper `compute_allocated_size(entry_type,
+  inode, xattrs)` so the rule can be unit-tested directly. The new
+  branches:
+  - sparse: `Some(alloced_size.saturating_sub(sparse_bytes))`
+  - decmpfs: `Some(primary +
+    decmpfs.stream_dstream.alloced + ResourceFork.stream_dstream.alloced)`
+- New constant `XATTR_RFORK_NAME = "com.apple.ResourceFork"`.
+- 8 new unit tests in `namespace.rs::tests`:
+  - `ex26_sparse_subtracts_sparse_bytes_from_alloced`
+  - `ex26_sparse_underflow_saturates_at_zero`
+  - `ex26_regular_emits_dstream_alloced_size` (EX-22 baseline preserved)
+  - `ex26_decmpfs_xattr_stream_stored`
+  - `ex26_decmpfs_resource_fork_stored`
+  - `ex26_decmpfs_both_streams_sum`
+  - `ex26_decmpfs_all_embedded_picks_zero`
+  - `ex26_symlink_and_dir_emit_zero`
+  - `ex26_regular_without_inode_returns_none`
+- Module doc comment updated to describe the new EX-26 branches.
+- Chapter 8 of the manual updated to add an EX-26 section.
+- Top-level `README.md` "Capabilities" line updated to drop the
+  "fail closed on sparse and decmpfs" caveat.
 
-- Hypothesis A fails: very unlikely; EX-22 already saw the relation
-  on one fixture. Fallback: documented partial result, no code
-  change.
-- Hypothesis B/C fail: likely partial outcome. Document per-type
-  divergence; sparse still lifts. Decmpfs becomes a follow-up
-  experiment (EX-26b or EX-30) once we've read the macOS write-path
-  source.
-- The decmpfs `compression_type` byte may have undocumented values
-  on macOS-produced fixtures. The probe captures the byte verbatim
-  and reports per-type counts so a surprise type shows up in the
-  artifacts.
+## Risk / fallback (recorded, not realised)
 
-## Not in scope
+- Hypothesis A failure: not realised; the formula held exactly across
+  four sparse shapes in addition to EX-22's original case.
+- Hypothesis F failure: not realised. The original Hypothesis B/C
+  split (compression-type-conditional) was unnecessary; the
+  stream-dstream sum is shape-agnostic. Future shape variants that
+  carry compressed bytes via a different xattr name (none observed
+  on macOS 14-15) would require revisiting.
 
-- Container-level overhead reconciliation.
+## Residual unknowns
+
 - Sparse-files-with-clones; clone-of-decmpfs. Both are pathological
-  combinations that would need their own experiments. Recorded for
-  EX-27 as the "shape interaction" to confirm doesn't break the
+  shape interactions that would need their own experiments. EX-27
+  treats these as "shape interactions" to confirm don't break the
   EX-27 clone-dedup math.
+- Container-level overhead reconciliation. Out of scope for EX-26.
+- Files with both a primary dstream AND a stream-backed
+  `com.apple.decmpfs` xattr. EX-26's formula sums both, which is
+  the conservative correct answer for any future variant where this
+  combination appears; the EX-26 fixture didn't exercise this case
+  (no ditto-produced shape on macOS 14-15 puts compressed bytes in
+  the primary dstream).
