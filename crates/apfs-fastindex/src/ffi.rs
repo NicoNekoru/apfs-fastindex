@@ -550,7 +550,20 @@ pub extern "C" fn apfs_scan_node_path(scan: *const ApfsScan, idx: u32) -> ApfsPa
             if (idx as usize) >= s.tree.nodes.len() {
                 return null_ref;
             }
-            let mut cache = s.path_cache.lock().unwrap();
+            // Recover from a poisoned mutex by taking the inner
+            // guard anyway. The `path_cache` only holds owned
+            // `Box<str>` values that don't observe any external
+            // invariants — a panic mid-insert can't leave them in
+            // a partially-constructed state — so the audit's #N1
+            // "one panic → permanent DoS on all path queries"
+            // amplification doesn't apply. Pre-fix this was
+            // `.unwrap()`, which returned the FFI sentinel
+            // `(NULL, 0)` for every subsequent `apfs_scan_node_path`
+            // on the same scan handle.
+            let mut cache = s
+                .path_cache
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             // The entry stays in the HashMap for the lifetime of
             // `ApfsScan`, so the borrowed slice is valid until
             // `apfs_scan_free`. The `&'static str` lifetime extension
@@ -1073,5 +1086,39 @@ mod tests {
         // Non-panic path: returns whatever the closure made.
         let result = ffi_guard(sentinel, || -> *mut ApfsScan { sentinel });
         assert!(result.is_null());
+    }
+
+    /// Round-2 audit #N1 regression: the `path_cache` Mutex must
+    /// recover from a poison instead of permanently returning
+    /// `(NULL, 0)` to every subsequent `apfs_scan_node_path`
+    /// call. We force a poison by panicking while holding the
+    /// guard, then confirm we can still read and write the map
+    /// afterwards.
+    #[test]
+    fn path_cache_recovers_from_poison() {
+        use std::collections::HashMap;
+        use std::sync::Mutex;
+
+        let cache: Mutex<HashMap<u32, Box<str>>> = Mutex::new(HashMap::new());
+
+        // Poison the mutex: panic while the guard is held.
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut guard = cache.lock().unwrap();
+            guard.insert(7, Box::from("pre-poison"));
+            panic!("synthetic panic to poison the mutex");
+        }));
+
+        // Sanity: the mutex is poisoned.
+        assert!(cache.lock().is_err(), "mutex should be poisoned after panic");
+
+        // The recovery idiom we ship in `apfs_scan_node_path`.
+        let mut guard = cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        // Pre-poison entry survived.
+        assert_eq!(guard.get(&7).map(|s| s.as_ref()), Some("pre-poison"));
+        // And we can still write.
+        guard.insert(9, Box::from("post-poison"));
+        assert_eq!(guard.get(&9).map(|s| s.as_ref()), Some("post-poison"));
     }
 }
