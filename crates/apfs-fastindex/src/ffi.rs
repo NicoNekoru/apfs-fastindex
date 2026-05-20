@@ -1025,3 +1025,53 @@ pub extern "C" fn apfs_scan_source_requested_path(scan: *const ApfsScan) -> *con
         s.source_requested_path.as_ptr()
     })
 }
+
+#[cfg(test)]
+mod tests {
+    //! Adversarial-input coverage for the FFI panic safety
+    //! landed in commit 1eacf54. The in-module tests focus on
+    //! `ffi_guard` itself — happy-path, sentinel on panic, and
+    //! interaction with the thread-local error slot. Cross-
+    //! binary lifecycle (process-isolated panic-hook installs,
+    //! `apfs_last_error` clear-on-read) lives in
+    //! `tests/diag_ffi.rs` so each case runs fresh.
+
+    use super::*;
+
+    #[test]
+    fn ffi_guard_returns_closure_value_when_no_panic() {
+        let result = ffi_guard(0_u32, || 42);
+        assert_eq!(result, 42);
+    }
+
+    #[test]
+    fn ffi_guard_returns_sentinel_on_panic() {
+        // `catch_unwind` is active in debug builds (cargo test
+        // runs debug by default); release builds with
+        // `panic = "abort"` would abort the test process and
+        // never reach this assertion.
+        #[cfg(debug_assertions)]
+        {
+            let result = ffi_guard(99_u32, || panic!("ffi_guard test panic"));
+            assert_eq!(result, 99, "panic should yield the sentinel");
+        }
+    }
+
+    #[test]
+    fn ffi_guard_with_pointer_sentinel() {
+        // Mirror the pattern the real FFI uses: returning a
+        // NULL pointer on bad input or panic. Confirms the
+        // generic over `R = *mut T` compiles and behaves.
+        let sentinel: *mut ApfsScan = ptr::null_mut();
+        #[cfg(debug_assertions)]
+        {
+            let result = ffi_guard(sentinel, || -> *mut ApfsScan {
+                panic!("simulated parser failure")
+            });
+            assert!(result.is_null());
+        }
+        // Non-panic path: returns whatever the closure made.
+        let result = ffi_guard(sentinel, || -> *mut ApfsScan { sentinel });
+        assert!(result.is_null());
+    }
+}

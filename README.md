@@ -178,8 +178,15 @@ mounted volumes.
 ## Development
 
 ```sh
-# Build + test the Rust crate.
+# Build + test the Rust crate (lib unit tests + tests/ integration).
 cargo test -p apfs-fastindex
+
+# Swift-side FFI surface tests — needs the static lib staged
+# first (the bundle build does this for you; `cargo build
+# --release -p apfs-fastindex && ./make-release.sh --no-bundle`
+# works for iteration). Runs as a CLI executable rather than
+# XCTest so it works under Command Line Tools without Xcode.
+swift run --package-path app apfs-ffi-tests
 
 # Quick perf probe — wall time + peak RSS per phase. Honours
 # APFS_PHASE_TIMINGS=1 for per-phase walk / sort / aggregates

@@ -34,6 +34,27 @@ let package = Package(
                     "-L", "Sources/CApfsFastindex",
                 ])
             ]
+        ),
+        // Swift-side FFI test runner. A `.executableTarget`
+        // rather than a `.testTarget` because XCTest requires a
+        // full Xcode install; we want the tests to run under
+        // the bare Command Line Tools toolchain too (and in any
+        // headless CI). The runner exits 0 on success, non-zero
+        // on the first failed assertion.
+        //
+        // Same `-L` flag the app uses so the static lib
+        // (staged by `make-release.sh`) resolves at link time.
+        // Run via: `swift run --package-path app apfs-ffi-tests`
+        // — `make-release.sh test` wires this up.
+        .executableTarget(
+            name: "apfs-ffi-tests",
+            dependencies: ["CApfsFastindex"],
+            path: "Tests/ApfsFastindexTests",
+            linkerSettings: [
+                .unsafeFlags([
+                    "-L", "Sources/CApfsFastindex",
+                ])
+            ]
         )
     ]
 )
