@@ -14,6 +14,16 @@ enum AppPrefs {
     /// treats `0` and `1` as the serial implementation; anything
     /// ≥ 2 uses the parallel walker.
     static let threadsKey = "apfs.threads"
+    /// Opt-in: when true, every administrator scan mounts each
+    /// user-visible TM local snapshot of the target volume and
+    /// folds its contents into the result under a synthetic
+    /// `__snapshots__/<snap-name>/` subtree. Off by default
+    /// because each snapshot adds roughly one full volume walk
+    /// to the scan time — a user with 10 days of TM local
+    /// snapshots sees ~10× the latency. Requires administrator
+    /// privileges (the helper calls `mount_apfs -s`); enabling
+    /// this option auto-routes scans through the admin path.
+    static let expandSnapshotsKey = "apfs.expandSnapshots"
 
     /// Upper bound on the worker-threads stepper. Pulled from
     /// `sysctl hw.physicalcpu` — the count of physical CPU
@@ -39,6 +49,7 @@ enum AppPrefs {
 }
 
 struct SettingsView: View {
+    @AppStorage(AppPrefs.expandSnapshotsKey) private var expandSnapshots: Bool = false
     @AppStorage(AppPrefs.depthKey) private var depth: Int = 0
     @AppStorage(AppPrefs.threadsKey) private var threads: Int = 0
 
@@ -103,9 +114,30 @@ struct SettingsView: View {
                 Text("Scan")
                     .font(AppFont.ui(11, weight: .semibold))
             }
+
+            Section {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Expand local snapshots")
+                            .font(AppFont.ui(13, weight: .semibold))
+                        Text("Mount each user-visible Time Machine local snapshot of the scanned volume and fold its contents into the result under __snapshots__/<name>/. Adds ≈ one full volume walk per snapshot. Forces administrator mode.")
+                            .font(AppFont.ui(11))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(4)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 12)
+                    Toggle("", isOn: $expandSnapshots)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                }
+            } header: {
+                Text("Snapshots")
+                    .font(AppFont.ui(11, weight: .semibold))
+            }
         }
         .formStyle(.grouped)
-        .frame(width: 600, height: 280)
+        .frame(width: 600, height: 380)
         .font(AppFont.ui(12))
     }
 }

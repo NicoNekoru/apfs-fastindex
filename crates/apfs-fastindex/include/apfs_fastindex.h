@@ -276,7 +276,18 @@ struct ApfsScan *apfs_scan_directory_with_progress(const char *path,
  *
  * On any of those, the caller can read `apfs_last_error` for a
  * human-readable diagnostic.
+ * True iff `path` resolves to a filesystem mounted as a
+ * snapshot (statfs.f_flags & MNT_SNAPSHOT). Returns 0 for any
+ * error (path NULL, not UTF-8, statfs failed) so the caller
+ * treats a non-snapshot as the safe default.
+ *
+ * EX-29 follow-up: the Swift bridge can't reach Darwin's
+ * `statfs(_:_:)` function unambiguously through the overlay
+ * (name collision with `struct statfs`). Calling out to this
+ * FFI is the workaround.
  */
+int32_t apfs_is_snapshot_path(const char *path);
+
 struct ApfsScan *apfs_scan_from_msgpack_file(const char *path);
 
 /**

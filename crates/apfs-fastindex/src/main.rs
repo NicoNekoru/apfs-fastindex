@@ -840,6 +840,16 @@ fn run_server_mode() -> ExitCode {
                 let _ = writeln!(stdout, "ok\t{exit}");
                 let _ = stdout.flush();
             }
+            ["scan-with-snapshots", path, out_msgpack, progress_log] => {
+                let exit = run_server_scan_with_snapshots(
+                    path,
+                    out_msgpack,
+                    progress_log,
+                    threads,
+                );
+                let _ = writeln!(stdout, "ok\t{exit}");
+                let _ = stdout.flush();
+            }
             ["quit"] => {
                 let _ = writeln!(stdout, "ok\t0");
                 let _ = stdout.flush();
@@ -928,4 +938,594 @@ fn run_server_scan(
         return 1;
     }
     0
+}
+
+/// Live scan + every user-visible TM local snapshot of the volume
+/// the scan target lives on. The snapshots are mounted under
+/// temporary directories, walked, their entries are prefixed with
+/// `__snapshots__/<snap-name>/` so they fold into one tree, and the
+/// mounts are torn down before this function returns regardless of
+/// outcome.
+///
+/// Requires root (mount_apfs is privileged). Invoked from the
+/// long-lived AdminSession helper, so the calling process already
+/// has EUID 0.
+fn run_server_scan_with_snapshots(
+    path: &str,
+    out_msgpack: &str,
+    progress_log: &str,
+    threads: usize,
+) -> i32 {
+    use std::fs::File;
+    use std::io::Write;
+    use std::path::PathBuf;
+
+    let mut progress_file = match File::create(progress_log) {
+        Ok(f) => f,
+        Err(err) => {
+            let _ = writeln!(
+                std::io::stderr().lock(),
+                "apfs-fastindex-scan: server: cannot open progress log {progress_log}: {err}"
+            );
+            return 1;
+        }
+    };
+    let mut emit_progress = |event: ProgressEvent| {
+        let _ = writeln!(
+            progress_file,
+            "{{\"scanned\":{},\"skipped\":{},\"bytes\":{},\"elapsed_ms\":{},\"terminal\":{}}}",
+            event.scanned,
+            event.skipped,
+            event.bytes,
+            event.elapsed.as_millis(),
+            event.terminal
+        );
+        let _ = progress_file.flush();
+    };
+
+    // 1. Resolve the volume the user's path lives on. We need the
+    //    device path so mount_apfs has a `device` arg; the mount
+    //    point so we can translate user-path → snapshot-relative
+    //    path.
+    let (live_mount_on, live_device) = match statfs_info(path) {
+        Ok(pair) => pair,
+        Err(err) => {
+            let _ = writeln!(
+                std::io::stderr().lock(),
+                "apfs-fastindex-scan: server: statfs({path}) failed: {err}"
+            );
+            return 1;
+        }
+    };
+
+    // 2. Enumerate user-visible TM local snapshots of that volume.
+    //    The mount-point form (`/`, `/System/Volumes/Data`, etc.)
+    //    is the canonical input to `tmutil listlocalsnapshots`.
+    let snap_query_mount = if live_mount_on == "/" {
+        "/".to_string()
+    } else {
+        live_mount_on.clone()
+    };
+    let snapshots = match apfs_fastindex::snapshots::list_tmutil_snapshots(
+        std::path::Path::new(&snap_query_mount),
+    ) {
+        Ok(entries) => entries
+            .into_iter()
+            .filter(|e| e.user_visible)
+            .collect::<Vec<_>>(),
+        Err(err) => {
+            let _ = writeln!(
+                std::io::stderr().lock(),
+                "apfs-fastindex-scan: server: snapshot enumeration failed: {err}"
+            );
+            Vec::new()
+        }
+    };
+
+    // 3. Mount each snapshot at a fresh temp dir. Track for
+    //    teardown regardless of any subsequent failure.
+    let scratch_root: PathBuf = std::env::temp_dir()
+        .join(format!("apfs-fastindex-snap-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&scratch_root);
+    let mut mounted: Vec<(String, PathBuf)> = Vec::new();
+    for snap in &snapshots {
+        let mount_dir = scratch_root.join(format!("snap-{}", mounted.len()));
+        if let Err(err) = std::fs::create_dir_all(&mount_dir) {
+            let _ = writeln!(
+                std::io::stderr().lock(),
+                "apfs-fastindex-scan: server: mkdir snapshot mount {mount_dir:?} failed: {err}"
+            );
+            continue;
+        }
+        match mount_snapshot(&snap.name, &live_device, &mount_dir) {
+            Ok(()) => mounted.push((snap.name.clone(), mount_dir)),
+            Err(err) => {
+                let _ = writeln!(
+                    std::io::stderr().lock(),
+                    "apfs-fastindex-scan: server: mount_apfs -s {} on {} -> {mount_dir:?} \
+                     failed: {err}",
+                    snap.name,
+                    live_device,
+                );
+                let _ = std::fs::remove_dir_all(&mount_dir);
+            }
+        }
+    }
+
+    // 4. Compute the per-snapshot path: relative to the live mount,
+    //    rebased onto the snapshot mount point. Handles the firmlink
+    //    case (path doesn't textually start with mnt_on; assume it
+    //    sits at the volume root).
+    let path_rel = path_relative_to_mount(path, &live_mount_on);
+
+    // 5. Walk live + every successfully-mounted snapshot, merging
+    //    entries.
+    let live_options = FallbackOptions {
+        cross_mounts: false,
+        progress: Some(&mut emit_progress as &mut (dyn FnMut(ProgressEvent) + Send)),
+        threads,
+        skip_aggregates: true,
+    };
+    let live = match fallback_scan_path_with_options(path, live_options) {
+        Ok(s) => s,
+        Err(err) => {
+            let _ = writeln!(
+                std::io::stderr().lock(),
+                "apfs-fastindex-scan: server: live scan {path} failed: {err}"
+            );
+            cleanup_mounts(&mounted);
+            let _ = std::fs::remove_dir_all(&scratch_root);
+            return 1;
+        }
+    };
+
+    let mut merged = live;
+    for (snap_name, mount_dir) in &mounted {
+        let snap_path = mount_dir.join(&path_rel);
+        if !snap_path.exists() {
+            // Snapshot might not contain the user's path (e.g.,
+            // the subdirectory was added after the snapshot).
+            // Skip silently — the user sees the live result + the
+            // other snapshots.
+            continue;
+        }
+        let snap_options = FallbackOptions {
+            cross_mounts: false,
+            progress: None,
+            threads,
+            skip_aggregates: true,
+        };
+        let snap = match fallback_scan_path_with_options(&snap_path, snap_options) {
+            Ok(s) => s,
+            Err(err) => {
+                let _ = writeln!(
+                    std::io::stderr().lock(),
+                    "apfs-fastindex-scan: server: snapshot walk {snap_path:?} failed: {err}"
+                );
+                continue;
+            }
+        };
+        merge_snapshot_into(&mut merged, snap, snap_name);
+    }
+    // Rebuild aggregates from the merged entries so per-directory
+    // totals include snapshot subtrees.
+    merged.parser_output.aggregates = apfs_fastindex::build_directory_aggregates(
+        &merged.parser_output.entries,
+    );
+
+    let bytes = match rmp_serde::to_vec_named(&merged) {
+        Ok(b) => b,
+        Err(err) => {
+            let _ = writeln!(
+                std::io::stderr().lock(),
+                "apfs-fastindex-scan: server: serialise merged scan failed: {err}"
+            );
+            cleanup_mounts(&mounted);
+            let _ = std::fs::remove_dir_all(&scratch_root);
+            return 1;
+        }
+    };
+    if let Err(err) = std::fs::write(out_msgpack, &bytes) {
+        let _ = writeln!(
+            std::io::stderr().lock(),
+            "apfs-fastindex-scan: server: write {out_msgpack} failed: {err}"
+        );
+        cleanup_mounts(&mounted);
+        let _ = std::fs::remove_dir_all(&scratch_root);
+        return 1;
+    }
+
+    cleanup_mounts(&mounted);
+    let _ = std::fs::remove_dir_all(&scratch_root);
+    0
+}
+
+/// `statfs(path)` -> `(mnt_on, mnt_from)`. Errors propagate as
+/// io::Error.
+fn statfs_info(path: &str) -> std::io::Result<(String, String)> {
+    use std::ffi::CString;
+    let c_path = CString::new(path).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "path contains an interior NUL",
+        )
+    })?;
+    let mut buf: libc::statfs = unsafe { std::mem::zeroed() };
+    let rc = unsafe { libc::statfs(c_path.as_ptr(), &mut buf as *mut libc::statfs) };
+    if rc != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let mnt_on = unsafe {
+        std::ffi::CStr::from_ptr(buf.f_mntonname.as_ptr())
+            .to_string_lossy()
+            .into_owned()
+    };
+    let mnt_from = unsafe {
+        std::ffi::CStr::from_ptr(buf.f_mntfromname.as_ptr())
+            .to_string_lossy()
+            .into_owned()
+    };
+    Ok((mnt_on, mnt_from))
+}
+
+/// Best-effort translation: user-supplied path → path relative to
+/// the volume's mount root. Handles two cases:
+///
+/// 1. Path is textually under `mnt_on`. Just strip the prefix.
+/// 2. Path is firmlinked into the volume (e.g. `/Users/kai`
+///    statfs's onto `/System/Volumes/Data`). Strip the leading
+///    `/` and assume the path lives at the volume root — true for
+///    every standard macOS firmlink (`/Users`, `/Library`,
+///    `/private/var/...`).
+///
+/// Returns a `PathBuf` containing the relative path with no
+/// leading slash.
+fn path_relative_to_mount(path: &str, mnt_on: &str) -> std::path::PathBuf {
+    let trimmed_mnt = mnt_on.trim_end_matches('/');
+    if !trimmed_mnt.is_empty() {
+        if let Some(rest) = path.strip_prefix(trimmed_mnt) {
+            let cleaned = rest.trim_start_matches('/');
+            return std::path::PathBuf::from(cleaned);
+        }
+    }
+    // Fallback: firmlinked path. Strip leading `/`.
+    std::path::PathBuf::from(path.trim_start_matches('/'))
+}
+
+/// `mount_apfs -s <snap-name> <device> <mount-point>`. Returns
+/// `Ok(())` on success, `Err(message)` on failure.
+fn mount_snapshot(
+    snap_name: &str,
+    device: &str,
+    mount_point: &std::path::Path,
+) -> Result<(), String> {
+    let status = std::process::Command::new("/sbin/mount_apfs")
+        .arg("-s")
+        .arg(snap_name)
+        .arg(device)
+        .arg(mount_point)
+        .status()
+        .map_err(|e| format!("spawn failed: {e}"))?;
+    if !status.success() {
+        return Err(format!("mount_apfs exited {}", status));
+    }
+    Ok(())
+}
+
+/// `umount <mount-point>`. Best-effort; errors logged to stderr.
+fn cleanup_mounts(mounted: &[(String, std::path::PathBuf)]) {
+    use std::io::Write;
+    for (_, mount_dir) in mounted {
+        let status = std::process::Command::new("/sbin/umount")
+            .arg(mount_dir)
+            .status();
+        match status {
+            Ok(s) if s.success() => {}
+            Ok(s) => {
+                let _ = writeln!(
+                    std::io::stderr().lock(),
+                    "apfs-fastindex-scan: server: umount {mount_dir:?} exited {s}"
+                );
+            }
+            Err(err) => {
+                let _ = writeln!(
+                    std::io::stderr().lock(),
+                    "apfs-fastindex-scan: server: umount {mount_dir:?} spawn failed: {err}"
+                );
+            }
+        }
+        let _ = std::fs::remove_dir_all(mount_dir);
+    }
+}
+
+/// Append a snapshot's entries into the merged scan, prefixing
+/// each path with `__snapshots__/<snap-name>/` so the merged tree
+/// keeps the two subtrees separate. `correctness_claim` /
+/// `not_claimed` from the snapshot scan are dropped — the merged
+/// claim remains the live scan's claim because that's the scan
+/// the user actually asked for.
+fn merge_snapshot_into(
+    merged: &mut FallbackScanOutput,
+    snap: FallbackScanOutput,
+    snap_name: &str,
+) {
+    use apfs_fastindex::{EntryKind, NamespaceEntry};
+
+    // Add a synthetic `__snapshots__` parent Dir entry once per
+    // merge group so the tree-list panel shows it as a navigable
+    // subtree. Idempotent: if a previous merge already added it,
+    // subsequent merges find it and skip.
+    if !merged
+        .parser_output
+        .entries
+        .iter()
+        .any(|e| &*e.path == "__snapshots__")
+    {
+        merged.parser_output.entries.push(NamespaceEntry {
+            path: "__snapshots__".into(),
+            entry_kind: EntryKind::Dir,
+            file_id: 0,
+            logical_size: 0,
+            symlink_target: None,
+            allocated_size: Some(0),
+            real_size: Some(0),
+        });
+    }
+
+    let prefix = format!("__snapshots__/{snap_name}");
+    merged
+        .parser_output
+        .entries
+        .reserve(snap.parser_output.entries.len());
+    for entry in snap.parser_output.entries.into_iter() {
+        // Always include the snapshot's path under the synthetic
+        // `__snapshots__/<name>/` directory. Empty-path entries
+        // (the snapshot's root, if any) become the synthetic
+        // directory itself.
+        let new_path = if entry.path.is_empty() {
+            prefix.clone()
+        } else {
+            format!("{prefix}/{}", entry.path)
+        };
+        merged.parser_output.entries.push(NamespaceEntry {
+            path: new_path.into_boxed_str(),
+            entry_kind: entry.entry_kind,
+            file_id: entry.file_id,
+            logical_size: entry.logical_size,
+            symlink_target: entry.symlink_target,
+            allocated_size: entry.allocated_size,
+            real_size: entry.real_size,
+        });
+    }
+    // Walk-skips from the snapshot side are not merged — they
+    // would surface paths that no longer exist on the live FS
+    // and would be confusing in the status-bar elide pill.
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use apfs_fastindex::{
+        DirectoryAggregate, EntryKind, NamespaceEntry, ParserOutput, ScanState,
+        SourceDescriptor, WalkSkip,
+    };
+    use std::path::PathBuf;
+
+    fn entry(path: &str, logical: u64) -> NamespaceEntry {
+        NamespaceEntry {
+            path: path.into(),
+            entry_kind: EntryKind::File,
+            file_id: 0,
+            logical_size: logical,
+            symlink_target: None,
+            allocated_size: Some(logical),
+            real_size: Some(logical),
+        }
+    }
+
+    fn empty_output(entries: Vec<NamespaceEntry>) -> FallbackScanOutput {
+        FallbackScanOutput {
+            parser_output: ParserOutput {
+                source: SourceDescriptor {
+                    requested_path: PathBuf::from("/"),
+                    raw_container_path: "/".to_string(),
+                    source_kind: "test".to_string(),
+                    allowlist_reason: "test".to_string(),
+                },
+                scan_state: ScanState {
+                    block_size: 4096,
+                    descriptor_blocks: 0,
+                    descriptor_base: 0,
+                    descriptor_base_non_contiguous: false,
+                    highest_xid: 0,
+                    candidate_count: 0,
+                    validation_gaps: vec![],
+                },
+                backend_name: "test".to_string(),
+                entries,
+                aggregates: vec![],
+                walk_skips: vec![],
+            },
+            correctness_claim: String::new(),
+            not_claimed: vec![],
+        }
+    }
+
+    /// path_relative_to_mount: textual prefix case — path is
+    /// physically under the mount root.
+    #[test]
+    fn path_relative_strips_textual_prefix() {
+        let p = path_relative_to_mount("/System/Volumes/Data/Users/kai", "/System/Volumes/Data");
+        assert_eq!(p, PathBuf::from("Users/kai"));
+    }
+
+    /// path_relative_to_mount: firmlink case — path doesn't
+    /// textually match mnt_on but statfs reports the path lives
+    /// on a different mount. Fall back to leading-/-strip.
+    #[test]
+    fn path_relative_handles_firmlinked_path() {
+        // `/Users/kai` statfs's to `/System/Volumes/Data` on a
+        // standard macOS install via firmlink. Textual strip
+        // fails (no prefix); fallback strips leading `/`.
+        let p = path_relative_to_mount("/Users/kai", "/System/Volumes/Data");
+        assert_eq!(p, PathBuf::from("Users/kai"));
+    }
+
+    /// path_relative_to_mount: path on root mount.
+    #[test]
+    fn path_relative_strips_root_mount() {
+        let p = path_relative_to_mount("/tmp/foo", "/");
+        assert_eq!(p, PathBuf::from("tmp/foo"));
+    }
+
+    /// path_relative_to_mount: path equals mount root.
+    #[test]
+    fn path_relative_at_mount_root_is_empty() {
+        let p = path_relative_to_mount("/System/Volumes/Data", "/System/Volumes/Data");
+        assert_eq!(p, PathBuf::from(""));
+    }
+
+    /// merge_snapshot_into: snapshot entries get prefixed with
+    /// `__snapshots__/<name>/` so the merged tree has them in a
+    /// separate subtree from the live entries.
+    #[test]
+    fn merge_prefixes_snapshot_entries() {
+        let live = vec![
+            entry("Documents/foo.txt", 100),
+            entry("Documents/bar.txt", 200),
+        ];
+        let snap = vec![
+            entry("Documents/foo.txt", 100),
+            entry("Documents/deleted.txt", 500),
+        ];
+
+        let mut merged = empty_output(live);
+        merge_snapshot_into(
+            &mut merged,
+            empty_output(snap),
+            "com.apple.TimeMachine.2026-05-20-100000.local",
+        );
+
+        let paths: Vec<&str> = merged
+            .parser_output
+            .entries
+            .iter()
+            .map(|e| &*e.path)
+            .collect();
+        assert!(paths.contains(&"Documents/foo.txt"));
+        assert!(paths.contains(&"Documents/bar.txt"));
+        assert!(paths.contains(
+            &"__snapshots__/com.apple.TimeMachine.2026-05-20-100000.local/Documents/foo.txt"
+        ));
+        assert!(paths.contains(
+            &"__snapshots__/com.apple.TimeMachine.2026-05-20-100000.local/Documents/deleted.txt"
+        ));
+        // Live (2) + snapshot (2) + synthetic `__snapshots__`
+        // parent Dir (1) = 5.
+        assert_eq!(merged.parser_output.entries.len(), 5);
+        assert!(paths.contains(&"__snapshots__"));
+    }
+
+    /// merge_snapshot_into: entries from multiple snapshots stay
+    /// in separate __snapshots__/<name>/ subtrees.
+    #[test]
+    fn merge_keeps_snapshots_separate() {
+        let mut merged = empty_output(vec![entry("a.txt", 100)]);
+        merge_snapshot_into(
+            &mut merged,
+            empty_output(vec![entry("a.txt", 100)]),
+            "snap-1",
+        );
+        merge_snapshot_into(
+            &mut merged,
+            empty_output(vec![entry("a.txt", 100)]),
+            "snap-2",
+        );
+
+        let paths: Vec<&str> = merged
+            .parser_output
+            .entries
+            .iter()
+            .map(|e| &*e.path)
+            .collect();
+        assert!(paths.contains(&"a.txt"));
+        assert!(paths.contains(&"__snapshots__/snap-1/a.txt"));
+        assert!(paths.contains(&"__snapshots__/snap-2/a.txt"));
+        // Live (1) + snap-1 (1) + snap-2 (1) + synthetic
+        // `__snapshots__` Dir (1, added once across both merges) = 4.
+        assert_eq!(merged.parser_output.entries.len(), 4);
+    }
+
+    /// build_directory_aggregates is exposed publicly via the
+    /// crate root re-export; the merge flow re-aggregates after
+    /// adding snapshot subtrees so per-directory totals include
+    /// them. The synthetic `__snapshots__` Dir entry that
+    /// merge_snapshot_into adds shows up in the aggregates.
+    #[test]
+    fn rebuild_aggregates_includes_snapshot_subtree() {
+        fn dir(path: &str) -> NamespaceEntry {
+            NamespaceEntry {
+                path: path.into(),
+                entry_kind: EntryKind::Dir,
+                file_id: 0,
+                logical_size: 0,
+                symlink_target: None,
+                allocated_size: Some(0),
+                real_size: Some(0),
+            }
+        }
+        // Live scan: typical fallback-walker output — Dir
+        // entries for every directory, File entries beneath.
+        let mut merged = empty_output(vec![
+            dir("Documents"),
+            entry("Documents/foo.txt", 100),
+        ]);
+        // Snapshot scan would have the same Dir-then-File
+        // shape. After the merge they get prefixed with
+        // __snapshots__/<name>/.
+        merge_snapshot_into(
+            &mut merged,
+            empty_output(vec![dir("Documents"), entry("Documents/foo.txt", 100)]),
+            "snap-1",
+        );
+        merged.parser_output.aggregates =
+            apfs_fastindex::build_directory_aggregates(&merged.parser_output.entries);
+
+        let agg_paths: Vec<&str> = merged
+            .parser_output
+            .aggregates
+            .iter()
+            .map(|a| a.path.as_str())
+            .collect();
+        // The synthetic snapshot subtree must produce aggregate
+        // rows: the `__snapshots__` container, and the
+        // `__snapshots__/snap-1/Documents` directory.
+        assert!(
+            agg_paths.contains(&"__snapshots__"),
+            "expected `__snapshots__` aggregate; got {agg_paths:?}"
+        );
+        assert!(
+            agg_paths
+                .iter()
+                .any(|p| p.starts_with("__snapshots__/snap-1")),
+            "expected `__snapshots__/snap-1*` aggregate; got {agg_paths:?}"
+        );
+    }
+
+    /// merge_snapshot_into is called once per snapshot; the
+    /// synthetic `__snapshots__` parent Dir should only be added
+    /// once (idempotent across repeated calls).
+    #[test]
+    fn merge_adds_snapshots_parent_dir_once() {
+        let mut merged = empty_output(vec![entry("a.txt", 100)]);
+        merge_snapshot_into(&mut merged, empty_output(vec![entry("a.txt", 100)]), "s1");
+        merge_snapshot_into(&mut merged, empty_output(vec![entry("a.txt", 100)]), "s2");
+        let count = merged
+            .parser_output
+            .entries
+            .iter()
+            .filter(|e| &*e.path == "__snapshots__")
+            .count();
+        assert_eq!(count, 1, "`__snapshots__` parent should appear once");
+    }
 }

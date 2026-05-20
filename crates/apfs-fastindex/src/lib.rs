@@ -83,8 +83,9 @@ pub use container::{
     CheckpointMapBlock, CheckpointMapSummary, CheckpointMapping, ContainerSummary,
 };
 pub use fallback::{
-    fallback_scan_path, fallback_scan_path_with_options, FallbackError, FallbackOptions,
-    FallbackScanOutput, ProgressEvent,
+    build_aggregates as build_directory_aggregates, fallback_scan_path,
+    fallback_scan_path_with_options, FallbackError, FallbackOptions, FallbackScanOutput,
+    ProgressEvent,
 };
 pub use extent_ref::{ExtentRefDump, ExtentRefStorage, PhysExtRecord};
 pub use fs_record_body::{

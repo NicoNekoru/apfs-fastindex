@@ -177,11 +177,13 @@ enum PrivilegedScan {
     /// background thread, marshal to main if you touch SwiftUI.
     static func run(
         path: String,
+        includeSnapshots: Bool = false,
         onSessionReady: (() -> Void)? = nil,
         onProgress: ((Scan.ProgressSnapshot) -> Void)? = nil
     ) -> Outcome {
         let outcome = AdminSession.shared.requestScan(
             path: path,
+            includeSnapshots: includeSnapshots,
             onSessionReady: onSessionReady,
             onProgress: onProgress
         )

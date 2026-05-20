@@ -271,6 +271,15 @@ final class Scan {
     /// circuit in `PrivilegedScan.run`). The flag is advisory —
     /// it doesn't change the Rust-side handle, only the UI.
     var isAdmin: Bool
+    /// `true` when this scan targeted a path on a snapshot
+    /// filesystem (statfs.f_flags & MNT_SNAPSHOT). Set at
+    /// construction time by inspecting the path the user typed
+    /// or via the same MNT_SNAPSHOT check inside
+    /// `PrivilegedScan`. Drives a separate "Snapshot" status
+    /// chip — orthogonal to `isAdmin`, since walking a
+    /// pre-mounted snapshot doesn't require root, but the data
+    /// is still snapshot-frozen and worth labelling.
+    var isSnapshotPath: Bool
 
     /// Performs a fallback (POSIX-traversal) scan of `path`.
     /// `threads` of 0 picks the default. Returns `nil` if the
@@ -281,7 +290,7 @@ final class Scan {
             apfs_scan_directory(cPath, threads, crossMounts)
         }
         guard let handle else { return nil }
-        return Scan(handle: handle, isAdmin: false)
+        return Scan(handle: handle, isAdmin: false, isSnapshotPath: SnapshotDetect.isOnSnapshot(path))
     }
 
     /// Rehydrate a Scan from a msgpack file written by a
@@ -291,12 +300,16 @@ final class Scan {
     /// builds the same handle the in-process scan produces.
     /// Returns `nil` on read / decode failure; the caller can
     /// read `apfs_last_error` for the cause.
-    static func fromPrivilegedMsgpack(path: String) -> Scan? {
+    static func fromPrivilegedMsgpack(path: String, sourcePath: String? = nil) -> Scan? {
         let handle = path.withCString { cPath in
             apfs_scan_from_msgpack_file(cPath)
         }
         guard let handle else { return nil }
-        return Scan(handle: handle, isAdmin: true)
+        // The `path` argument here is the msgpack temp-file path;
+        // `sourcePath` is the user-supplied scan target. Detect
+        // snapshot-path on the source, not the temp file.
+        let detect = sourcePath.map { SnapshotDetect.isOnSnapshot($0) } ?? false
+        return Scan(handle: handle, isAdmin: true, isSnapshotPath: detect)
     }
 
     /// Run the in-process fallback walker and mark the result as
@@ -316,7 +329,7 @@ final class Scan {
             apfs_scan_directory(cPath, threads, crossMounts)
         }
         guard let handle else { return nil }
-        return Scan(handle: handle, isAdmin: true)
+        return Scan(handle: handle, isAdmin: true, isSnapshotPath: SnapshotDetect.isOnSnapshot(path))
     }
 
     /// One snapshot from the running scanner — `scanned` and
@@ -387,14 +400,15 @@ final class Scan {
         Unmanaged<Box>.fromOpaque(userdata).release()
 
         guard let handle else { return nil }
-        return Scan(handle: handle, isAdmin: false)
+        return Scan(handle: handle, isAdmin: false, isSnapshotPath: SnapshotDetect.isOnSnapshot(path))
     }
 
     private let handle: OpaquePointer
 
-    private init(handle: OpaquePointer, isAdmin: Bool) {
+    private init(handle: OpaquePointer, isAdmin: Bool, isSnapshotPath: Bool = false) {
         self.handle = handle
         self.isAdmin = isAdmin
+        self.isSnapshotPath = isSnapshotPath
     }
 
     deinit {

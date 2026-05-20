@@ -30,6 +30,12 @@ struct NativeContentView: View {
     /// rescan.
     @AppStorage(AppPrefs.depthKey) private var depth: Int = 0
     @AppStorage(AppPrefs.threadsKey) private var threads: Int = 0
+    /// Mirror of the Settings toggle. When true, every scan
+    /// routes through the privileged path and adds the
+    /// scan-with-snapshots command so user-visible TM local
+    /// snapshots get folded into the result. Off by default
+    /// because each snapshot adds roughly one full volume walk.
+    @AppStorage(AppPrefs.expandSnapshotsKey) private var expandSnapshots: Bool = false
     @State private var metric: Scan.Metric = .logical
     @State private var lastSize: CGSize = .zero
     @State private var currentNode: UInt32 = 0
@@ -811,9 +817,22 @@ struct NativeContentView: View {
                 // press routes through AdminSession's long-lived
                 // privileged helper and the chip stays on.
                 if adminMode {
-                    statusPill("Admin", tint: VizPalette.warning) 
+                    statusPill("Admin", tint: VizPalette.warning)
                         .help("Scan ran with administrator privileges; "
                           + "TCC-restricted user-data paths are included.")
+                }
+                // Snapshot-path chip (EX-29 follow-up, implicit
+                // opt-in case): user pointed the scanner at a
+                // path on a snapshot filesystem
+                // (statfs.f_flags & MNT_SNAPSHOT). The data is
+                // frozen at the snapshot's transaction — surface
+                // it so they aren't confused when totals don't
+                // match the live volume.
+                if scan.isSnapshotPath {
+                    statusPill("Snapshot", tint: VizPalette.accent)
+                        .help("Scan target is on a snapshot filesystem. "
+                              + "Totals are frozen at the snapshot's "
+                              + "transaction; they don't reflect live volume state.")
                 }
                 Text(totalsText(for: scan))
                     .font(AppFont.ui(12)).monospacedDigit()
@@ -1265,9 +1284,11 @@ struct NativeContentView: View {
         } else {
             scanProgressBytesTotal = 0
         }
+        let snapshotsRequested = expandSnapshots
         DispatchQueue.global(qos: .userInitiated).async {
             let outcome = PrivilegedScan.run(
                 path: path,
+                includeSnapshots: snapshotsRequested,
                 onSessionReady: {
                     // Auth just completed (helper sent its
                     // ready handshake). Engage sticky admin
@@ -1338,12 +1359,18 @@ struct NativeContentView: View {
     }
 
     private func startScan() {
-        // Sticky admin mode: once elevated, every Scan-button
-        // click stays on the privileged path. Routes through
-        // startPrivilegedScan so the user gets the same progress
-        // UI + admin chip + title suffix as the menu-triggered
-        // flow.
-        if adminMode {
+        // Two paths route through the privileged flow instead of
+        // the in-process fallback walker:
+        //
+        // 1. Sticky admin mode: once the user has elevated for the
+        //    session, every Scan-button click stays on the
+        //    privileged path so subsequent scans don't lose
+        //    admin-only paths.
+        // 2. Expand-snapshots is on: the snapshot orchestration
+        //    (mount_apfs → walk → merge → unmount) lives in the
+        //    privileged helper, so even a fresh non-admin user
+        //    gets routed through it. The auth prompt fires here.
+        if adminMode || expandSnapshots {
             startPrivilegedScan()
             return
         }

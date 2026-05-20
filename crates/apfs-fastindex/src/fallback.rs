@@ -1125,7 +1125,7 @@ fn entry_kind_from_meta(meta: &fs::Metadata) -> EntryKind {
 /// `BTreeMap<String, ...>` + `ancestor_directories() -> Vec<String>`
 /// shape which allocated ~25M intermediate Strings on a 5M-entry
 /// `/`-scan.
-fn build_aggregates(entries: &[NamespaceEntry]) -> Vec<DirectoryAggregate> {
+pub fn build_aggregates(entries: &[NamespaceEntry]) -> Vec<DirectoryAggregate> {
     use rustc_hash::FxBuildHasher;
     // Both maps swap to fxhash. The outer is probed once per
     // ancestor per file (~30M probes on a /-scale scan); the

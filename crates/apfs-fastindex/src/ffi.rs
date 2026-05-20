@@ -372,6 +372,44 @@ fn finalize_scan_handle(output: crate::FallbackScanOutput) -> *mut ApfsScan {
 /// On any of those, the caller can read `apfs_last_error` for a
 /// human-readable diagnostic.
 #[no_mangle]
+/// True iff `path` resolves to a filesystem mounted as a
+/// snapshot (statfs.f_flags & MNT_SNAPSHOT). Returns 0 for any
+/// error (path NULL, not UTF-8, statfs failed) so the caller
+/// treats a non-snapshot as the safe default.
+///
+/// EX-29 follow-up: the Swift bridge can't reach Darwin's
+/// `statfs(_:_:)` function unambiguously through the overlay
+/// (name collision with `struct statfs`). Calling out to this
+/// FFI is the workaround.
+#[no_mangle]
+pub extern "C" fn apfs_is_snapshot_path(path: *const c_char) -> i32 {
+    ffi_guard(0, move || {
+        if path.is_null() {
+            return 0;
+        }
+        let c_str = unsafe { std::ffi::CStr::from_ptr(path) };
+        let Ok(rust_path) = c_str.to_str() else {
+            return 0;
+        };
+        let Ok(c_path) = std::ffi::CString::new(rust_path) else {
+            return 0;
+        };
+        let mut buf: libc::statfs = unsafe { std::mem::zeroed() };
+        let rc = unsafe { libc::statfs(c_path.as_ptr(), &mut buf as *mut libc::statfs) };
+        if rc != 0 {
+            return 0;
+        }
+        // MNT_SNAPSHOT from <sys/mount.h>: 0x40000000.
+        const MNT_SNAPSHOT: u32 = 0x4000_0000;
+        if buf.f_flags & MNT_SNAPSHOT != 0 {
+            1
+        } else {
+            0
+        }
+    })
+}
+
+#[no_mangle]
 pub extern "C" fn apfs_scan_from_msgpack_file(path: *const c_char) -> *mut ApfsScan {
     ffi_guard(ptr::null_mut(), move || {
         if path.is_null() {
