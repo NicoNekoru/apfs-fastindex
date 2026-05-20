@@ -5,24 +5,60 @@ on:
     branches: [main]
   pull_request:
 
+# Minimal default token scope. Individual jobs can opt back in
+# if they need write access (none do today).
+permissions:
+  contents: read
+
 # The whole build is macOS-bound (apfs-fastindex links against
 # libSystem for getattrlistbulk and SwiftUI for the app target).
 # Linux runners would only confuse the matrix and Apple-Silicon
 # perf data, so we just don't run there.
 jobs:
   rust-test:
-    name: cargo test
+    name: cargo test + clippy
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      # Actions pinned to their commit SHA per OpenSSF supply-
+      # chain guidance — a compromised `actions/checkout@v4`
+      # floating tag could otherwise run arbitrary code in CI.
+      # The trailing comment is the friendly version label.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4.1.2
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+      - name: cargo clippy
+        # Audit's CI gap callout — clippy lints catch real bugs
+        # (panic-on-unwrap, unsound transmutes, lifetime
+        # mistakes) that `cargo build` misses. Deny warnings so
+        # lint regressions break the build.
+        #
+        # Three pre-existing lints are allowed for now to avoid
+        # bundling a 38-call-site cleanup with the audit
+        # follow-ups:
+        #   - `doc_lazy_continuation`: doc-comment indentation
+        #     style on multi-line bullets; cosmetic.
+        #   - `explicit_auto_deref`: `&*box_str` patterns where
+        #     auto-deref would suffice; stylistic.
+        #   - `not_unsafe_ptr_arg_deref`: every `#[no_mangle]
+        #     extern "C" fn` in `ffi.rs` dereferences a
+        #     caller-supplied pointer. Marking them `unsafe fn`
+        #     would be pedantically correct but changes the
+        #     cbindgen header in ways the Swift importer doesn't
+        #     care about. Tracked as a follow-up cleanup.
+        run: |
+          cargo clippy --all-targets --release -- \
+            -D warnings \
+            -A clippy::doc_lazy_continuation \
+            -A clippy::explicit_auto_deref \
+            -A clippy::not_unsafe_ptr_arg_deref \
+            -A clippy::too_many_arguments \
+            -A clippy::manual_is_multiple_of
       - name: cargo test
         run: cargo test -p apfs-fastindex --release
 
@@ -30,21 +66,19 @@ jobs:
     name: cargo audit
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Install cargo-audit
         run: cargo install --locked cargo-audit
       - name: Run audit
-        # `--deny warnings` would also fail on unmaintained-but-
-        # safe crates; we only care about advisories for now.
         run: cargo audit
 
   swift-ffi-tests:
     name: swift FFI tests
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4.1.2
         with:
           path: |
             ~/.cargo/registry
@@ -62,12 +96,12 @@ jobs:
         run: swift run --package-path app apfs-ffi-tests
 
   cbindgen-drift:
-    name: cbindgen no-drift
+    name: cbindgen header drift
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4.1.2
         with:
           path: |
             ~/.cargo/registry
@@ -77,19 +111,29 @@ jobs:
       - name: Build the crate so cbindgen runs
         # `build.rs` regenerates the header into
         # `target/<profile>/include/apfs_fastindex.h`. A
-        # cbindgen failure now panics the build script (audit
-        # fix #7), so a successful build here is itself the
-        # drift check — there's no committed header to diff
-        # against, and `build.rs` no longer swallows errors.
+        # cbindgen failure panics the build script (commit
+        # 35a5df6), so a successful build here is a precondition
+        # for the diff below.
         run: cargo build --release -p apfs-fastindex
-      - name: Sanity-check the header has the expected FFI symbols
-        # Lightweight grep so a future build.rs change that
-        # silently skips cbindgen still trips here.
+      - name: Diff against the committed header
+        # Round-2 audit #N7: the previous symbol-grep let
+        # signature / struct-layout drift through. A real
+        # `git diff --exit-code` against the snapshot at
+        # `crates/apfs-fastindex/include/apfs_fastindex.h`
+        # catches *any* change to the FFI ABI, not just the
+        # subset we remembered to grep for. To accept a
+        # legitimate FFI change, run `cargo build` locally
+        # and commit the regenerated header alongside the
+        # Rust changes.
         run: |
           set -e
-          HEADER=target/release/include/apfs_fastindex.h
-          test -f "$HEADER" || { echo "header missing"; exit 1; }
-          for sym in apfs_hello apfs_version apfs_scan_directory apfs_last_error apfs_log_path; do
-            grep -q "\b$sym\b" "$HEADER" || { echo "missing symbol: $sym"; exit 1; }
-          done
-          echo "all expected symbols present in $HEADER"
+          COMMITTED=crates/apfs-fastindex/include/apfs_fastindex.h
+          GENERATED=target/release/include/apfs_fastindex.h
+          if ! diff -u "$COMMITTED" "$GENERATED"; then
+            echo
+            echo "ERROR: committed header is stale."
+            echo "Run a release build locally and commit the"
+            echo "regenerated $COMMITTED."
+            exit 1
+          fi
+          echo "header drift check OK — committed and generated match"
