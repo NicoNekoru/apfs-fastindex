@@ -375,18 +375,27 @@ Long-range product roadmap:
   (+82% cumulative since the pre-perf baseline; 1.82× total).
   Test count 69 → 70 (parallel_walker_matches_serial_shape).
 - `EX-26` SR-019 sparse + decmpfs allocated-size precedence
-  (R5 phase 1; planned, methodology populated). Formalises
-  EX-22's observed `alloced_size - sparse_bytes ≈ st_blocks * 512`
-  as Hypothesis A; adds per-`compression_type` hypotheses
-  (fork-stored / xattr-stored) for the decmpfs branch of SR-019.
-  Uses the EX-19/EX-22 fixture plus three new sparse and three
-  new decmpfs variants. If validated, lifts the sparse case from
-  fail-closed `None` to `Some(alloced_size - sparse_bytes)` in
-  `crates/apfs-fastindex/src/namespace.rs::allocated_size` and
-  populates the Allocated metric for the system frameworks,
-  Xcode, and decmpfs trees that currently report as
-  `not_claimed`. Documented in
-  `experiments/EX-26-sparse-decmpfs-allocated/README.md`.
+  (R5 phase 1; **closed**, verdict
+  `validated_sparse_and_decmpfs`). Extended the EX-22 fixture
+  with three sparse shapes (1 MiB, 10 MiB, 50 MiB HEAD/TAIL
+  holes plus a chunked 4 KiB-data-per-64 KiB stride) and three
+  decmpfs variants (small compressible JSON →
+  xattr-stream-stored; 256 KiB compressible binary →
+  resource-fork-stored; incompressible → ditto declined to
+  compress). All 10 rows match `st_blocks * 512` exactly under
+  the lifted rules: sparse = `alloced_size - sparse_bytes`
+  (Hypothesis A, held across all 4 sparse shapes); decmpfs =
+  `Σ stream-backed xattr alloced_size + primary dstream`
+  (Hypothesis F, supersedes the originally-planned B/C/D
+  compression-type-conditional split). Lift landed in
+  `crates/apfs-fastindex/src/namespace.rs::compute_allocated_size`
+  (refactored as a free helper for direct unit-testing). 8 new
+  regression tests in `namespace.rs::tests`. Manual chapter 8
+  updated with EX-26 per-shape tables; chapter 1 and 13's
+  "fail-closed gap" callouts dropped. The Allocated metric now
+  populates for every shape the macOS write-path produces; the
+  only fail-closed branch left in SR-019 is the "anything else"
+  catch-all (FIFOs, sockets, block devices).
 - `EX-27` clone-dedup via extent-reference tree (R5 phase 2;
   planned skeleton). Introduces an `oxr_t` walker to extract
   per-extent refcounts; computes the volume's deduplicated
