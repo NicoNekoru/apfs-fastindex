@@ -65,7 +65,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::fallback_bulk::{BulkEntry, BulkReader};
 use crate::{
@@ -288,7 +288,7 @@ impl From<io::Error> for FallbackError {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FallbackScanOutput {
     pub parser_output: ParserOutput,
     pub correctness_claim: String,

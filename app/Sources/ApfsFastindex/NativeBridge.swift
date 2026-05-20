@@ -256,6 +256,16 @@ final class Scan {
     /// constant changes, the Swift mapping changes here too.
     static let allocatedTotalUnclaimed: UInt64 = UInt64.max
 
+    /// `true` when this Scan was produced by the
+    /// "Scan as Administrator…" privileged-subprocess path
+    /// (`Scan.fromPrivilegedMsgpack`), `false` for the in-process
+    /// fallback walker. Drives the status-bar admin chip and the
+    /// window title suffix. The Rust crate's
+    /// `apfs_scan_from_msgpack_file` cannot tell whether the
+    /// msgpack came from a privileged scan; we set this field at
+    /// the Swift-construction site that knows.
+    let isAdmin: Bool
+
     /// Performs a fallback (POSIX-traversal) scan of `path`.
     /// `threads` of 0 picks the default. Returns `nil` if the
     /// Rust side rejected the path (bad UTF-8, missing,
@@ -265,7 +275,22 @@ final class Scan {
             apfs_scan_directory(cPath, threads, crossMounts)
         }
         guard let handle else { return nil }
-        return Scan(handle: handle)
+        return Scan(handle: handle, isAdmin: false)
+    }
+
+    /// Rehydrate a Scan from a msgpack file written by a
+    /// privileged subprocess (the "Scan as Administrator…" flow).
+    /// The file is a `FallbackScanOutput` serialised with
+    /// `rmp_serde::to_vec_named`; the Rust FFI decodes it and
+    /// builds the same handle the in-process scan produces.
+    /// Returns `nil` on read / decode failure; the caller can
+    /// read `apfs_last_error` for the cause.
+    static func fromPrivilegedMsgpack(path: String) -> Scan? {
+        let handle = path.withCString { cPath in
+            apfs_scan_from_msgpack_file(cPath)
+        }
+        guard let handle else { return nil }
+        return Scan(handle: handle, isAdmin: true)
     }
 
     /// One snapshot from the running scanner — `scanned` and
@@ -336,13 +361,14 @@ final class Scan {
         Unmanaged<Box>.fromOpaque(userdata).release()
 
         guard let handle else { return nil }
-        return Scan(handle: handle)
+        return Scan(handle: handle, isAdmin: false)
     }
 
     private let handle: OpaquePointer
 
-    private init(handle: OpaquePointer) {
+    private init(handle: OpaquePointer, isAdmin: Bool) {
         self.handle = handle
+        self.isAdmin = isAdmin
     }
 
     deinit {

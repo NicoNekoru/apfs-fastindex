@@ -126,6 +126,22 @@ struct NativeContentView: View {
         .background(VizPalette.bg)
         .preferredColorScheme(.dark)
         .foregroundStyle(VizPalette.text)
+        .onReceive(NotificationCenter.default.publisher(for: .scanAsAdministratorRequested)) { _ in
+            // The File > Scan as Administrator… menu item posts
+            // this notification; we kick off the privileged scan
+            // here so the menu command doesn't need a reference to
+            // SwiftUI state. The path comes from `pathInput`,
+            // matching the regular Scan button's flow.
+            startPrivilegedScan()
+        }
+        .onChange(of: scan?.isAdmin) { _ in
+            // Refresh the window title so the "— Administrator"
+            // suffix reflects the current scan's privileged state.
+            // Routes through NSApp because SwiftUI's `.navigationTitle`
+            // is per-toolbar on macOS rather than per-window.
+            applyWindowTitle()
+        }
+        .onAppear { applyWindowTitle() }
         .onChange(of: scan?.entryCount) { _ in
             rebuildTreeRows()
             rebuildExtSummary()
@@ -765,6 +781,30 @@ struct NativeContentView: View {
             } else if let scan {
                 statusPill(scan.sourceKind.isEmpty ? "fallback" : scan.sourceKind,
                            tint: VizPalette.accent)
+                // Admin-mode chip (EX-28 follow-up): when this Scan
+                // came from the "Scan as Administrator…" path, the
+                // results include TCC-restricted paths the
+                // unprivileged walker can't see. Surfacing the
+                // privileged state in the status bar tells the user
+                // at a glance that this view is a sudo-scan, not the
+                // standard one.
+                if scan.isAdmin {
+                    HStack(spacing: 4) {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text("Admin")
+                            .font(AppFont.ui(11, weight: .semibold))
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 4)
+                            .stroke(VizPalette.warning.opacity(0.65), lineWidth: 1)
+                    )
+                    .foregroundStyle(VizPalette.warning)
+                    .help("Scan ran with administrator privileges; "
+                          + "TCC-restricted user-data paths are included.")
+                }
                 Text(totalsText(for: scan))
                     .font(AppFont.ui(12)).monospacedDigit()
                     .foregroundStyle(VizPalette.muted)
@@ -1151,7 +1191,98 @@ struct NativeContentView: View {
         return String(format: "%d:%02d", m, s)
     }
 
+    // MARK: - Window title
+
+    /// Apply the window title for the current scan state. When the
+    /// active Scan was produced by the privileged subprocess path,
+    /// the title gets an "— Administrator" suffix so users moving
+    /// between regular and admin scans (e.g. one window of each in
+    /// future Cmd-N support) can tell at a glance which one they're
+    /// looking at without consulting the status bar.
+    private func applyWindowTitle() {
+        let base = "apfs-fastindex"
+        let title = (scan?.isAdmin == true) ? "\(base) — Administrator" : base
+        // Apply to every window the app owns; in practice that's
+        // one window today, but the loop costs nothing and is
+        // future-proof for Cmd-N.
+        for window in NSApplication.shared.windows {
+            window.title = title
+        }
+    }
+
     // MARK: - Scan + layout flow
+
+    /// "Scan as Administrator…" flow (EX-28 follow-up). Spawns the
+    /// bundled CLI under `osascript ... with administrator
+    /// privileges`, which pops the macOS authentication prompt. The
+    /// CLI runs as root, bypasses TCC on user-data paths, writes its
+    /// `FallbackScanOutput` as msgpack to a temp file. On subprocess
+    /// exit we rehydrate via `apfs_scan_from_msgpack_file` and the
+    /// rest of the renderer is unchanged.
+    ///
+    /// Progress UI: the privileged subprocess has no streaming
+    /// progress hook today (it writes the full output at the end),
+    /// so we run with an indeterminate progress overlay. The label
+    /// reads "Scanning (administrator)…" so the user knows the
+    /// blocking-on-osascript shape is expected.
+    private func startPrivilegedScan() {
+        let path = pathInput.trimmingCharacters(in: .whitespaces)
+        guard !path.isEmpty else { return }
+        guard !scanning else { return }
+        scanError = nil
+        scanning = true
+        scanPhaseLabel = "Scanning (administrator)"
+        scanProgressScanned = 0
+        scanProgressSkipped = 0
+        scanProgressBytes = 0
+        scanProgressElapsedMs = 0
+        // Indeterminate denominator (B): privileged scan currently
+        // has no streaming progress, so the bar stays at "no
+        // fraction" until the subprocess finishes. The terminal
+        // path below sets all the counters from the rehydrated
+        // result so the user sees the final numbers transition
+        // cleanly into the treemap.
+        scanProgressBytesTotal = 0
+        DispatchQueue.global(qos: .userInitiated).async {
+            let outcome = PrivilegedScan.run(path: path)
+            DispatchQueue.main.async {
+                switch outcome {
+                case .ok(let result):
+                    scanPhaseLabel = "Rendering"
+                    scan = result
+                    currentNode = 0
+                    lastClickedPath = ""
+                    expandedNodes = [0]
+                    walkSkips = result.walkSkips()
+                    // Reflect the rehydrated totals in the
+                    // progress-overlay counters so the final
+                    // frame's numbers match the treemap.
+                    scanProgressScanned = result.entryCount
+                    scanProgressBytes = result.logicalTotal
+                    scanProgressBytesTotal = result.logicalTotal
+                    if !result.allocatedAvailable && metric == .allocated {
+                        metric = .logical
+                    }
+                    updateLayout()
+                    rebuildTreeRows()
+                    rebuildExtSummary()
+                case .cancelled:
+                    // Quiet — user dismissed the auth dialog. No
+                    // error popup, no toast, just go back to where
+                    // we were.
+                    break
+                case .failed(let message, _):
+                    scan = nil
+                    layout = nil
+                    treeRows = []
+                    extSummary = nil
+                    walkSkips = []
+                    scanError = message
+                }
+                scanning = false
+            }
+        }
+    }
 
     private func startScan() {
         let path = pathInput.trimmingCharacters(in: .whitespaces)

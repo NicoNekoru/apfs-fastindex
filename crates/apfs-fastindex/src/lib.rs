@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use plist::Value;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 mod block_io;
 mod btree;
@@ -104,7 +104,7 @@ const MIN_BLOCK_SIZE: u32 = 4096;
 const MAX_BLOCK_SIZE: u32 = 64 * 1024;
 const MAX_DESCRIPTOR_BLOCKS: u32 = 10_000;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SourceDescriptor {
     pub requested_path: PathBuf,
     pub raw_container_path: String,
@@ -112,7 +112,7 @@ pub struct SourceDescriptor {
     pub allowlist_reason: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScanState {
     pub block_size: u32,
     pub descriptor_blocks: u32,
@@ -123,7 +123,7 @@ pub struct ScanState {
     pub validation_gaps: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EntryKind {
     Dir,
@@ -138,7 +138,7 @@ pub enum EntryKind {
 /// that's a ~50 MiB drop on the entry vec alone, plus tighter
 /// cache lines per row. The JSONL output via `serde` is
 /// unchanged (`Box<str>` serializes as a plain string).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NamespaceEntry {
     pub path: Box<str>,
     pub entry_kind: EntryKind,
@@ -171,7 +171,7 @@ pub struct NamespaceEntry {
     pub real_size: Option<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DirectoryAggregate {
     pub path: String,
     pub unique_inode_logical_total: u64,
@@ -187,7 +187,7 @@ pub struct DirectoryAggregate {
     pub unique_inode_real_total: Option<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ParserOutput {
     pub source: SourceDescriptor,
     pub scan_state: ScanState,
@@ -205,7 +205,7 @@ pub struct ParserOutput {
     pub walk_skips: Vec<WalkSkip>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WalkSkip {
     pub path: String,
     pub reason: String,

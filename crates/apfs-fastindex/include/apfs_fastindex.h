@@ -259,6 +259,27 @@ struct ApfsScan *apfs_scan_directory_with_progress(const char *path,
                                                    void *userdata);
 
 /**
+ * Load an ApfsScan from a previously-emitted msgpack file.
+ *
+ * The privileged-subprocess "Scan as Administrator…" flow spawns
+ * `apfs-fastindex-scan --format msgpack ...` via osascript with
+ * administrator privileges. The subprocess writes its
+ * `FallbackScanOutput` as a msgpack blob to a temp file the parent
+ * app picks; on subprocess exit, the parent calls this FFI to
+ * rehydrate an `ApfsScan` from that file — identical to the
+ * in-process scan handle the Swift renderer normally reads.
+ *
+ * Returns `NULL` on:
+ * - `path` is NULL or not valid UTF-8
+ * - the file can't be opened or read
+ * - the msgpack blob fails to decode as `FallbackScanOutput`
+ *
+ * On any of those, the caller can read `apfs_last_error` for a
+ * human-readable diagnostic.
+ */
+struct ApfsScan *apfs_scan_from_msgpack_file(const char *path);
+
+/**
  * Drop a scan handle. Idempotent on NULL.
  */
 void apfs_scan_free(struct ApfsScan *scan);
@@ -281,6 +302,23 @@ uint64_t apfs_scan_logical_total(const struct ApfsScan *scan);
  * the tree root's pre-computed aggregate.
  */
 uint64_t apfs_scan_allocated_total(const struct ApfsScan *scan);
+
+/**
+ * Sum of `entry.real_size` (EX-27 clone-deduplicated allocated
+ * bytes) across the whole scan, or `APFS_REAL_TOTAL_UNCLAIMED`
+ * (`u64::MAX`) when *any* row had `real_size = None`. Reads off
+ * the tree root's pre-computed aggregate.
+ */
+uint64_t apfs_scan_real_total(const struct ApfsScan *scan);
+
+/**
+ * `true` iff at least one entry in the scan has
+ * `real_size = Some(_)`. The Swift UI toggles the "Real" metric
+ * chip off when this is false. Fallback mode populates this same
+ * as `allocated_size` (no refcount info from POSIX), so on a
+ * well-formed scan both are typically `true`.
+ */
+bool apfs_scan_real_available(const struct ApfsScan *scan);
 
 /**
  * Total number of nodes in the tree (root + every directory +
