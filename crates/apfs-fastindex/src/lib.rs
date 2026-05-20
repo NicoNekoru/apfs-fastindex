@@ -38,6 +38,13 @@ mod namespace;
 /// as a gated integration test; this module is the reusable
 /// comparator.
 pub mod parity;
+/// EX-29 local-snapshot enumeration: parse `tmutil` and
+/// `diskutil` snapshot listings, apply the SR-020 sealed-system
+/// filter, and classify the host's snapshot state. Reclaimable
+/// bytes are explicitly unclaimed — no public read-only oracle
+/// surfaces them on macOS, and EX-28's verdict ruled out the
+/// raw-extent-diff path.
+pub mod snapshots;
 mod object;
 mod omap;
 /// Treemap layout + cell flattening. Produces the

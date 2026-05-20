@@ -151,6 +151,58 @@ authoritative for live volumes, including the
 privileged-subprocess invocation that unlocks TCC-restricted
 user-data paths.}
 
+\section{EX-29 Local-Snapshot Enumeration (No User Snapshots
+on This Host)}
+\label{sec:ex29-snapshots}
+
+The product surfaces local snapshots as a row in the status bar
+because their bytes are part of \texttt{df}'s ``used'' total and
+the volume's Finder-reported capacity, but the scanner walks
+only the live volume's fs-tree. Without a snapshot row, those
+bytes look ``missing'' on a user's mental model.
+
+EX-29's deliverable is the enumeration: a count of user-visible
+local snapshots, with names. Reclaimable bytes are explicitly
+out of scope on stock Apple silicon: there is no public
+read-only oracle for per-snapshot reclaimable bytes
+(\texttt{tmutil thinlocalsnapshots} reports the number, but it
+deletes the snapshot in the process), and EX-28's verdict
+(\texttt{live\_raw\_blocked\_by\_kernel}) ruled out the raw
+extent-set diff path.
+
+Enumeration is unprivileged. The crate's
+\texttt{snapshots} module calls \texttt{tmutil
+listlocalsnapshots <mount>} and \texttt{diskutil apfs
+listSnapshots <mount>}, parses each output, and classifies the
+result. SR-020's sealed-system filter excludes snapshots whose
+name matches \texttt{com.apple.os.update-*} (the read-only
+system volume's boot snapshot, which the user can't delete and
+whose bytes aren't user-visible).
+
+\textbf{Observation (2026-05-20).} The project owner's host
+has zero user-visible TM local snapshots and one sealed-system
+OS-update snapshot on \texttt{disk3s1s1}. The classifier
+returned \texttt{NoUserSnapshots\{sealed\_system\_excluded\_count
+= 1\}}. EX-23 found the same shape in 2026-05-16; on a
+single-user development host without Time Machine configured
+this is the expected steady state.
+
+The integration harness in
+\texttt{crates/apfs-fastindex/tests/ex29\_snapshot\_enumeration.rs}
+mirrors EX-28's pattern. An unconditional unprivileged test runs
+the classifier; a gated test exercises a raw extent diff between
+a mounted snapshot's device node and the live volume, using the
+existing \texttt{parity::compare\_namespace\_shapes} comparator.
+The gated test reuses EX-28's \texttt{LiveScanOutcome}
+classifier, so an \texttt{EPERM} on the snapshot device is
+recorded as ``EX-28 Hypothesis C reproduces on the snapshot
+device'' rather than failing the test.
+
+The live-snapshot row of the support matrix therefore reads:
+\emph{enumeration validated; reclaimable bytes unclaimed (no
+read-only oracle; raw extent diff blocked by EX-28 Hypothesis C
+on Apple silicon under SIP).}
+
 \section{Fail-Closed Triggers}
 
 A source that does not satisfy the allowlist must fail closed before

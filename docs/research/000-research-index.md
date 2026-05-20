@@ -444,13 +444,25 @@ Long-range product roadmap:
   `experiments/EX-28-root-mode-raw-on-live/README.md`; manual
   chapter 11 records the empirical verdict.
 - `EX-29` local-snapshot extent-set contribution (R5 phase 4;
-  planned skeleton). Reuses EX-27's extent-set machinery and
-  EX-28's root path to mount each local snapshot via
-  `mount_apfs -s`, walk its fs-tree, extract its extent set, and
-  difference against the live volume to compute per-snapshot
-  unique contribution. Validated against `tmutil
-  thinlocalsnapshots`. If validated, lands a status-bar row
-  reporting reclaimable snapshot bytes. Documented in
+  **closed 2026-05-20**, verdict `blocked_no_user_snapshots`).
+  After EX-28 closed with `live_raw_blocked_by_kernel`, EX-29's
+  original raw-extent-diff path is unviable on this host class
+  too (a `mount_apfs -s` snapshot device is gated by the same
+  SIP/sealed-system policy). EX-29's redesigned deliverable is
+  unprivileged enumeration: `tmutil listlocalsnapshots` +
+  `diskutil apfs listSnapshots` parsed in
+  `crates/apfs-fastindex/src/snapshots.rs`, with the SR-020
+  sealed-system-prefix filter and a `SnapshotVerdict` classifier
+  (Enumerated / NoUserSnapshots / ToolingUnavailable). On the
+  project owner's 2026-05-20 host: 0 user-visible TM local
+  snapshots; 1 sealed-system OS-update snapshot on `disk3s1s1`
+  (SR-020-excluded). Same shape EX-23 found. Reclaimable bytes
+  are explicitly unclaimed — no public read-only macOS oracle
+  surfaces them, and EX-28's verdict blocks the raw alternative.
+  Tests: 8 unit + 2 integration (one unconditional, one gated
+  on `APFS_FASTINDEX_EX29_SNAPSHOT_DEVICE` that reuses EX-28's
+  LiveScanOutcome classifier). Manual chapter 11 records the
+  enumeration cell. Documented in
   `experiments/EX-29-snapshot-contribution/README.md`.
 - `EX-21` fallback path skeleton; landed a POSIX-traversal-backed
   fallback in `src/apfs_fastindex/fallback_traversal.py` that emits the

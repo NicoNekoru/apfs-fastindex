@@ -1,0 +1,8 @@
+{
+  "sealed_system_excluded_count": 1,
+  "status": "executed",
+  "user_visible_diskutil_count": 0,
+  "user_visible_tmutil_count": 0,
+  "verdict": "blocked_no_user_snapshots",
+  "verdict_detail": "No user-visible TM local snapshots on any of ('/', '/System/Volumes/Data'). Diskutil reports 1 sealed-system snapshot(s) (SR-020 excluded): ['com.apple.os.update-5514FF97DEE9C60C7FBF462B06A418D5FC4A882D5AF41D2BAF0A1419FB9B9F86']. Same shape EX-23 found on this host class; EX-29 enumeration is structurally correct but has nothing to surface."
+}

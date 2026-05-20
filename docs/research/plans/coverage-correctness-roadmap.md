@@ -159,7 +159,33 @@ validate cleanly. The fallback for each:
 
 ## Status
 
-- EX-26: **Planned** — methodology populated this turn (this commit).
-- EX-27, EX-28, EX-29: **Planned (skeleton)** — Bottom Line + Question +
-  Hypotheses captured this turn; Setup / Probe Steps populated when each
-  experiment is executed.
+- EX-26: **Closed** (2026-05-20). Verdict
+  `validated_sparse_and_decmpfs`. Both fail-closed SR-019
+  branches lift; Rust lift + 8 regression tests landed.
+- EX-27: **Closed** (2026-05-20). Verdict `validated_clone_dedup`.
+  Python-direct probe validated the formula against the
+  authoritative `Σ phys_ext bytes` oracle; Rust port landed as
+  the `extent_ref` module, `compute_dstream_real_totals`
+  helper, new `real_size` column on `NamespaceEntry`, and FFI
+  surface. 6 EX-27 regression tests cover the three
+  clone-family shapes.
+- EX-28: **Closed** (2026-05-20). Verdict
+  `live_raw_blocked_by_kernel`. macOS returns `EPERM` on raw
+  reads of the live boot data partition under SIP even with
+  `sudo`. Reusable parity comparator + gated harness landed for
+  future hosts. "Scan as administrator…" stays on the fallback
+  walker even with root.
+- EX-29: **Closed** (2026-05-20). Verdict
+  `blocked_no_user_snapshots`. Host has 0 user-visible TM
+  local snapshots; 1 sealed-system snapshot SR-020-excluded.
+  Enumeration module + classifier + gated harness landed; bytes
+  oracle deferred (no public read-only API; EX-28 Hypothesis C
+  blocks the raw-extent-diff alternative).
+
+**R5 complete.** Three of four experiments produced positive
+correctness lifts (EX-26 sparse + decmpfs; EX-27 clone-dedup);
+two produced negative oracle-blocked verdicts (EX-28 live raw,
+EX-29 snapshot bytes) that document the macOS-policy boundary
+the product can't cross without privileged entitlements. Total
+Rust test count: 133 lib + 4 FFI + 2 EX-28 + 2 EX-29 = 141,
+all green under `cargo test -p apfs-fastindex --release`.
