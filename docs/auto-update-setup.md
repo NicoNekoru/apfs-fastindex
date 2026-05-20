@@ -26,40 +26,49 @@ won't see the new version until the keys are in place.**
 ./make-release.sh
 ```
 
-This drops Sparkle's `sign_update` binary somewhere under
-`app/.build/artifacts/sparkle/Sparkle/`. The release script
-finds it via `find` so you don't need to remember the exact
-path.
+This drops two tools alongside Sparkle's xcframework under
+`app/.build/artifacts/sparkle/Sparkle/bin/`:
+
+- `sign_update` — signs release zips. `make-release.sh
+  --publish` invokes it for you.
+- `generate_keys` — one-time keypair generator. You run this
+  manually, once.
+
+(Sparkle ≤ 1.x had a combined `sign_update --generate-keys`;
+2.x split keygen into its own binary. Don't be fooled by old
+docs.)
 
 ### 2. Generate the EdDSA keypair
 
 ```sh
-# from the repo root
-find app/.build -name sign_update -type f | head -1
-# → /Users/.../app/.build/artifacts/sparkle/Sparkle/bin/sign_update
+app/.build/artifacts/sparkle/Sparkle/bin/generate_keys
 ```
 
-Run that with `--generate-keys`:
-
-```sh
-/Users/.../sign_update --generate-keys
-```
-
-`sign_update` writes the private key to your login Keychain
-under the service name `https://sparkle-project.org` (account
-`ed25519`) and prints the public key to stdout. Example
-output (yours will differ):
+`generate_keys` writes the private key into your login
+Keychain (service `https://sparkle-project.org`, account
+`ed25519`) and prints the public key to stdout, framed like:
 
 ```
-Public key (Base64): rs3HBd5jjyAtnQS+7g6XSnh+Itmwms2LP1mtRq8Zkho=
+Generating a new signing key. This may take a moment, depending on your machine.
+A key has been generated and saved in your keychain. Add the `SUPublicEDKey` key to
+the Info.plist of each app for which you intend to use Sparkle for distributing
+updates. It should appear like this:
+
+    <key>SUPublicEDKey</key>
+    <string>VRrRWtzTzuBeo4dnQViq6ymvbmR+jMbnaRakpJnYmM8=</string>
 ```
 
 ### 3. Stash the public key in the repo
 
 ```sh
-echo "rs3HBd5jjyAtnQS+7g6XSnh+Itmwms2LP1mtRq8Zkho=" \
+# substitute your actual key from step 2
+echo -n "VRrRWtzTzuBeo4dnQViq6ymvbmR+jMbnaRakpJnYmM8=" \
     > app/sparkle-public-key.txt
 ```
+
+(Use `echo -n` so there's no trailing newline; the build
+script `tr`s newlines out either way, but a clean file is
+easier to diff.)
 
 The file holds the public key on a single line, no trailing
 newline. `make-release.sh` reads it (whitespace-trimmed) and
