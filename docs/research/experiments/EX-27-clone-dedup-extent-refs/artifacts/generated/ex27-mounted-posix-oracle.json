@@ -1,0 +1,175 @@
+{
+  "du_per_dir": {
+    ".": 5574656,
+    "family-a": 328192,
+    "family-b": 3146240,
+    "family-c": 2097664
+  },
+  "du_per_path": {
+    "family-a/clone-1.bin": 65536,
+    "family-a/clone-2.bin": 65536,
+    "family-a/clone-3.bin": 65536,
+    "family-a/clone-4.bin": 65536,
+    "family-a/src.bin": 65536,
+    "family-b/clone-1.bin": 1048576,
+    "family-b/clone-2.bin": 1048576,
+    "family-b/src.bin": 1048576,
+    "family-c/clone.bin": 1048576,
+    "family-c/src.bin": 1048576,
+    "hard.txt": 512,
+    "link.txt": 512,
+    "ordinary.txt": 512
+  },
+  "entries": [
+    {
+      "inode": 2,
+      "path": ".",
+      "st_blocks": 0,
+      "st_blocks_x_512": 0,
+      "st_size": 288,
+      "type": "dir"
+    },
+    {
+      "inode": 16,
+      "nlink": 2,
+      "path": "hard.txt",
+      "st_blocks": 8,
+      "st_blocks_x_512": 4096,
+      "st_size": 28,
+      "type": "file"
+    },
+    {
+      "inode": 21,
+      "nlink": 1,
+      "path": "link.txt",
+      "st_blocks": 0,
+      "st_blocks_x_512": 0,
+      "st_size": 12,
+      "symlink_target": "ordinary.txt",
+      "type": "symlink"
+    },
+    {
+      "inode": 16,
+      "nlink": 2,
+      "path": "ordinary.txt",
+      "st_blocks": 8,
+      "st_blocks_x_512": 4096,
+      "st_size": 28,
+      "type": "file"
+    },
+    {
+      "inode": 22,
+      "path": "family-a",
+      "st_blocks": 0,
+      "st_blocks_x_512": 0,
+      "st_size": 224,
+      "type": "dir"
+    },
+    {
+      "inode": 24,
+      "nlink": 1,
+      "path": "family-a/clone-1.bin",
+      "st_blocks": 128,
+      "st_blocks_x_512": 65536,
+      "st_size": 65536,
+      "type": "file"
+    },
+    {
+      "inode": 25,
+      "nlink": 1,
+      "path": "family-a/clone-2.bin",
+      "st_blocks": 128,
+      "st_blocks_x_512": 65536,
+      "st_size": 65536,
+      "type": "file"
+    },
+    {
+      "inode": 26,
+      "nlink": 1,
+      "path": "family-a/clone-3.bin",
+      "st_blocks": 128,
+      "st_blocks_x_512": 65536,
+      "st_size": 65536,
+      "type": "file"
+    },
+    {
+      "inode": 27,
+      "nlink": 1,
+      "path": "family-a/clone-4.bin",
+      "st_blocks": 128,
+      "st_blocks_x_512": 65536,
+      "st_size": 65536,
+      "type": "file"
+    },
+    {
+      "inode": 23,
+      "nlink": 1,
+      "path": "family-a/src.bin",
+      "st_blocks": 128,
+      "st_blocks_x_512": 65536,
+      "st_size": 65536,
+      "type": "file"
+    },
+    {
+      "inode": 28,
+      "path": "family-b",
+      "st_blocks": 0,
+      "st_blocks_x_512": 0,
+      "st_size": 160,
+      "type": "dir"
+    },
+    {
+      "inode": 30,
+      "nlink": 1,
+      "path": "family-b/clone-1.bin",
+      "st_blocks": 2048,
+      "st_blocks_x_512": 1048576,
+      "st_size": 1048576,
+      "type": "file"
+    },
+    {
+      "inode": 31,
+      "nlink": 1,
+      "path": "family-b/clone-2.bin",
+      "st_blocks": 2048,
+      "st_blocks_x_512": 1048576,
+      "st_size": 1048576,
+      "type": "file"
+    },
+    {
+      "inode": 29,
+      "nlink": 1,
+      "path": "family-b/src.bin",
+      "st_blocks": 2048,
+      "st_blocks_x_512": 1048576,
+      "st_size": 1048576,
+      "type": "file"
+    },
+    {
+      "inode": 32,
+      "path": "family-c",
+      "st_blocks": 0,
+      "st_blocks_x_512": 0,
+      "st_size": 128,
+      "type": "dir"
+    },
+    {
+      "inode": 34,
+      "nlink": 1,
+      "path": "family-c/clone.bin",
+      "st_blocks": 2048,
+      "st_blocks_x_512": 1048576,
+      "st_size": 1048576,
+      "type": "file"
+    },
+    {
+      "inode": 33,
+      "nlink": 1,
+      "path": "family-c/src.bin",
+      "st_blocks": 2048,
+      "st_blocks_x_512": 1048576,
+      "st_size": 1048576,
+      "type": "file"
+    }
+  ]
+}

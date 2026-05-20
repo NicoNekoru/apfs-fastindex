@@ -966,6 +966,12 @@ fn walk_one_directory(
             logical_size,
             symlink_target,
             allocated_size,
+            // EX-27 honesty: the fallback walker has no refcount info
+            // from POSIX (`stat` does not surface clone-share data on
+            // macOS). We report `real_size == allocated_size` so the
+            // shape parity with raw mode holds and the metric is
+            // observably non-deduped on this backend.
+            real_size: allocated_size,
         });
         if is_dir && !cross_mount_skip {
             out_new_frames.push(WalkFrame { absolute, relative });
@@ -1189,11 +1195,17 @@ fn build_aggregates(entries: &[NamespaceEntry]) -> Vec<DirectoryAggregate> {
             .try_fold(0u64, |acc, (_, allocated)| allocated.map(|a| acc + a));
         let mut contributing_file_ids: Vec<u64> = file_sizes.keys().copied().collect();
         contributing_file_ids.sort_unstable();
+        // EX-27: the fallback walker emits `real_size == allocated_size`
+        // per entry (no refcount info from POSIX), so the per-directory
+        // real total mirrors the allocated total. Same None-collapse
+        // contract.
+        let unique_inode_real_total: Option<u64> = unique_inode_allocated_total;
         out.push(DirectoryAggregate {
             path: path.to_string(),
             unique_inode_logical_total,
             contributing_file_ids,
             unique_inode_allocated_total,
+            unique_inode_real_total,
         });
     }
     out

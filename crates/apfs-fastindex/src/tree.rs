@@ -87,12 +87,18 @@ pub struct TreeNode {
     pub children_count: u32,
     pub logical_size: u64,
     pub allocated_size: Option<u64>,
+    pub real_size: Option<u64>,
     pub symlink_target: Option<Box<str>>,
     /// Sum of `logical_size` for this subtree (own + descendants).
     pub value_logical: u64,
     /// Sum of `allocated_size` for this subtree, or `None` if the
     /// SR-019 None-collapse fired in any descendant.
     pub value_allocated: Option<u64>,
+    /// EX-27: sum of `real_size` (clone-deduplicated allocated bytes)
+    /// for this subtree, or `None` if any descendant lacks the value
+    /// (extent-reference-tree gate failed or fallback walker without
+    /// raw access).
+    pub value_real: Option<u64>,
     /// Number of non-directory descendants (matches the JS
     /// renderer's `itemCount`).
     pub item_count: u64,
@@ -158,9 +164,11 @@ impl Tree {
             children_count: 0,
             logical_size: 0,
             allocated_size: None,
+            real_size: None,
             symlink_target: None,
             value_logical: 0,
             value_allocated: None,
+            value_real: None,
             item_count: 0,
         });
         // Pre-size dir child Vecs to 8 — most dirs on a macOS
@@ -223,9 +231,11 @@ impl Tree {
                                     children_count: 0,
                                     logical_size: 0,
                                     allocated_size: None,
+                                    real_size: None,
                                     symlink_target: None,
                                     value_logical: 0,
                                     value_allocated: None,
+                                    value_real: None,
                                     item_count: 0,
                                 });
                                 // Pre-sized dir child Vec (see
@@ -252,9 +262,11 @@ impl Tree {
                                 children_count: 0,
                                 logical_size: entry.logical_size,
                                 allocated_size: entry.allocated_size,
+                                real_size: entry.real_size,
                                 symlink_target: entry.symlink_target.as_deref().map(Box::from),
                                 value_logical: entry.logical_size,
                                 value_allocated: entry.allocated_size,
+                                value_real: entry.real_size,
                                 item_count: 1,
                             });
                             // Leaves never push into their own
@@ -284,9 +296,11 @@ impl Tree {
                                 children_count: 0,
                                 logical_size: 0,
                                 allocated_size: None,
+                                real_size: None,
                                 symlink_target: None,
                                 value_logical: 0,
                                 value_allocated: None,
+                                value_real: None,
                                 item_count: 0,
                             });
                             // Pre-sized dir child Vec (see
@@ -402,6 +416,11 @@ impl Tree {
             } else {
                 self.nodes[ni].allocated_size
             };
+            let mut sum_real: Option<u64> = if is_dir {
+                Some(0)
+            } else {
+                self.nodes[ni].real_size
+            };
             let mut sum_items: u64 = if is_dir { 0 } else { 1 };
 
             // Sum children. Walk the arena slice directly —
@@ -417,12 +436,17 @@ impl Tree {
                     (Some(s), Some(cv)) => Some(s.saturating_add(cv)),
                     _ => None,
                 };
+                sum_real = match (sum_real, c.value_real) {
+                    (Some(s), Some(cv)) => Some(s.saturating_add(cv)),
+                    _ => None,
+                };
                 sum_items = sum_items.saturating_add(c.item_count);
             }
 
             let n = &mut self.nodes[ni];
             n.value_logical = sum_logical;
             n.value_allocated = sum_allocated;
+            n.value_real = sum_real;
             n.item_count = sum_items;
         }
     }
@@ -549,6 +573,7 @@ mod tests {
             logical_size: logical,
             symlink_target: None,
             allocated_size: allocated,
+            real_size: allocated,
         }
     }
 

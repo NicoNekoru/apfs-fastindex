@@ -1,0 +1,144 @@
+{
+  "block_size": 4096,
+  "file_extent_count": 10,
+  "oracle_dir_sum_du_minus_A": 5574656,
+  "per_dstream_count": 8,
+  "per_inode_count": 14,
+  "per_inode_share_sum": 2441214,
+  "phys_ext_count": 10,
+  "phys_ext_total_bytes": 2441216,
+  "rows": [
+    {
+      "computed_dedup_share": 13107,
+      "dstream_dedup_total": 65536,
+      "dstream_raw_total": 65536,
+      "dstream_refcnt": 5,
+      "inode_obj_id": 24,
+      "oracle_du_minus_A": 65536,
+      "path": "family-a/clone-1.bin",
+      "private_id": 23
+    },
+    {
+      "computed_dedup_share": 13107,
+      "dstream_dedup_total": 65536,
+      "dstream_raw_total": 65536,
+      "dstream_refcnt": 5,
+      "inode_obj_id": 25,
+      "oracle_du_minus_A": 65536,
+      "path": "family-a/clone-2.bin",
+      "private_id": 23
+    },
+    {
+      "computed_dedup_share": 13107,
+      "dstream_dedup_total": 65536,
+      "dstream_raw_total": 65536,
+      "dstream_refcnt": 5,
+      "inode_obj_id": 26,
+      "oracle_du_minus_A": 65536,
+      "path": "family-a/clone-3.bin",
+      "private_id": 23
+    },
+    {
+      "computed_dedup_share": 13107,
+      "dstream_dedup_total": 65536,
+      "dstream_raw_total": 65536,
+      "dstream_refcnt": 5,
+      "inode_obj_id": 27,
+      "oracle_du_minus_A": 65536,
+      "path": "family-a/clone-4.bin",
+      "private_id": 23
+    },
+    {
+      "computed_dedup_share": 13107,
+      "dstream_dedup_total": 65536,
+      "dstream_raw_total": 65536,
+      "dstream_refcnt": 5,
+      "inode_obj_id": 23,
+      "oracle_du_minus_A": 65536,
+      "path": "family-a/src.bin",
+      "private_id": 23
+    },
+    {
+      "computed_dedup_share": 349525,
+      "dstream_dedup_total": 1048576,
+      "dstream_raw_total": 1048576,
+      "dstream_refcnt": 3,
+      "inode_obj_id": 30,
+      "oracle_du_minus_A": 1048576,
+      "path": "family-b/clone-1.bin",
+      "private_id": 29
+    },
+    {
+      "computed_dedup_share": 349525,
+      "dstream_dedup_total": 1048576,
+      "dstream_raw_total": 1048576,
+      "dstream_refcnt": 3,
+      "inode_obj_id": 31,
+      "oracle_du_minus_A": 1048576,
+      "path": "family-b/clone-2.bin",
+      "private_id": 29
+    },
+    {
+      "computed_dedup_share": 349525,
+      "dstream_dedup_total": 1048576,
+      "dstream_raw_total": 1048576,
+      "dstream_refcnt": 3,
+      "inode_obj_id": 29,
+      "oracle_du_minus_A": 1048576,
+      "path": "family-b/src.bin",
+      "private_id": 29
+    },
+    {
+      "computed_dedup_share": 655360,
+      "dstream_dedup_total": 655360,
+      "dstream_raw_total": 1048576,
+      "dstream_refcnt": 1,
+      "inode_obj_id": 34,
+      "oracle_du_minus_A": 1048576,
+      "path": "family-c/clone.bin",
+      "private_id": 35
+    },
+    {
+      "computed_dedup_share": 655360,
+      "dstream_dedup_total": 655360,
+      "dstream_raw_total": 1048576,
+      "dstream_refcnt": 1,
+      "inode_obj_id": 33,
+      "oracle_du_minus_A": 1048576,
+      "path": "family-c/src.bin",
+      "private_id": 33
+    },
+    {
+      "computed_dedup_share": 4096,
+      "dstream_dedup_total": 4096,
+      "dstream_raw_total": 4096,
+      "dstream_refcnt": 1,
+      "inode_obj_id": 16,
+      "oracle_du_minus_A": 512,
+      "path": "hard.txt",
+      "private_id": 16
+    },
+    {
+      "computed_dedup_share": 0,
+      "dstream_dedup_total": null,
+      "dstream_raw_total": null,
+      "dstream_refcnt": null,
+      "inode_obj_id": 21,
+      "oracle_du_minus_A": 512,
+      "path": "link.txt",
+      "private_id": null
+    },
+    {
+      "computed_dedup_share": 4096,
+      "dstream_dedup_total": 4096,
+      "dstream_raw_total": 4096,
+      "dstream_refcnt": 1,
+      "inode_obj_id": 16,
+      "oracle_du_minus_A": 512,
+      "path": "ordinary.txt",
+      "private_id": 16
+    }
+  ],
+  "unique_dstreams_dedup_sum": 2441216,
+  "unique_dstreams_raw_sum": 3227648
+}

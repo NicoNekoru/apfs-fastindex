@@ -71,6 +71,138 @@ flight.
 The allowlist will grow only after a paired oracle and a new probe
 clear the corresponding entry in the support matrix.
 
+\section{EX-28 Live-Volume Raw Mode (Hypothesis C: Blocked by the Kernel)}
+\label{sec:ex28-live-raw}
+
+A live mounted volume's \texttt{/dev/diskNsM} device node is not on
+the allowlist above. It cannot be: a live mounted volume is
+exactly the case the source-gate refuses, because the volume
+metadata advances during the scan window and SR-014 checkpoint
+selection has no way to pin the visible state.
+
+EX-28 asks the narrower question: \emph{if a user with root
+privileges hands the existing raw parser a \texttt{/dev/diskNsM}
+of a live volume, does the parser produce a self-consistent
+shape, and does that shape agree with what the fallback walker
+emits from the same mount point in the same scan window?}
+
+The harness lands as a Rust integration test in
+\texttt{crates/apfs-fastindex/tests/ex28\_live\_parity.rs},
+gated on the environment variables
+\texttt{APFS\_FASTINDEX\_EX28\_LIVE\_DEVICE} and
+\texttt{APFS\_FASTINDEX\_EX28\_MOUNT\_POINT}. Without those, the
+test is a clean no-op and \texttt{cargo test --release} skips it.
+With them set and the test run as root, the harness:
+
+\begin{enumerate}
+  \item Tries three successive raw scans of the device. Each
+    must publish a \texttt{selected\_checkpoint} (no SR-014
+    fail-closure under live concurrent writes), with pairwise
+    symmetric difference of their \texttt{NamespaceEntry} sets
+    $\leq 200$ paths.
+  \item Runs one fallback-walker scan of the mount point and
+    compares it against the raw scan; symmetric difference must
+    be $\leq 1000$ paths to absorb the
+    raw-can-read-paths-the-fallback-cannot asymmetry (TCC, sealed
+    system volume reads).
+\end{enumerate}
+
+The comparator behind both checks is
+\texttt{apfs\_fastindex::parity::compare\_namespace\_shapes},
+which returns a structured \texttt{ShapeDiff} with
+\texttt{only\_in\_left}, \texttt{only\_in\_right}, and per-field
+\texttt{mismatches}. It is exposed as a public crate surface so
+any future tooling can use it.
+
+\textbf{Observation (2026-05-20).} The first privileged run on
+the project owner's Apple silicon host returned the harshest of
+the planned fallbacks: macOS refused to even open
+\texttt{/dev/disk3s1} for raw reads, returning \texttt{EPERM}
+(errno 1, ``Operation not permitted'') on the first
+\texttt{read(2)} of the device's block zero, despite the
+process running as root. The harness classifies this as
+\texttt{LiveScanOutcome::BlockedByKernel} and records the
+\texttt{live\_raw\_blocked\_by\_kernel} verdict. The kernel's
+storage-system security policy refuses raw block access to the
+live boot data partition independently of POSIX file
+permissions; SIP and the sealed-system-volume seal both
+contribute. Neither the successive-scan stability nor the
+raw-vs-fallback parity assertions could be evaluated because the
+raw backend never opened.
+
+\textbf{Product implication.} The "Scan as administrator…" menu
+item the original EX-28 plan anticipated does not graduate to
+raw mode on a stock Apple silicon macOS host. The
+privileged-subprocess shape still serves a purpose --- unlocking
+TCC-restricted user-data paths the fallback walker hits
+\texttt{EACCES} on --- but it stays on the fallback walker even
+under root. The raw fast path is unchanged in its original scope:
+detached \texttt{.dmg} images, caller-pinned raw devices on a
+quiesced volume. EX-28's contribution to the codebase is the
+reusable shape-parity comparator
+(\texttt{apfs\_fastindex::parity}) and the env-gated integration
+harness that future hosts (or future macOS versions with
+different security policies) can rerun without code changes.
+
+The live-disk row of the support matrix therefore reads:
+\emph{not supported on stock macOS; raw read returns
+\texttt{EPERM} under \texttt{sudo}; the fallback walker remains
+authoritative for live volumes, including the
+privileged-subprocess invocation that unlocks TCC-restricted
+user-data paths.}
+
+\section{EX-29 Local-Snapshot Enumeration (No User Snapshots
+on This Host)}
+\label{sec:ex29-snapshots}
+
+The product surfaces local snapshots as a row in the status bar
+because their bytes are part of \texttt{df}'s ``used'' total and
+the volume's Finder-reported capacity, but the scanner walks
+only the live volume's fs-tree. Without a snapshot row, those
+bytes look ``missing'' on a user's mental model.
+
+EX-29's deliverable is the enumeration: a count of user-visible
+local snapshots, with names. Reclaimable bytes are explicitly
+out of scope on stock Apple silicon: there is no public
+read-only oracle for per-snapshot reclaimable bytes
+(\texttt{tmutil thinlocalsnapshots} reports the number, but it
+deletes the snapshot in the process), and EX-28's verdict
+(\texttt{live\_raw\_blocked\_by\_kernel}) ruled out the raw
+extent-set diff path.
+
+Enumeration is unprivileged. The crate's
+\texttt{snapshots} module calls \texttt{tmutil
+listlocalsnapshots <mount>} and \texttt{diskutil apfs
+listSnapshots <mount>}, parses each output, and classifies the
+result. SR-020's sealed-system filter excludes snapshots whose
+name matches \texttt{com.apple.os.update-*} (the read-only
+system volume's boot snapshot, which the user can't delete and
+whose bytes aren't user-visible).
+
+\textbf{Observation (2026-05-20).} The project owner's host
+has zero user-visible TM local snapshots and one sealed-system
+OS-update snapshot on \texttt{disk3s1s1}. The classifier
+returned \texttt{NoUserSnapshots\{sealed\_system\_excluded\_count
+= 1\}}. EX-23 found the same shape in 2026-05-16; on a
+single-user development host without Time Machine configured
+this is the expected steady state.
+
+The integration harness in
+\texttt{crates/apfs-fastindex/tests/ex29\_snapshot\_enumeration.rs}
+mirrors EX-28's pattern. An unconditional unprivileged test runs
+the classifier; a gated test exercises a raw extent diff between
+a mounted snapshot's device node and the live volume, using the
+existing \texttt{parity::compare\_namespace\_shapes} comparator.
+The gated test reuses EX-28's \texttt{LiveScanOutcome}
+classifier, so an \texttt{EPERM} on the snapshot device is
+recorded as ``EX-28 Hypothesis C reproduces on the snapshot
+device'' rather than failing the test.
+
+The live-snapshot row of the support matrix therefore reads:
+\emph{enumeration validated; reclaimable bytes unclaimed (no
+read-only oracle; raw extent diff blocked by EX-28 Hypothesis C
+on Apple silicon under SIP).}
+
 \section{Fail-Closed Triggers}
 
 A source that does not satisfy the allowlist must fail closed before

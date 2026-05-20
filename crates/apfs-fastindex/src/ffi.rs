@@ -168,12 +168,19 @@ pub struct ApfsScan {
     /// The Swift UI toggles the "Allocated" metric chip off
     /// when this is false.
     allocated_available: bool,
+    /// True iff *any* entry has `real_size = Some(_)`. The Swift UI
+    /// toggles the "Real" metric chip off when this is false. Raw mode
+    /// (EX-27) populates this; the fallback walker also sets it
+    /// (`real_size == allocated_size`) so the metric is observably
+    /// available with the same coverage as Allocated.
+    real_available: bool,
 }
 
-/// Sentinel for "no allocated total" (SR-019 None-collapse).
-/// Pre-baked at the C-ABI boundary because Option<u64> doesn't
-/// cross unmodified.
+/// Sentinel for "no allocated total" (SR-019 None-collapse) and
+/// "no real total" (EX-27 None-collapse). Pre-baked at the C-ABI
+/// boundary because Option<u64> doesn't cross unmodified.
 const APFS_ALLOCATED_TOTAL_UNCLAIMED: u64 = u64::MAX;
+const APFS_REAL_TOTAL_UNCLAIMED: u64 = u64::MAX;
 
 /// Scan a directory and return an owning `ApfsScan*`. `threads`
 /// of 0 uses the default (min of physical-cpu and 4 per EX-25).
@@ -310,9 +317,15 @@ pub extern "C" fn apfs_scan_directory_with_progress(
 fn finalize_scan_handle(output: crate::FallbackScanOutput) -> *mut ApfsScan {
     let tree = Tree::build(&output.parser_output.entries);
     let mut allocated_available = false;
+    let mut real_available = false;
     for entry in &output.parser_output.entries {
         if entry.allocated_size.is_some() {
             allocated_available = true;
+        }
+        if entry.real_size.is_some() {
+            real_available = true;
+        }
+        if allocated_available && real_available {
             break;
         }
     }
@@ -337,6 +350,7 @@ fn finalize_scan_handle(output: crate::FallbackScanOutput) -> *mut ApfsScan {
         source_kind: source_kind_c,
         source_requested_path: source_requested_path_c,
         allocated_available,
+        real_available,
     }))
 }
 
@@ -393,6 +407,39 @@ pub extern "C" fn apfs_scan_allocated_total(scan: *const ApfsScan) -> u64 {
             .first()
             .and_then(|r| r.value_allocated)
             .unwrap_or(APFS_ALLOCATED_TOTAL_UNCLAIMED)
+    })
+}
+
+/// Sum of `entry.real_size` (EX-27 clone-deduplicated allocated
+/// bytes) across the whole scan, or `APFS_REAL_TOTAL_UNCLAIMED`
+/// (`u64::MAX`) when *any* row had `real_size = None`. Reads off
+/// the tree root's pre-computed aggregate.
+#[no_mangle]
+pub extern "C" fn apfs_scan_real_total(scan: *const ApfsScan) -> u64 {
+    ffi_guard(APFS_REAL_TOTAL_UNCLAIMED, move || {
+        let Some(s) = (unsafe { scan.as_ref() }) else {
+            return APFS_REAL_TOTAL_UNCLAIMED;
+        };
+        s.tree
+            .nodes
+            .first()
+            .and_then(|r| r.value_real)
+            .unwrap_or(APFS_REAL_TOTAL_UNCLAIMED)
+    })
+}
+
+/// `true` iff at least one entry in the scan has
+/// `real_size = Some(_)`. The Swift UI toggles the "Real" metric
+/// chip off when this is false. Fallback mode populates this same
+/// as `allocated_size` (no refcount info from POSIX), so on a
+/// well-formed scan both are typically `true`.
+#[no_mangle]
+pub extern "C" fn apfs_scan_real_available(scan: *const ApfsScan) -> bool {
+    ffi_guard(false, move || {
+        let Some(s) = (unsafe { scan.as_ref() }) else {
+            return false;
+        };
+        s.real_available
     })
 }
 

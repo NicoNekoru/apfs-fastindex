@@ -1,0 +1,60 @@
+{
+  "operations": [
+    {
+      "path": "ordinary.txt",
+      "step": "create ordinary.txt"
+    },
+    {
+      "path": "hard.txt",
+      "step": "hard link hard.txt -> ordinary.txt"
+    },
+    {
+      "path": "link.txt",
+      "step": "symlink link.txt -> ordinary.txt"
+    },
+    {
+      "path": "family-a/src.bin",
+      "step": "family-a src.bin (64 KiB)"
+    },
+    {
+      "path": "family-a/clone-1.bin",
+      "step": "family-a clone-1"
+    },
+    {
+      "path": "family-a/clone-2.bin",
+      "step": "family-a clone-2"
+    },
+    {
+      "path": "family-a/clone-3.bin",
+      "step": "family-a clone-3"
+    },
+    {
+      "path": "family-a/clone-4.bin",
+      "step": "family-a clone-4"
+    },
+    {
+      "path": "family-b/src.bin",
+      "step": "family-b src.bin (1 MiB)"
+    },
+    {
+      "path": "family-b/clone-1.bin",
+      "step": "family-b clone-1"
+    },
+    {
+      "path": "family-b/clone-2.bin",
+      "step": "family-b clone-2"
+    },
+    {
+      "path": "family-c/src.bin",
+      "step": "family-c src.bin (1 MiB)"
+    },
+    {
+      "path": "family-c/clone.bin",
+      "step": "family-c clone"
+    },
+    {
+      "path": "family-c/clone.bin",
+      "step": "family-c clone middle 256 KiB rewritten at 384 KiB"
+    }
+  ]
+}

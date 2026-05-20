@@ -69,6 +69,13 @@ pub enum FsRecordKey {
     SiblingLink {
         sibling_id: u64,
     },
+    /// `j_file_extent_key_t` — high 60 bits of `hdr` are the dstream_id
+    /// (shared by clones), low 60 bits are repeated as `object_id` on the
+    /// row; the additional `logical_addr` is the file extent's logical
+    /// offset.
+    FileExtent {
+        logical_addr: u64,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -84,6 +91,7 @@ pub enum FsRecordValue {
     SiblingMap {
         file_id: Option<u64>,
     },
+    FileExtent(FileExtentBody),
     /// Well-formed but outside v1 namespace + logical-size scope; the row is
     /// counted but no further fields are produced.
     Unsupported {
@@ -143,6 +151,22 @@ pub struct SiblingLinkBody {
     pub name_len: u16,
     pub name: String,
     pub name_bytes_hex: String,
+}
+
+/// `j_file_extent_val_t` — 24 bytes: `len_and_flags` (8) +
+/// `phys_block_num` (8) + `crypto_id` (8). High 4 bits of
+/// `len_and_flags` are flags; low 60 bits are length in *bytes*.
+///
+/// EX-27 (clone-dedup): each file_extent record points at a physical
+/// extent. Multiple clones reference the same paddr through the
+/// extent-reference tree's `phys_ext` records; the refcnt there is
+/// what makes dedup work.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct FileExtentBody {
+    pub length_bytes: u64,
+    pub flags: u8,
+    pub phys_block_num: u64,
+    pub crypto_id: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -211,8 +235,13 @@ pub(crate) const RAW_TYPE_INODE: u8 = 3;
 pub(crate) const RAW_TYPE_XATTR: u8 = 4;
 pub(crate) const RAW_TYPE_SIBLING_LINK: u8 = 5;
 pub(crate) const RAW_TYPE_DSTREAM_ID: u8 = 6;
+pub(crate) const RAW_TYPE_FILE_EXTENT: u8 = 8;
 pub(crate) const RAW_TYPE_DIR_REC: u8 = 9;
 pub(crate) const RAW_TYPE_SIBLING_MAP: u8 = 12;
+
+/// `j_file_extent_val_t` is 24 bytes minimum; `crypto_id` (last 8) may be
+/// absent on some encoders, but Apple-produced volumes emit all 24.
+const FILE_EXTENT_VALUE_MIN: usize = 24;
 
 const INO_EXT_TYPE_SNAP_XID: u8 = 1;
 const INO_EXT_TYPE_DELTA_TREE_OID: u8 = 2;
@@ -312,8 +341,25 @@ fn decode_key(
         RAW_TYPE_DIR_REC => decode_drec_key(key, node_paddr, entry_index),
         RAW_TYPE_XATTR => decode_xattr_key(key, node_paddr, entry_index),
         RAW_TYPE_SIBLING_LINK => decode_sibling_link_key(key, node_paddr, entry_index),
+        RAW_TYPE_FILE_EXTENT => decode_file_extent_key(key, node_paddr, entry_index),
         _ => Ok(FsRecordKey::Plain),
     }
+}
+
+fn decode_file_extent_key(
+    key: &[u8],
+    node_paddr: u64,
+    entry_index: u32,
+) -> Result<FsRecordKey, ScanError> {
+    if key.len() < 16 {
+        return Err(ScanError::InvalidObject(format!(
+            "file_extent key at node {node_paddr} entry {entry_index} shorter than \
+             j_file_extent_key_t (16 bytes), got {}",
+            key.len()
+        )));
+    }
+    let logical_addr = le_u64(key, 8);
+    Ok(FsRecordKey::FileExtent { logical_addr })
 }
 
 fn decode_drec_key(
@@ -492,6 +538,11 @@ fn decode_value(
                 file_id: Some(le_u64(value, 0)),
             })
         }
+        RAW_TYPE_FILE_EXTENT => Ok(FsRecordValue::FileExtent(decode_file_extent(
+            value,
+            node_paddr,
+            entry_index,
+        )?)),
         _ => Ok(FsRecordValue::Unsupported {
             reason: "record family is outside the v1 body decoder allowlist",
         }),
@@ -703,6 +754,39 @@ fn decode_sibling_link(
         name_len,
         name,
         name_bytes_hex: to_hex(name_bytes),
+    })
+}
+
+/// `j_file_extent_val_t` (24 bytes): `len_and_flags` (8) +
+/// `phys_block_num` (8) + `crypto_id` (8). High 4 bits of
+/// `len_and_flags` are flags; low 60 bits are length in *bytes*.
+///
+/// Note: APFS's published j_file_extent_val_t is 24 bytes. Older
+/// fixtures or compressed variants may omit `crypto_id` (16-byte
+/// short form), but every macOS-produced volume we've validated
+/// against emits 24 bytes; the decoder is strict.
+fn decode_file_extent(
+    value: &[u8],
+    node_paddr: u64,
+    entry_index: u32,
+) -> Result<FileExtentBody, ScanError> {
+    if value.len() < FILE_EXTENT_VALUE_MIN {
+        return Err(ScanError::InvalidObject(format!(
+            "file_extent value at node {node_paddr} entry {entry_index} \
+             shorter than {FILE_EXTENT_VALUE_MIN} bytes (got {})",
+            value.len()
+        )));
+    }
+    let len_and_flags = le_u64(value, 0);
+    let length_bytes = len_and_flags & FS_OBJECT_ID_MASK;
+    let flags = ((len_and_flags >> FS_RECORD_TYPE_SHIFT) as u8) & 0xF;
+    let phys_block_num = le_u64(value, 8);
+    let crypto_id = le_u64(value, 16);
+    Ok(FileExtentBody {
+        length_bytes,
+        flags,
+        phys_block_num,
+        crypto_id,
     })
 }
 
