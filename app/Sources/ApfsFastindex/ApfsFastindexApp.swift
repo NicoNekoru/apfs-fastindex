@@ -18,6 +18,11 @@ struct ApfsFastindexApp: App {
     ///                              an early-stage app)
     /// - `SUScheduledCheckInterval` 86400 seconds (one day)
     private let updaterController: SPUStandardUpdaterController
+    /// Held for the lifetime of the app so Sparkle's weak
+    /// delegate reference stays valid. Provides the appcast URL
+    /// in both production and dev (where Info.plist's SUFeedURL
+    /// isn't present).
+    private let updaterDelegate = UpdaterDelegate()
     /// SwiftPM-built binaries launch as a CLI tool by default, so even
     /// though the SwiftUI scene wires up, the window is never raised to
     /// the foreground and no dock icon appears. We flip the activation
@@ -38,7 +43,7 @@ struct ApfsFastindexApp: App {
         NativeBridge.validate()
         updaterController = SPUStandardUpdaterController(
             startingUpdater: true,
-            updaterDelegate: nil,
+            updaterDelegate: updaterDelegate,
             userDriverDelegate: nil
         )
         // Apply the user's saved check-interval preference on
@@ -118,7 +123,7 @@ struct ApfsFastindexApp: App {
             // mirrors `SPUUpdater.canCheckForUpdates` (false
             // while another check or download is in flight).
             CommandGroup(after: .appInfo) {
-                CheckForUpdatesView(updater: updaterController.updater)
+                CheckForUpdatesView(controller: updaterController)
             }
 
             // File menu: "Scan as Administrator…" (⌘⇧A). Posts a
