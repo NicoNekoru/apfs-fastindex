@@ -71,7 +71,7 @@ flight.
 The allowlist will grow only after a paired oracle and a new probe
 clear the corresponding entry in the support matrix.
 
-\section{EX-28 Live-Volume Raw Mode (Validation Harness Landed)}
+\section{EX-28 Live-Volume Raw Mode (Hypothesis C: Blocked by the Kernel)}
 \label{sec:ex28-live-raw}
 
 A live mounted volume's \texttt{/dev/diskNsM} device node is not on
@@ -80,13 +80,11 @@ exactly the case the source-gate refuses, because the volume
 metadata advances during the scan window and SR-014 checkpoint
 selection has no way to pin the visible state.
 
-EX-28 does not try to add live boot disks to the allowlist. It
-adds a validation harness that asks a narrower question: \emph{if
-a user with root privileges hands the existing raw parser a
-\texttt{/dev/diskNsM} of a live volume, does the parser produce a
-self-consistent shape, and does that shape agree with what the
-fallback walker emits from the same mount point in the same scan
-window?}
+EX-28 asks the narrower question: \emph{if a user with root
+privileges hands the existing raw parser a \texttt{/dev/diskNsM}
+of a live volume, does the parser produce a self-consistent
+shape, and does that shape agree with what the fallback walker
+emits from the same mount point in the same scan window?}
 
 The harness lands as a Rust integration test in
 \texttt{crates/apfs-fastindex/tests/ex28\_live\_parity.rs},
@@ -94,16 +92,16 @@ gated on the environment variables
 \texttt{APFS\_FASTINDEX\_EX28\_LIVE\_DEVICE} and
 \texttt{APFS\_FASTINDEX\_EX28\_MOUNT\_POINT}. Without those, the
 test is a clean no-op and \texttt{cargo test --release} skips it.
-With them set and the test run as root:
+With them set and the test run as root, the harness:
 
 \begin{enumerate}
-  \item Three successive raw scans of the device are taken; each
+  \item Tries three successive raw scans of the device. Each
     must publish a \texttt{selected\_checkpoint} (no SR-014
-    fail-closure under live concurrent writes), and the pairwise
+    fail-closure under live concurrent writes), with pairwise
     symmetric difference of their \texttt{NamespaceEntry} sets
-    must be $\leq 200$ paths.
-  \item One additional fallback-walker scan of the mount point is
-    compared against the raw scan; the symmetric difference must
+    $\leq 200$ paths.
+  \item Runs one fallback-walker scan of the mount point and
+    compares it against the raw scan; symmetric difference must
     be $\leq 1000$ paths to absorb the
     raw-can-read-paths-the-fallback-cannot asymmetry (TCC, sealed
     system volume reads).
@@ -116,16 +114,42 @@ which returns a structured \texttt{ShapeDiff} with
 \texttt{mismatches}. It is exposed as a public crate surface so
 any future tooling can use it.
 
-The intended user-facing dispatch is a privileged subprocess:
-\texttt{osascript -e 'do shell script ... with administrator
-privileges'} spawning the existing
-\texttt{apfs-fastindex-scan} binary with the device path. The app
-will surface this as a "Scan as administrator…" menu item; the
-Rust crate's contribution is that the binary already accepts the
-device path verbatim and the harness already exists to validate
-the result. Until the user runs the gated test, the live-disk
-support cell stays at \emph{validation-harness-landed,
-verdict-pending}.
+\textbf{Observation (2026-05-20).} The first privileged run on
+the project owner's Apple silicon host returned the harshest of
+the planned fallbacks: macOS refused to even open
+\texttt{/dev/disk3s1} for raw reads, returning \texttt{EPERM}
+(errno 1, ``Operation not permitted'') on the first
+\texttt{read(2)} of the device's block zero, despite the
+process running as root. The harness classifies this as
+\texttt{LiveScanOutcome::BlockedByKernel} and records the
+\texttt{live\_raw\_blocked\_by\_kernel} verdict. The kernel's
+storage-system security policy refuses raw block access to the
+live boot data partition independently of POSIX file
+permissions; SIP and the sealed-system-volume seal both
+contribute. Neither the successive-scan stability nor the
+raw-vs-fallback parity assertions could be evaluated because the
+raw backend never opened.
+
+\textbf{Product implication.} The "Scan as administrator…" menu
+item the original EX-28 plan anticipated does not graduate to
+raw mode on a stock Apple silicon macOS host. The
+privileged-subprocess shape still serves a purpose --- unlocking
+TCC-restricted user-data paths the fallback walker hits
+\texttt{EACCES} on --- but it stays on the fallback walker even
+under root. The raw fast path is unchanged in its original scope:
+detached \texttt{.dmg} images, caller-pinned raw devices on a
+quiesced volume. EX-28's contribution to the codebase is the
+reusable shape-parity comparator
+(\texttt{apfs\_fastindex::parity}) and the env-gated integration
+harness that future hosts (or future macOS versions with
+different security policies) can rerun without code changes.
+
+The live-disk row of the support matrix therefore reads:
+\emph{not supported on stock macOS; raw read returns
+\texttt{EPERM} under \texttt{sudo}; the fallback walker remains
+authoritative for live volumes, including the
+privileged-subprocess invocation that unlocks TCC-restricted
+user-data paths.}
 
 \section{Fail-Closed Triggers}
 

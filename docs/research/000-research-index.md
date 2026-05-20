@@ -423,21 +423,26 @@ Long-range product roadmap:
   "Real" in the native renderer. Documented in
   `experiments/EX-27-clone-dedup-extent-refs/README.md`.
 - `EX-28` root mode + raw parser on live system volume (R5
-  phase 3; **validation harness landed in Rust**, live-disk
-  verdict pending a privileged run). The Rust crate now carries
-  the public `parity::compare_namespace_shapes` comparator that
-  emits a `ShapeDiff` (only_in_left, only_in_right, per-field
-  mismatches, counts), validated by 7 unit tests. The
-  `tests/ex28_live_parity.rs` integration harness gates on
-  `APFS_FASTINDEX_EX28_LIVE_DEVICE` + `..._MOUNT_POINT` env vars:
-  three-successive-scans stability ≤ 200-path symmetric
-  difference, raw-vs-fallback parity ≤ 1000-path budget. Without
-  the env vars the tests run as clean no-ops, so
-  `cargo test --release` keeps passing; with them set under
-  root, the harness exercises the EX-28 methodology against the
-  user's actual device. Manual chapter 11 documents the new
-  validation cell. Documented in
-  `experiments/EX-28-root-mode-raw-on-live/README.md`.
+  phase 3; **closed 2026-05-20**, verdict
+  `live_raw_blocked_by_kernel`). The Rust crate carries the
+  public `parity::compare_namespace_shapes` comparator
+  (7 unit tests) and the env-gated integration harness in
+  `tests/ex28_live_parity.rs`. First privileged run on the
+  project owner's Apple silicon host produced Hypothesis C: macOS
+  returned `EPERM` (errno 1) on the first `read(2)` of
+  `/dev/disk3s1`'s block 0 despite running under `sudo`. The
+  kernel's storage-system security policy refuses raw block
+  access to the live boot data partition independently of POSIX
+  file permissions; SIP and the sealed-system-volume seal both
+  contribute. The harness classifies this as
+  `LiveScanOutcome::BlockedByKernel`, records the verdict, and
+  exits cleanly. Live boot raw mode is not viable on this host
+  class; the "Scan as administrator…" path stays on the
+  fallback walker even under root. Comparator + harness remain
+  useful for future hosts and for EX-29 snapshot-vs-live diffs.
+  Documented in
+  `experiments/EX-28-root-mode-raw-on-live/README.md`; manual
+  chapter 11 records the empirical verdict.
 - `EX-29` local-snapshot extent-set contribution (R5 phase 4;
   planned skeleton). Reuses EX-27's extent-set machinery and
   EX-28's root path to mount each local snapshot via

@@ -4,11 +4,12 @@ ID: EX-28
 Title: Root mode + raw parser on live system volume
 Date: 2026-05-20
 Owner: Claude
-Status: Harness landed in Rust; live-disk validation pending an
-authorized run.
-Result: Pending the user's privileged run; the Rust integration
-test is the gate and runs as a no-op without
-`APFS_FASTINDEX_EX28_LIVE_DEVICE`.
+Status: Closed. Harness landed in Rust; first privileged run on
+the project owner's Apple silicon host returned Hypothesis C.
+Result: `live_raw_blocked_by_kernel` — macOS returns `EPERM`
+on raw reads of `/dev/disk3s1` (the live boot data partition)
+even under `sudo`, on a SIP-enabled Apple silicon host
+(2026-05-20). Live raw mode is not viable on this host class.
 Related RLs:
 - RL-01 Checkpoint Selection
 - RL-08 Identity and Incremental Caching
@@ -26,27 +27,60 @@ Related docs:
 
 ## Bottom line
 
-The Rust crate now carries the EX-28 validation harness:
+**First privileged run produced Hypothesis C** — macOS's
+storage-system security policy refuses raw reads of the live boot
+data partition's device node even under `sudo`, returning
+`EPERM` (errno 1, "Operation not permitted") on the very first
+`read(2)` of the device's block 0. On the project owner's
+2026-05-20 Apple silicon host (`/dev/disk3s1`, SIP enabled,
+APFS, sealed system volume), neither successive-scan stability
+nor raw-vs-fallback parity can be measured because the raw
+backend never opens.
+
+**Implication for the product.** The "Scan as administrator…"
+menu item the original EX-28 plan anticipated cannot graduate
+to raw mode on a stock macOS host. The privileged-subprocess
+shape still serves a purpose — unlocking TCC-restricted user
+data paths that the fallback walker hits `EACCES` on — but the
+backend stays on the fallback walker even with root. The
+raw fast path remains useful for detached `.dmg` images and any
+future read-only-remount workflow; it does not become a
+live-boot-disk fast path on Apple silicon under SIP.
+
+The validation harness lands in the Rust crate as a reusable
+artifact:
 
 - `apfs_fastindex::parity::compare_namespace_shapes` is a public
   reusable comparator that takes two `NamespaceEntry` slices and
   emits a `ShapeDiff` (only_in_left, only_in_right, mismatches,
   counts). Validated by 7 unit tests covering identical slices,
   symmetric difference, per-field divergence, and the deliberately-
-  ignored `file_id` axis.
+  ignored `file_id` axis. The comparator is generic — useful for
+  any future shape-parity work, including EX-29 snapshot-vs-live
+  diffs.
 - `tests/ex28_live_parity.rs` is the integration harness for the
-  live-volume probe. Two tests:
+  live-volume probe. Two tests, both gated on
+  `APFS_FASTINDEX_EX28_LIVE_DEVICE`:
   1. `ex28_successive_scans_stabilize`: three raw scans against
-     the device named by `APFS_FASTINDEX_EX28_LIVE_DEVICE`; pairwise
-     symmetric difference must be ≤ `SUCCESSIVE_SCAN_BUDGET = 200`.
+     the device named by the env var; pairwise symmetric
+     difference must be ≤ `SUCCESSIVE_SCAN_BUDGET = 200`.
   2. `ex28_raw_vs_fallback_parity`: one raw scan + one fallback
      scan of the same volume (mount point from
      `APFS_FASTINDEX_EX28_MOUNT_POINT`); symmetric difference must
      be ≤ `RAW_FALLBACK_BUDGET = 1000`.
 
+Both tests classify the live-scan outcome into four buckets
+(`Ok`, `BlockedByKernel` for `EPERM`, `NotPrivileged` for
+`EACCES`, `Other` for any unexpected error) so the verdict is
+self-recording. When the kernel returns `EPERM`, the test prints
+"EX-28 Hypothesis C verdict: macOS kernel returned EPERM on raw
+read of <device>" and exits successfully — what failed is the
+operating system's security policy, not the parser, and the harness
+records that as the validated outcome.
+
 Without those env vars, both tests are clean no-ops, so
 `cargo test --release` runs them as harness-tracked but exercises
-zero code. To actually run the EX-28 validation under root:
+zero code. To re-run the privileged probe:
 
 ```sh
 sudo APFS_FASTINDEX_EX28_LIVE_DEVICE=/dev/disk3s1 \
@@ -54,17 +88,19 @@ sudo APFS_FASTINDEX_EX28_LIVE_DEVICE=/dev/disk3s1 \
      cargo test --release --test ex28_live_parity -- --nocapture
 ```
 
-The harness shape — env-gated test + reusable comparator — is the
-"implementation" in the Rust code base. The user-facing
-"Scan as administrator…" menu item (Swift `osascript` privileged
-subprocess) is a separate UX session and not part of this commit;
-the Rust crate is what the menu item would spawn.
+(Note: a `sudo cargo` run leaves root-owned artifacts in
+`target/release/deps/`. To clean them before a non-sudo build,
+`sudo rm -rf target/release/deps/*apfs_fastindex*` — or use
+`CARGO_TARGET_DIR=/tmp/apfs-fastindex-sudo-target sudo cargo
+test --release ...` to keep the sudo cache out of the normal
+target dir.)
 
-This is a validation experiment, not a correctness experiment — the
-parser is unchanged. The deliverable is the harness landed here,
-the documented privileged-subprocess invocation, an updated
-support-matrix row in manual chapter 11, and the user's privileged
-run to actually produce a verdict.
+This is a validation experiment, not a correctness experiment —
+the parser is unchanged. The verdict the harness produces on this
+host (`live_raw_blocked_by_kernel`) is itself the deliverable: it
+closes EX-28 with Hypothesis C and informs the app's future
+"Scan as administrator…" surface (stays on the fallback walker
+even under root).
 
 ## Question
 
@@ -159,8 +195,17 @@ Outline:
 - `live_raw_requires_readonly_remount`: Hypothesis B holds. The
   "Scan as administrator…" path documents the remount step, falls
   back to fallback walker if the volume isn't read-only.
-- `live_raw_unreliable`: Hypothesis C. "Scan as administrator…"
-  stays on the fallback walker. Raw stays detached-`.dmg`-only.
+- `live_raw_blocked_by_kernel` **(landed 2026-05-20 on the
+  project owner's Apple silicon host)**: Hypothesis C. macOS
+  returns `EPERM` on the very first `read(2)` of the live boot
+  data partition's device node, even under `sudo`. The kernel
+  security policy refuses raw block access independently of file
+  permissions. "Scan as administrator…" stays on the fallback
+  walker even with root; raw stays detached-`.dmg`-only on this
+  host class.
+- `live_raw_unreliable`: a softer Hypothesis C — raw opens, but
+  successive scans diverge beyond the budget. Not observed here
+  because the kernel never let us open in the first place.
 
 ## Implementation deltas if validated
 

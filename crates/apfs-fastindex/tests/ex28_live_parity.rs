@@ -32,15 +32,65 @@
 //! app's "Scan as administrator…" command.
 
 use std::env;
-use std::path::PathBuf;
+use std::io;
+use std::path::{Path, PathBuf};
 
 use apfs_fastindex::parity::compare_namespace_shapes;
 use apfs_fastindex::{
-    checkpoint_scan_source, fallback_scan_path_with_options, FallbackOptions,
+    checkpoint_scan_source, fallback_scan_path_with_options, CheckpointScanOutput,
+    FallbackOptions, ParserError, ScanError,
 };
 
 const LIVE_DEVICE_ENV: &str = "APFS_FASTINDEX_EX28_LIVE_DEVICE";
 const MOUNT_POINT_ENV: &str = "APFS_FASTINDEX_EX28_MOUNT_POINT";
+
+/// Classifies why a `checkpoint_scan_source` call against a live
+/// device failed, so the test surfaces the right EX-28 verdict.
+enum LiveScanOutcome {
+    /// Scan completed; the parity assertions can run.
+    Ok(CheckpointScanOutput),
+    /// macOS refused to read the raw device with `EPERM` even
+    /// under root — this is EX-28 Hypothesis C, "live raw
+    /// unreliable on this host class". The harness records the
+    /// verdict and exits cleanly (the test passes; what failed is
+    /// the operating system, not the parser).
+    BlockedByKernel,
+    /// macOS refused to read the raw device with `EACCES` — the
+    /// caller is not root. Record and exit cleanly; the user
+    /// needs to re-run under sudo.
+    NotPrivileged,
+    /// Any other error is a real bug; propagate it as a panic.
+    Other(ParserError),
+}
+
+fn classify_live_scan(device: &Path) -> LiveScanOutcome {
+    match checkpoint_scan_source(device) {
+        Ok(output) => LiveScanOutcome::Ok(output),
+        Err(ParserError::Scan(ScanError::Io(err))) => match err.kind() {
+            io::ErrorKind::PermissionDenied => {
+                // macOS distinguishes EPERM (operation not
+                // permitted by the kernel security policy) from
+                // EACCES (file permissions). Both map to
+                // PermissionDenied in Rust's io::ErrorKind; we
+                // disambiguate via the raw_os_error if present.
+                if err.raw_os_error() == Some(libc_eperm()) {
+                    LiveScanOutcome::BlockedByKernel
+                } else {
+                    LiveScanOutcome::NotPrivileged
+                }
+            }
+            _ => LiveScanOutcome::Other(ParserError::Scan(ScanError::Io(err))),
+        },
+        Err(other) => LiveScanOutcome::Other(other),
+    }
+}
+
+/// `libc::EPERM = 1` on every Apple platform. We hardcode the value
+/// to avoid the `libc` dependency in tests (already a dependency in
+/// the crate proper, but the import shape varies between editions).
+fn libc_eperm() -> i32 {
+    1
+}
 
 /// EX-28's accepted symmetric-difference budget for successive raw
 /// scans on an idle macOS host. Empirically calibrated: a 60-second
@@ -81,10 +131,30 @@ fn ex28_successive_scans_stabilize() {
     };
 
     eprintln!("EX-28: scanning {} three times…", device.display());
-    let scan_one = checkpoint_scan_source(&device)
-        .expect("first raw scan should succeed under root + valid device");
+    let scan_one = match classify_live_scan(&device) {
+        LiveScanOutcome::Ok(s) => s,
+        LiveScanOutcome::BlockedByKernel => {
+            eprintln!(
+                "EX-28 Hypothesis C verdict: macOS kernel returned EPERM on raw read of {}. \
+                 Live raw mode is blocked on this host class even under root. The harness \
+                 records the verdict and exits cleanly; the parser is unchanged.",
+                device.display()
+            );
+            return;
+        }
+        LiveScanOutcome::NotPrivileged => {
+            eprintln!(
+                "EX-28: EACCES reading {}. Re-run under sudo: \
+                 sudo {LIVE_DEVICE_ENV}={} cargo test --release --test ex28_live_parity",
+                device.display(),
+                device.display(),
+            );
+            return;
+        }
+        LiveScanOutcome::Other(err) => panic!("unexpected first raw scan error: {err:?}"),
+    };
     let scan_two = checkpoint_scan_source(&device)
-        .expect("second raw scan should succeed");
+        .expect("second raw scan should succeed (first one already did)");
     let scan_three = checkpoint_scan_source(&device)
         .expect("third raw scan should succeed");
 
@@ -159,7 +229,26 @@ fn ex28_raw_vs_fallback_parity() {
         return;
     };
 
-    let raw = checkpoint_scan_source(&device).expect("raw scan should succeed");
+    let raw = match classify_live_scan(&device) {
+        LiveScanOutcome::Ok(s) => s,
+        LiveScanOutcome::BlockedByKernel => {
+            eprintln!(
+                "EX-28 Hypothesis C verdict: macOS kernel returned EPERM on raw read of {}. \
+                 raw-vs-fallback parity is not measurable on this host. The fallback walker \
+                 itself remains the only validated backend for live volumes here.",
+                device.display()
+            );
+            return;
+        }
+        LiveScanOutcome::NotPrivileged => {
+            eprintln!(
+                "EX-28: EACCES reading {}. Re-run under sudo.",
+                device.display()
+            );
+            return;
+        }
+        LiveScanOutcome::Other(err) => panic!("unexpected raw scan error: {err:?}"),
+    };
     let fallback = fallback_scan_path_with_options(&mount, FallbackOptions::default())
         .expect("fallback scan should succeed");
 
