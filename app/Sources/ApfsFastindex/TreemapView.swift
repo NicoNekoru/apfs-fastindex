@@ -420,14 +420,16 @@ final class TreemapView: NSView {
 
         NSWorkspace.shared.recycle([url]) { newURLs, error in
             if let error {
-                NSLog("[context] recycle failed for %@: %@",
-                      path, error.localizedDescription)
+                appLogger.error(
+                    "context recycle failed for \(path, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                )
                 let err = NSAlert(error: error)
                 err.runModal()
                 return
             }
-            NSLog("[context] recycled %@ -> %@",
-                  path, newURLs.values.first?.path ?? "(unknown)")
+            appLogger.info(
+                "context recycled \(path, privacy: .public) -> \(newURLs.values.first?.path ?? "(unknown)", privacy: .public)"
+            )
         }
     }
 

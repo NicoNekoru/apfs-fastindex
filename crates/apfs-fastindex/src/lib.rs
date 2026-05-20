@@ -11,6 +11,11 @@ use serde::Serialize;
 mod block_io;
 mod btree;
 mod container;
+/// Diagnostic helpers — panic hook writing to
+/// `~/Library/Logs/apfs-fastindex.log` and the thread-local
+/// last-error slot the FFI exposes to Swift. See `diag.rs` for
+/// the rationale.
+mod diag;
 /// Per-extension aggregate for the ext-list side panel. Walks
 /// a subtree, groups leaves by extension, sorts by the active
 /// metric.

@@ -28,6 +28,7 @@ use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::ptr;
 
+use crate::diag;
 use crate::ext_summary::ExtSummary;
 use crate::render::{render_cells, ApfsCell, ApfsLayout, HitGrid, Metric};
 use crate::tree::{Tree, NODE_INVALID};
@@ -54,10 +55,53 @@ use crate::{fallback_scan_path_with_options, FallbackOptions, ProgressEvent};
 /// leave shared state inconsistent if they panic.
 #[inline]
 fn ffi_guard<R>(sentinel: R, f: impl FnOnce() -> R) -> R {
+    // First call across the FFI installs the panic hook (idempotent
+    // via `Once` inside `diag`). Cheap on subsequent calls — one
+    // atomic check on a static.
+    diag::install_panic_hook();
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
         Ok(r) => r,
+        // Panic payload was already captured into the thread-local
+        // `LAST_ERROR` and appended to the log file by the panic
+        // hook before unwinding reached us here — see `diag.rs`.
+        // We just swallow the `Err(Box<dyn Any>)` and return the
+        // fail-closed sentinel; Swift's next call to
+        // `apfs_last_error()` will hand the message back.
         Err(_) => sentinel,
     }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Diagnostic accessors
+// ─────────────────────────────────────────────────────────────
+
+/// Return a `*const c_char` pointing at the most-recent error
+/// message recorded on this thread, or NULL if there is none.
+/// Reading clears the slot — the contract is "one read per
+/// failure," matching Swift's `Scan.lastError()` semantics.
+///
+/// Lifetime: valid until the next call on the same thread that
+/// records a new error. Swift wraps with `String(cString:)` and
+/// owns the copy from that point on. NUL-terminated UTF-8.
+#[no_mangle]
+pub extern "C" fn apfs_last_error() -> *const c_char {
+    // No `ffi_guard` here: this accessor must never recurse
+    // into the panic-capture path. It only reads thread-locals
+    // and returns a pointer; the only way it could panic is an
+    // allocator failure inside `CString::new`, which is fatal
+    // anyway.
+    diag::last_error_cstr()
+}
+
+/// Return a `*const c_char` pointing at the resolved log-file
+/// path (`~/Library/Logs/apfs-fastindex.log` on macOS) the panic
+/// hook writes to. NULL if the hook hasn't been installed yet
+/// (won't happen after the first scan-related FFI call). The
+/// pointer lives for the process lifetime — Swift can cache it.
+#[no_mangle]
+pub extern "C" fn apfs_log_path() -> *const c_char {
+    diag::install_panic_hook();
+    diag::log_path_cstr()
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -204,12 +248,16 @@ pub extern "C" fn apfs_scan_directory_with_progress(
 ) -> *mut ApfsScan {
     ffi_guard(ptr::null_mut(), move || {
         if path.is_null() {
+            diag::set_last_error("path argument is NULL");
             return ptr::null_mut();
         }
         let cstr = unsafe { CStr::from_ptr(path) };
         let path_str = match cstr.to_str() {
             Ok(s) => s,
-            Err(_) => return ptr::null_mut(),
+            Err(e) => {
+                diag::set_last_error(format!("path is not valid UTF-8: {}", e));
+                return ptr::null_mut();
+            }
         };
         let user = ProgressUserdata(userdata);
         let mut progress_closure = move |event: ProgressEvent| {
@@ -246,7 +294,10 @@ pub extern "C" fn apfs_scan_directory_with_progress(
         };
         let output = match fallback_scan_path_with_options(path_str, options) {
             Ok(o) => o,
-            Err(_) => return ptr::null_mut(),
+            Err(e) => {
+                diag::set_last_error(format!("scan failed: {}", e));
+                return ptr::null_mut();
+            }
         };
         finalize_scan_handle(output)
     })
