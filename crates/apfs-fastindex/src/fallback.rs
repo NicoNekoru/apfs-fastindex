@@ -65,7 +65,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::fallback_bulk::{BulkEntry, BulkReader};
 use crate::{
@@ -288,7 +288,7 @@ impl From<io::Error> for FallbackError {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FallbackScanOutput {
     pub parser_output: ParserOutput,
     pub correctness_claim: String,
@@ -1125,7 +1125,7 @@ fn entry_kind_from_meta(meta: &fs::Metadata) -> EntryKind {
 /// `BTreeMap<String, ...>` + `ancestor_directories() -> Vec<String>`
 /// shape which allocated ~25M intermediate Strings on a 5M-entry
 /// `/`-scan.
-fn build_aggregates(entries: &[NamespaceEntry]) -> Vec<DirectoryAggregate> {
+pub fn build_aggregates(entries: &[NamespaceEntry]) -> Vec<DirectoryAggregate> {
     use rustc_hash::FxBuildHasher;
     // Both maps swap to fxhash. The outer is probed once per
     // ancestor per file (~30M probes on a /-scale scan); the

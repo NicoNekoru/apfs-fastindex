@@ -31,6 +31,33 @@ struct ApfsFastindexApp: App {
         }
         .windowResizability(.contentSize)
         .commands {
+            // File menu: "Scan as Administrator…" (⌘⇧A). Posts a
+            // notification picked up by the active
+            // `NativeContentView`, which (per
+            // `PrivilegedScan.run`) either spawns the bundled CLI
+            // under osascript-with-admin-privileges or — when the
+            // process is already running as root — calls the
+            // in-process fallback walker directly.
+            //
+            // The menu is always enabled: silently disabling it
+            // when the CLI helper is missing was confusing in
+            // dev-mode swift-run launches. `PrivilegedScan.run`
+            // surfaces a clear error popup in the status bar if
+            // the helper cannot be located, which is friendlier
+            // than a mysteriously grey menu item.
+            //
+            // EX-28 follow-up: the privileged scan uses the
+            // fallback walker (not raw mode, which EX-28 closed
+            // as kernel-blocked under SIP).
+            CommandGroup(after: .newItem) {
+                Button("Scan as Administrator…") {
+                    NotificationCenter.default.post(
+                        name: .scanAsAdministratorRequested,
+                        object: nil
+                    )
+                }
+                .keyboardShortcut("A", modifiers: [.command, .shift])
+            }
             // Help-menu entry → opens the Rust panic-hook log
             // file in the user's default editor. The file lives
             // under `~/Library/Logs/apfs-fastindex.log`; this
@@ -69,5 +96,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        // Tear down the privileged helper (if any) so it doesn't
+        // hang around as a zombie after the GUI dies. Best-effort
+        // — `AdminSession.shutdown()` is idempotent on the
+        // already-not-running state.
+        AdminSession.shared.shutdown()
     }
 }

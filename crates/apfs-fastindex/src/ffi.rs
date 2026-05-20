@@ -354,6 +354,97 @@ fn finalize_scan_handle(output: crate::FallbackScanOutput) -> *mut ApfsScan {
     }))
 }
 
+/// Load an ApfsScan from a previously-emitted msgpack file.
+///
+/// The privileged-subprocess "Scan as Administrator…" flow spawns
+/// `apfs-fastindex-scan --format msgpack ...` via osascript with
+/// administrator privileges. The subprocess writes its
+/// `FallbackScanOutput` as a msgpack blob to a temp file the parent
+/// app picks; on subprocess exit, the parent calls this FFI to
+/// rehydrate an `ApfsScan` from that file — identical to the
+/// in-process scan handle the Swift renderer normally reads.
+///
+/// Returns `NULL` on:
+/// - `path` is NULL or not valid UTF-8
+/// - the file can't be opened or read
+/// - the msgpack blob fails to decode as `FallbackScanOutput`
+///
+/// On any of those, the caller can read `apfs_last_error` for a
+/// human-readable diagnostic.
+#[no_mangle]
+/// True iff `path` resolves to a filesystem mounted as a
+/// snapshot (statfs.f_flags & MNT_SNAPSHOT). Returns 0 for any
+/// error (path NULL, not UTF-8, statfs failed) so the caller
+/// treats a non-snapshot as the safe default.
+///
+/// EX-29 follow-up: the Swift bridge can't reach Darwin's
+/// `statfs(_:_:)` function unambiguously through the overlay
+/// (name collision with `struct statfs`). Calling out to this
+/// FFI is the workaround.
+#[no_mangle]
+pub extern "C" fn apfs_is_snapshot_path(path: *const c_char) -> i32 {
+    ffi_guard(0, move || {
+        if path.is_null() {
+            return 0;
+        }
+        let c_str = unsafe { std::ffi::CStr::from_ptr(path) };
+        let Ok(rust_path) = c_str.to_str() else {
+            return 0;
+        };
+        let Ok(c_path) = std::ffi::CString::new(rust_path) else {
+            return 0;
+        };
+        let mut buf: libc::statfs = unsafe { std::mem::zeroed() };
+        let rc = unsafe { libc::statfs(c_path.as_ptr(), &mut buf as *mut libc::statfs) };
+        if rc != 0 {
+            return 0;
+        }
+        // MNT_SNAPSHOT from <sys/mount.h>: 0x40000000.
+        const MNT_SNAPSHOT: u32 = 0x4000_0000;
+        if buf.f_flags & MNT_SNAPSHOT != 0 {
+            1
+        } else {
+            0
+        }
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn apfs_scan_from_msgpack_file(path: *const c_char) -> *mut ApfsScan {
+    ffi_guard(ptr::null_mut(), move || {
+        if path.is_null() {
+            crate::diag::set_last_error("apfs_scan_from_msgpack_file: path is NULL");
+            return ptr::null_mut();
+        }
+        let cstr = unsafe { std::ffi::CStr::from_ptr(path) };
+        let Ok(rust_path) = cstr.to_str() else {
+            crate::diag::set_last_error(
+                "apfs_scan_from_msgpack_file: path is not valid UTF-8",
+            );
+            return ptr::null_mut();
+        };
+        let bytes = match std::fs::read(rust_path) {
+            Ok(b) => b,
+            Err(err) => {
+                crate::diag::set_last_error(&format!(
+                    "apfs_scan_from_msgpack_file: read {rust_path}: {err}"
+                ));
+                return ptr::null_mut();
+            }
+        };
+        let output: crate::FallbackScanOutput = match rmp_serde::from_slice(&bytes) {
+            Ok(o) => o,
+            Err(err) => {
+                crate::diag::set_last_error(&format!(
+                    "apfs_scan_from_msgpack_file: decode {rust_path}: {err}"
+                ));
+                return ptr::null_mut();
+            }
+        };
+        finalize_scan_handle(output)
+    })
+}
+
 /// Drop a scan handle. Idempotent on NULL.
 #[no_mangle]
 pub extern "C" fn apfs_scan_free(scan: *mut ApfsScan) {

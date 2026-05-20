@@ -256,6 +256,31 @@ final class Scan {
     /// constant changes, the Swift mapping changes here too.
     static let allocatedTotalUnclaimed: UInt64 = UInt64.max
 
+    /// `true` when this Scan was produced under the
+    /// "Scan as Administrator…" flow (privileged subprocess, or
+    /// — when the GUI is already running as root — the in-process
+    /// fallback walker). Drives the status-bar admin chip and the
+    /// window title suffix. The Rust crate's
+    /// `apfs_scan_from_msgpack_file` cannot tell whether the
+    /// msgpack came from a privileged scan; we set this field at
+    /// the Swift-construction site that knows.
+    ///
+    /// `var` rather than `let` so callers can flip the badge after
+    /// construction when the in-process fallback path happens to
+    /// inherit root privileges (e.g. the `alreadyRoot` short-
+    /// circuit in `PrivilegedScan.run`). The flag is advisory —
+    /// it doesn't change the Rust-side handle, only the UI.
+    var isAdmin: Bool
+    /// `true` when this scan targeted a path on a snapshot
+    /// filesystem (statfs.f_flags & MNT_SNAPSHOT). Set at
+    /// construction time by inspecting the path the user typed
+    /// or via the same MNT_SNAPSHOT check inside
+    /// `PrivilegedScan`. Drives a separate "Snapshot" status
+    /// chip — orthogonal to `isAdmin`, since walking a
+    /// pre-mounted snapshot doesn't require root, but the data
+    /// is still snapshot-frozen and worth labelling.
+    var isSnapshotPath: Bool
+
     /// Performs a fallback (POSIX-traversal) scan of `path`.
     /// `threads` of 0 picks the default. Returns `nil` if the
     /// Rust side rejected the path (bad UTF-8, missing,
@@ -265,7 +290,46 @@ final class Scan {
             apfs_scan_directory(cPath, threads, crossMounts)
         }
         guard let handle else { return nil }
-        return Scan(handle: handle)
+        return Scan(handle: handle, isAdmin: false, isSnapshotPath: SnapshotDetect.isOnSnapshot(path))
+    }
+
+    /// Rehydrate a Scan from a msgpack file written by a
+    /// privileged subprocess (the "Scan as Administrator…" flow).
+    /// The file is a `FallbackScanOutput` serialised with
+    /// `rmp_serde::to_vec_named`; the Rust FFI decodes it and
+    /// builds the same handle the in-process scan produces.
+    /// Returns `nil` on read / decode failure; the caller can
+    /// read `apfs_last_error` for the cause.
+    static func fromPrivilegedMsgpack(path: String, sourcePath: String? = nil) -> Scan? {
+        let handle = path.withCString { cPath in
+            apfs_scan_from_msgpack_file(cPath)
+        }
+        guard let handle else { return nil }
+        // The `path` argument here is the msgpack temp-file path;
+        // `sourcePath` is the user-supplied scan target. Detect
+        // snapshot-path on the source, not the temp file.
+        let detect = sourcePath.map { SnapshotDetect.isOnSnapshot($0) } ?? false
+        return Scan(handle: handle, isAdmin: true, isSnapshotPath: detect)
+    }
+
+    /// Run the in-process fallback walker and mark the result as
+    /// admin-mode. Used when the GUI app is already running as
+    /// root (e.g. launched via `sudo` or by a SMAppService helper
+    /// in a future build) — the osascript escalation prompt is
+    /// redundant in that case, and the in-process walker already
+    /// sees every TCC-restricted path because the process EUID
+    /// is 0. The result carries `isAdmin = true` so the
+    /// status-bar chip and window title suffix still appear.
+    static func fallbackAsAdministrator(
+        path: String,
+        threads: UInt32 = 0,
+        crossMounts: Bool = false
+    ) -> Scan? {
+        let handle = path.withCString { cPath in
+            apfs_scan_directory(cPath, threads, crossMounts)
+        }
+        guard let handle else { return nil }
+        return Scan(handle: handle, isAdmin: true, isSnapshotPath: SnapshotDetect.isOnSnapshot(path))
     }
 
     /// One snapshot from the running scanner — `scanned` and
@@ -336,13 +400,15 @@ final class Scan {
         Unmanaged<Box>.fromOpaque(userdata).release()
 
         guard let handle else { return nil }
-        return Scan(handle: handle)
+        return Scan(handle: handle, isAdmin: false, isSnapshotPath: SnapshotDetect.isOnSnapshot(path))
     }
 
     private let handle: OpaquePointer
 
-    private init(handle: OpaquePointer) {
+    private init(handle: OpaquePointer, isAdmin: Bool, isSnapshotPath: Bool = false) {
         self.handle = handle
+        self.isAdmin = isAdmin
+        self.isSnapshotPath = isSnapshotPath
     }
 
     deinit {

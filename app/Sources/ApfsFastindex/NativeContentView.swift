@@ -15,6 +15,14 @@ struct NativeContentView: View {
     @State private var layout: Scan.Layout?
     @State private var scanError: String?
     @State private var scanning: Bool = false
+    /// Sticky admin mode (per user request): once the user
+    /// successfully runs File > Scan as Administrator…, every
+    /// subsequent scan (including the regular Scan button) uses
+    /// the privileged flow. The flag stays true until the app
+    /// quits; there is no "exit admin mode" affordance today.
+    /// The Scan button's label updates to reflect this so the
+    /// user knows clicking will surface another auth prompt.
+    @State private var adminMode: Bool = false
     /// Treemap depth + worker count live in `Settings` (⌘,). The
     /// `@AppStorage` binding here keeps them reactive: editing
     /// the value in the settings panel re-fires the depth
@@ -22,6 +30,12 @@ struct NativeContentView: View {
     /// rescan.
     @AppStorage(AppPrefs.depthKey) private var depth: Int = 0
     @AppStorage(AppPrefs.threadsKey) private var threads: Int = 0
+    /// Mirror of the Settings toggle. When true, every scan
+    /// routes through the privileged path and adds the
+    /// scan-with-snapshots command so user-visible TM local
+    /// snapshots get folded into the result. Off by default
+    /// because each snapshot adds roughly one full volume walk.
+    @AppStorage(AppPrefs.expandSnapshotsKey) private var expandSnapshots: Bool = false
     @State private var metric: Scan.Metric = .logical
     @State private var lastSize: CGSize = .zero
     @State private var currentNode: UInt32 = 0
@@ -126,6 +140,23 @@ struct NativeContentView: View {
         .background(VizPalette.bg)
         .preferredColorScheme(.dark)
         .foregroundStyle(VizPalette.text)
+        .onReceive(NotificationCenter.default.publisher(for: .scanAsAdministratorRequested)) { _ in
+            // The File > Scan as Administrator… menu item posts
+            // this notification; we kick off the privileged scan
+            // here so the menu command doesn't need a reference to
+            // SwiftUI state. The path comes from `pathInput`,
+            // matching the regular Scan button's flow.
+            startPrivilegedScan()
+        }
+        .onChange(of: adminMode) { _ in
+            // adminMode flips the moment auth completes
+            // (AdminSession's ready handshake); refresh the
+            // title and chip immediately. Routes through NSApp
+            // because SwiftUI's `.navigationTitle` is per-toolbar
+            // on macOS rather than per-window.
+            applyWindowTitle()
+        }
+        .onAppear { applyWindowTitle() }
         .onChange(of: scan?.entryCount) { _ in
             rebuildTreeRows()
             rebuildExtSummary()
@@ -654,13 +685,26 @@ struct NativeContentView: View {
             Button {
                 startScan()
             } label: {
-                Label("Scan", systemImage: "play.fill")
-                    .frame(minWidth: 72)
+                // In sticky admin mode (see `adminMode` state) the
+                // Scan button still drives the privileged flow, so
+                // surface a lock icon + "Admin" label so the user
+                // knows clicking will pop the auth prompt (or run
+                // privileged if already root).
+                if adminMode {
+                    Label("Scan", systemImage: "lock.fill")
+                        .frame(minWidth: 72)
+                } else {
+                    Label("Scan", systemImage: "play.fill")
+                        .frame(minWidth: 72)
+                }
             }
             .buttonStyle(.borderedProminent)
-            .tint(VizPalette.accent)
+            .tint(adminMode ? VizPalette.warning : VizPalette.accent)
             .keyboardShortcut(.return, modifiers: .command)
             .disabled(scanning || pathInput.trimmingCharacters(in: .whitespaces).isEmpty)
+            .help(adminMode
+                ? "Sticky admin mode is on — every Scan runs with administrator privileges."
+                : "Scan as the current user.")
         }
     }
 
@@ -765,6 +809,31 @@ struct NativeContentView: View {
             } else if let scan {
                 statusPill(scan.sourceKind.isEmpty ? "fallback" : scan.sourceKind,
                            tint: VizPalette.accent)
+                // Admin-mode chip (EX-28 follow-up): bound to
+                // sticky `adminMode`, not `scan.isAdmin`, so it
+                // flips the moment auth completes (before the
+                // first scan returns). Once sticky-admin is
+                // engaged for the session, every Scan-button
+                // press routes through AdminSession's long-lived
+                // privileged helper and the chip stays on.
+                if adminMode {
+                    statusPill("Admin", tint: VizPalette.warning)
+                        .help("Scan ran with administrator privileges; "
+                          + "TCC-restricted user-data paths are included.")
+                }
+                // Snapshot-path chip (EX-29 follow-up, implicit
+                // opt-in case): user pointed the scanner at a
+                // path on a snapshot filesystem
+                // (statfs.f_flags & MNT_SNAPSHOT). The data is
+                // frozen at the snapshot's transaction — surface
+                // it so they aren't confused when totals don't
+                // match the live volume.
+                if scan.isSnapshotPath {
+                    statusPill("Snapshot", tint: VizPalette.accent)
+                        .help("Scan target is on a snapshot filesystem. "
+                              + "Totals are frozen at the snapshot's "
+                              + "transaction; they don't reflect live volume state.")
+                }
                 Text(totalsText(for: scan))
                     .font(AppFont.ui(12)).monospacedDigit()
                     .foregroundStyle(VizPalette.muted)
@@ -1151,9 +1220,160 @@ struct NativeContentView: View {
         return String(format: "%d:%02d", m, s)
     }
 
+    // MARK: - Window title
+
+    /// Apply the window title for the current admin-mode state.
+    /// The suffix flips the moment `adminMode = true` is set —
+    /// which happens via the `onSessionReady` callback as soon
+    /// as the privileged helper sends its `ready\t1` handshake,
+    /// i.e. immediately after the user authenticates. This is
+    /// strictly tied to admin-mode state (not to the displayed
+    /// scan's `isAdmin` field) so the indicator updates before
+    /// the first scan completes.
+    private func applyWindowTitle() {
+        let base = "apfs-fastindex"
+        let title = adminMode ? "\(base) — Administrator" : base
+        for window in NSApplication.shared.windows {
+            window.title = title
+        }
+    }
+
     // MARK: - Scan + layout flow
 
+    /// "Scan as Administrator…" flow (EX-28 follow-up). Spawns the
+    /// bundled CLI under `osascript ... with administrator
+    /// privileges`, which pops the macOS authentication prompt. The
+    /// CLI runs as root, bypasses TCC on user-data paths, writes
+    /// its `FallbackScanOutput` as msgpack to a temp file and
+    /// progress JSON to a sibling stderr file at 250 ms cadence.
+    /// `PrivilegedScan.run` polls that progress file and forwards
+    /// events to `onProgress` here; the parent updates the same
+    /// state machine the regular Scan flow uses, so the overlay
+    /// shows live counter ticks (not a stuck 0 / 0).
+    ///
+    /// When the GUI is already running as root, `PrivilegedScan`
+    /// short-circuits to the in-process walker; the progress
+    /// callback is wired into `Scan.fallbackWithProgress` and the
+    /// UX is identical to the non-admin path.
+    ///
+    /// On success, sticky admin mode is engaged
+    /// (`adminMode = true`) — per the user requirement that
+    /// subsequent scans stay in administrator mode.
+    private func startPrivilegedScan() {
+        let path = pathInput.trimmingCharacters(in: .whitespaces)
+        guard !path.isEmpty else { return }
+        guard !scanning else { return }
+        scanError = nil
+        scanning = true
+        // "Authorizing" reads better than "Scanning" while the
+        // auth dialog is on screen and the subprocess hasn't
+        // started writing progress events yet. Flips to
+        // "Scanning (administrator)" on the first progress
+        // event.
+        scanPhaseLabel = "Authorizing"
+        scanProgressScanned = 0
+        scanProgressSkipped = 0
+        scanProgressBytes = 0
+        scanProgressElapsedMs = 0
+        // Denominator: same as the regular path. Volume-root
+        // scans use the volume's `used` bytes; subpath scans
+        // stay indeterminate until the terminal event snaps to
+        // the actual total.
+        if isVolumeRoot(path: path) {
+            scanProgressBytesTotal = volumeStats(for: path)?.used ?? 0
+        } else {
+            scanProgressBytesTotal = 0
+        }
+        let snapshotsRequested = expandSnapshots
+        DispatchQueue.global(qos: .userInitiated).async {
+            let outcome = PrivilegedScan.run(
+                path: path,
+                includeSnapshots: snapshotsRequested,
+                onSessionReady: {
+                    // Auth just completed (helper sent its
+                    // ready handshake). Engage sticky admin
+                    // mode NOW so the title bar and chip flip
+                    // immediately, not after the first scan
+                    // finishes. The session is reusable for
+                    // every subsequent scan; the auth dialog
+                    // pops once per app lifetime.
+                    DispatchQueue.main.async {
+                        adminMode = true
+                        applyWindowTitle()
+                    }
+                },
+                onProgress: { snapshot in
+                    DispatchQueue.main.async {
+                        if scanPhaseLabel == "Authorizing" {
+                            scanPhaseLabel = "Scanning (administrator)"
+                        }
+                        scanProgressScanned = snapshot.scanned
+                        scanProgressSkipped = snapshot.skipped
+                        scanProgressBytes = snapshot.bytes
+                        scanProgressElapsedMs = snapshot.elapsedMs
+                        if snapshot.terminal {
+                            scanPhaseLabel = "Indexing"
+                            if scanProgressBytesTotal == 0 {
+                                scanProgressBytesTotal = snapshot.bytes
+                            }
+                        }
+                    }
+                }
+            )
+            DispatchQueue.main.async {
+                switch outcome {
+                case .ok(let result):
+                    scanPhaseLabel = "Rendering"
+                    scan = result
+                    currentNode = 0
+                    lastClickedPath = ""
+                    expandedNodes = [0]
+                    walkSkips = result.walkSkips()
+                    scanProgressScanned = result.entryCount
+                    scanProgressBytes = result.logicalTotal
+                    if scanProgressBytesTotal == 0 {
+                        scanProgressBytesTotal = result.logicalTotal
+                    }
+                    if !result.allocatedAvailable && metric == .allocated {
+                        metric = .logical
+                    }
+                    // adminMode was already engaged via
+                    // onSessionReady above; idempotent here.
+                    adminMode = true
+                    updateLayout()
+                    rebuildTreeRows()
+                    rebuildExtSummary()
+                case .cancelled:
+                    break
+                case .failed(let message, _):
+                    scan = nil
+                    layout = nil
+                    treeRows = []
+                    extSummary = nil
+                    walkSkips = []
+                    scanError = message
+                }
+                scanning = false
+            }
+        }
+    }
+
     private func startScan() {
+        // Two paths route through the privileged flow instead of
+        // the in-process fallback walker:
+        //
+        // 1. Sticky admin mode: once the user has elevated for the
+        //    session, every Scan-button click stays on the
+        //    privileged path so subsequent scans don't lose
+        //    admin-only paths.
+        // 2. Expand-snapshots is on: the snapshot orchestration
+        //    (mount_apfs → walk → merge → unmount) lives in the
+        //    privileged helper, so even a fresh non-admin user
+        //    gets routed through it. The auth prompt fires here.
+        if adminMode || expandSnapshots {
+            startPrivilegedScan()
+            return
+        }
         let path = pathInput.trimmingCharacters(in: .whitespaces)
         guard !path.isEmpty else { return }
         scanError = nil

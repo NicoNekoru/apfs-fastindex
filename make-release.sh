@@ -86,8 +86,10 @@ fi
 echo "==> [1/4] cargo build -p apfs-fastindex ($PROFILE)"
 if [ "$PROFILE" = "release" ]; then
     cargo build --release -p apfs-fastindex
+    cargo build --release -p apfs-fastindex --bin apfs-fastindex-scan
 else
     cargo build -p apfs-fastindex
+    cargo build -p apfs-fastindex --bin apfs-fastindex-scan
 fi
 
 # ---------------------------------------------------------------
@@ -181,6 +183,19 @@ done
 rm -rf "$BUNDLE"
 mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources"
 cp "$BIN" "$BUNDLE/Contents/MacOS/ApfsFastindex"
+
+# The "Scan as Administrator…" menu item spawns the CLI as a
+# privileged subprocess via osascript. Ship the CLI inside the
+# bundle so Bundle.main.url(forAuxiliaryExecutable:) can find it
+# without depending on whatever apfs-fastindex-scan happens to
+# live in $PATH on the user's machine.
+CLI_BIN="$REPO_ROOT/target/$PROFILE/apfs-fastindex-scan"
+if [ ! -x "$CLI_BIN" ]; then
+    echo "make-release.sh: cargo did not produce $CLI_BIN" >&2
+    exit 1
+fi
+cp "$CLI_BIN" "$BUNDLE/Contents/MacOS/apfs-fastindex-scan"
+
 if [ -n "$RESOURCE_BUNDLE" ]; then
     cp -R "$RESOURCE_BUNDLE" "$BUNDLE/Contents/Resources/"
 fi
