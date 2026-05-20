@@ -10,11 +10,29 @@ use std::io::{self, Read, Seek, SeekFrom};
 
 use crate::ScanError;
 
+/// APFS spec block-size bounds (`nx_block_size` in `nx_superblock_t`):
+/// the smallest legal value is 4 KiB and the largest 64 KiB.
+/// We hard-cap allocations at the spec maximum — a crafted image
+/// supplying a `nx_block_size` of 1 GiB would otherwise OOM the
+/// scanner at the very first `read_block` call. Caps and floor
+/// both fail closed with `InvalidObject`.
+pub(crate) const APFS_MIN_BLOCK_SIZE: usize = 4096;
+pub(crate) const APFS_MAX_BLOCK_SIZE: usize = 65_536;
+
 pub(crate) fn read_block<R: Read + Seek>(
     reader: &mut R,
     block_address: u64,
     block_size: usize,
 ) -> Result<Vec<u8>, ScanError> {
+    // Block-size sanity gate — runs on every read so the cap
+    // applies even when callers source `block_size` from an
+    // unvalidated path (block-zero before NXSB cross-check, test
+    // fixtures, etc.). Cheap: two integer comparisons per call.
+    if !(APFS_MIN_BLOCK_SIZE..=APFS_MAX_BLOCK_SIZE).contains(&block_size) {
+        return Err(ScanError::InvalidObject(format!(
+            "block_size {block_size} outside APFS spec range [{APFS_MIN_BLOCK_SIZE}, {APFS_MAX_BLOCK_SIZE}]"
+        )));
+    }
     let offset = block_address
         .checked_mul(block_size as u64)
         .ok_or_else(|| {

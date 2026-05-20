@@ -33,6 +33,33 @@ use crate::render::{render_cells, ApfsCell, ApfsLayout, HitGrid, Metric};
 use crate::tree::{Tree, NODE_INVALID};
 use crate::{fallback_scan_path_with_options, FallbackOptions, ProgressEvent};
 
+/// Run `f` inside a `catch_unwind` barrier and return `sentinel`
+/// if a Rust panic is caught. Every `#[no_mangle] extern "C" fn`
+/// in this module wraps its body in this helper. Without it, a
+/// panic in Rust code (parser asserts, index-out-of-range, etc.)
+/// would unwind across the C ABI into the Swift caller, which is
+/// undefined behavior — the SwiftUI app gets memory corruption
+/// or an abort, not a graceful error path.
+///
+/// `panic = "abort"` is set workspace-wide in the release profile
+/// as a defence-in-depth backstop, so this wrapper is the
+/// guaranteed source-level barrier on debug builds (where
+/// unwinding is on) and a no-op on release builds (which abort
+/// before unwinding ever reaches us). Either way the C caller
+/// never sees a partial-unwind state.
+///
+/// `AssertUnwindSafe` is required because most of our FFI bodies
+/// capture references / `*mut` pointers that don't implement
+/// `UnwindSafe` automatically; the bodies are short and don't
+/// leave shared state inconsistent if they panic.
+#[inline]
+fn ffi_guard<R>(sentinel: R, f: impl FnOnce() -> R) -> R {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+        Ok(r) => r,
+        Err(_) => sentinel,
+    }
+}
+
 // ─────────────────────────────────────────────────────────────
 // Phase 1 sanity-check surface
 // ─────────────────────────────────────────────────────────────
@@ -43,7 +70,7 @@ use crate::{fallback_scan_path_with_options, FallbackOptions, ProgressEvent};
 /// with name mangling or the static-lib search path.
 #[no_mangle]
 pub extern "C" fn apfs_hello() -> c_int {
-    42
+    ffi_guard(0, move || 42)
 }
 
 /// Returns the apfs-fastindex crate version as a NUL-terminated
@@ -52,12 +79,14 @@ pub extern "C" fn apfs_hello() -> c_int {
 /// version is baked at compile time from `Cargo.toml`.
 #[no_mangle]
 pub extern "C" fn apfs_version() -> *const c_char {
-    // `concat!` produces a static `&'static str`; appending a
-    // trailing `\0` byte and exposing the data pointer is the
-    // idiomatic way to hand a C string out of Rust without an
-    // allocation.
-    static VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "\0");
-    VERSION.as_ptr() as *const c_char
+    ffi_guard(ptr::null(), move || {
+        // `concat!` produces a static `&'static str`; appending a
+        // trailing `\0` byte and exposing the data pointer is the
+        // idiomatic way to hand a C string out of Rust without an
+        // allocation.
+        static VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "\0");
+        VERSION.as_ptr() as *const c_char
+    })
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -118,11 +147,13 @@ pub extern "C" fn apfs_scan_directory(
     threads: u32,
     cross_mounts: bool,
 ) -> *mut ApfsScan {
-    // Thin wrapper: the no-progress path is just the
-    // with-progress path called with a NULL callback. Keeps the
-    // post-scan finalize logic in one place
-    // (`finalize_scan_handle`).
-    apfs_scan_directory_with_progress(path, threads, cross_mounts, None, ptr::null_mut())
+    ffi_guard(ptr::null_mut(), move || {
+        // Thin wrapper: the no-progress path is just the
+        // with-progress path called with a NULL callback. Keeps the
+        // post-scan finalize logic in one place
+        // (`finalize_scan_handle`).
+        apfs_scan_directory_with_progress(path, threads, cross_mounts, None, ptr::null_mut())
+    })
 }
 
 /// C ABI signature for the progress callback the Swift side
@@ -171,51 +202,54 @@ pub extern "C" fn apfs_scan_directory_with_progress(
     progress_fn: ApfsProgressCallback,
     userdata: *mut std::os::raw::c_void,
 ) -> *mut ApfsScan {
-    if path.is_null() {
-        return ptr::null_mut();
-    }
-    let cstr = unsafe { CStr::from_ptr(path) };
-    let path_str = match cstr.to_str() {
-        Ok(s) => s,
-        Err(_) => return ptr::null_mut(),
-    };
-    let user = ProgressUserdata(userdata);
-    let mut progress_closure = move |event: ProgressEvent| {
-        // Rebind to a reference so disjoint-captures captures the
-        // whole `ProgressUserdata` (which is `Send` via the unsafe
-        // impl above) rather than projecting `user.0`, which would
-        // be a bare `*mut c_void` and not `Send`.
-        let user = &user;
-        if let Some(cb) = progress_fn {
-            cb(
-                event.scanned,
-                event.skipped,
-                event.bytes,
-                event.elapsed.as_millis() as u64,
-                event.terminal,
-                user.0,
-            );
+    ffi_guard(ptr::null_mut(), move || {
+        if path.is_null() {
+            return ptr::null_mut();
         }
-    };
-    let progress_ref: Option<&mut (dyn FnMut(ProgressEvent) + Send)> = if progress_fn.is_some() {
-        Some(&mut progress_closure)
-    } else {
-        None
-    };
-    let options = FallbackOptions {
-        cross_mounts,
-        progress: progress_ref,
-        threads: if threads == 0 { 4 } else { threads as usize },
-        // FFI consumers (the SwiftUI app) read subtree totals
-        // from the indexed `Tree`, not from the legacy
-        // `aggregates` Vec — skip the ~90 ms aggregate pass.
-        skip_aggregates: true,
-    };
-    let output = match fallback_scan_path_with_options(path_str, options) {
-        Ok(o) => o,
-        Err(_) => return ptr::null_mut(),
-    };
-    finalize_scan_handle(output)
+        let cstr = unsafe { CStr::from_ptr(path) };
+        let path_str = match cstr.to_str() {
+            Ok(s) => s,
+            Err(_) => return ptr::null_mut(),
+        };
+        let user = ProgressUserdata(userdata);
+        let mut progress_closure = move |event: ProgressEvent| {
+            // Rebind to a reference so disjoint-captures captures the
+            // whole `ProgressUserdata` (which is `Send` via the unsafe
+            // impl above) rather than projecting `user.0`, which would
+            // be a bare `*mut c_void` and not `Send`.
+            let user = &user;
+            if let Some(cb) = progress_fn {
+                cb(
+                    event.scanned,
+                    event.skipped,
+                    event.bytes,
+                    event.elapsed.as_millis() as u64,
+                    event.terminal,
+                    user.0,
+                );
+            }
+        };
+        let progress_ref: Option<&mut (dyn FnMut(ProgressEvent) + Send)> = if progress_fn.is_some()
+        {
+            Some(&mut progress_closure)
+        } else {
+            None
+        };
+        let options = FallbackOptions {
+            cross_mounts,
+            progress: progress_ref,
+            threads: if threads == 0 { 4 } else { threads as usize },
+            // FFI consumers (the SwiftUI app) read subtree totals
+            // from the indexed `Tree`, not from the legacy
+            // `aggregates` Vec — skip the ~90 ms aggregate pass.
+            skip_aggregates: true,
+        };
+        let output = match fallback_scan_path_with_options(path_str, options) {
+            Ok(o) => o,
+            Err(_) => return ptr::null_mut(),
+        };
+        finalize_scan_handle(output)
+    })
 }
 
 /// Shared post-scan handle construction. Called by both the
@@ -258,29 +292,39 @@ fn finalize_scan_handle(output: crate::FallbackScanOutput) -> *mut ApfsScan {
 /// Drop a scan handle. Idempotent on NULL.
 #[no_mangle]
 pub extern "C" fn apfs_scan_free(scan: *mut ApfsScan) {
-    if scan.is_null() {
-        return;
-    }
-    // SAFETY: caller must have obtained `scan` from
-    // `apfs_scan_directory` and not yet freed it.
-    unsafe {
-        drop(Box::from_raw(scan));
-    }
+    ffi_guard((), move || {
+        if scan.is_null() {
+            return;
+        }
+        // SAFETY: caller must have obtained `scan` from
+        // `apfs_scan_directory` and not yet freed it.
+        unsafe {
+            drop(Box::from_raw(scan));
+        }
+    })
 }
 
 /// Number of `NamespaceEntry` rows in the scan.
 #[no_mangle]
 pub extern "C" fn apfs_scan_entry_count(scan: *const ApfsScan) -> u64 {
-    let Some(s) = (unsafe { scan.as_ref() }) else { return 0; };
-    s.output.parser_output.entries.len() as u64
+    ffi_guard(0, move || {
+        let Some(s) = (unsafe { scan.as_ref() }) else {
+            return 0;
+        };
+        s.output.parser_output.entries.len() as u64
+    })
 }
 
 /// Sum of `entry.logical_size` across the whole scan. Reads off
 /// the tree root's pre-computed aggregate.
 #[no_mangle]
 pub extern "C" fn apfs_scan_logical_total(scan: *const ApfsScan) -> u64 {
-    let Some(s) = (unsafe { scan.as_ref() }) else { return 0; };
-    s.tree.nodes.first().map(|r| r.value_logical).unwrap_or(0)
+    ffi_guard(0, move || {
+        let Some(s) = (unsafe { scan.as_ref() }) else {
+            return 0;
+        };
+        s.tree.nodes.first().map(|r| r.value_logical).unwrap_or(0)
+    })
 }
 
 /// Sum of `entry.allocated_size` across the whole scan, or
@@ -289,12 +333,16 @@ pub extern "C" fn apfs_scan_logical_total(scan: *const ApfsScan) -> u64 {
 /// the tree root's pre-computed aggregate.
 #[no_mangle]
 pub extern "C" fn apfs_scan_allocated_total(scan: *const ApfsScan) -> u64 {
-    let Some(s) = (unsafe { scan.as_ref() }) else { return APFS_ALLOCATED_TOTAL_UNCLAIMED; };
-    s.tree
-        .nodes
-        .first()
-        .and_then(|r| r.value_allocated)
-        .unwrap_or(APFS_ALLOCATED_TOTAL_UNCLAIMED)
+    ffi_guard(APFS_ALLOCATED_TOTAL_UNCLAIMED, move || {
+        let Some(s) = (unsafe { scan.as_ref() }) else {
+            return APFS_ALLOCATED_TOTAL_UNCLAIMED;
+        };
+        s.tree
+            .nodes
+            .first()
+            .and_then(|r| r.value_allocated)
+            .unwrap_or(APFS_ALLOCATED_TOTAL_UNCLAIMED)
+    })
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -306,8 +354,12 @@ pub extern "C" fn apfs_scan_allocated_total(scan: *const ApfsScan) -> u64 {
 /// tree also has synthesized intermediate directories.
 #[no_mangle]
 pub extern "C" fn apfs_scan_node_count(scan: *const ApfsScan) -> u32 {
-    let Some(s) = (unsafe { scan.as_ref() }) else { return 0; };
-    s.tree.nodes.len() as u32
+    ffi_guard(0, move || {
+        let Some(s) = (unsafe { scan.as_ref() }) else {
+            return 0;
+        };
+        s.tree.nodes.len() as u32
+    })
 }
 
 /// Sentinel returned by `apfs_scan_node_index_for_path` (and
@@ -319,25 +371,26 @@ pub const APFS_NODE_INVALID: u32 = u32::MAX;
 /// (and `"/"`) maps to the synthesised root (index 0). Returns
 /// `APFS_NODE_INVALID` if no such node exists.
 #[no_mangle]
-pub extern "C" fn apfs_scan_node_index_for_path(
-    scan: *const ApfsScan,
-    path: *const c_char,
-) -> u32 {
-    if path.is_null() {
-        return APFS_NODE_INVALID;
-    }
-    let Some(s) = (unsafe { scan.as_ref() }) else { return APFS_NODE_INVALID; };
-    let cstr = unsafe { CStr::from_ptr(path) };
-    let p = match cstr.to_str() {
-        Ok(p) => p,
-        Err(_) => return APFS_NODE_INVALID,
-    };
-    let idx = s.tree.node_index_for_path(p);
-    if idx == NODE_INVALID {
-        APFS_NODE_INVALID
-    } else {
-        idx
-    }
+pub extern "C" fn apfs_scan_node_index_for_path(scan: *const ApfsScan, path: *const c_char) -> u32 {
+    ffi_guard(APFS_NODE_INVALID, move || {
+        if path.is_null() {
+            return APFS_NODE_INVALID;
+        }
+        let Some(s) = (unsafe { scan.as_ref() }) else {
+            return APFS_NODE_INVALID;
+        };
+        let cstr = unsafe { CStr::from_ptr(path) };
+        let p = match cstr.to_str() {
+            Ok(p) => p,
+            Err(_) => return APFS_NODE_INVALID,
+        };
+        let idx = s.tree.node_index_for_path(p);
+        if idx == NODE_INVALID {
+            APFS_NODE_INVALID
+        } else {
+            idx
+        }
+    })
 }
 
 /// Number of immediate children of the given node.
@@ -345,22 +398,30 @@ pub extern "C" fn apfs_scan_node_index_for_path(
 /// count`. Returns 0 for invalid indices.
 #[no_mangle]
 pub extern "C" fn apfs_scan_node_child_count(scan: *const ApfsScan, idx: u32) -> u32 {
-    let Some(s) = (unsafe { scan.as_ref() }) else { return 0; };
-    if (idx as usize) >= s.tree.nodes.len() {
-        return 0;
-    }
-    s.tree.nodes[idx as usize].children_count
+    ffi_guard(0, move || {
+        let Some(s) = (unsafe { scan.as_ref() }) else {
+            return 0;
+        };
+        if (idx as usize) >= s.tree.nodes.len() {
+            return 0;
+        }
+        s.tree.nodes[idx as usize].children_count
+    })
 }
 
 /// Per-node aggregate read by Swift's status bar. Pre-computed
 /// post-order at `Tree::build` time; constant-time lookup.
 #[no_mangle]
 pub extern "C" fn apfs_scan_node_value_logical(scan: *const ApfsScan, idx: u32) -> u64 {
-    let Some(s) = (unsafe { scan.as_ref() }) else { return 0; };
-    if (idx as usize) >= s.tree.nodes.len() {
-        return 0;
-    }
-    s.tree.nodes[idx as usize].value_logical
+    ffi_guard(0, move || {
+        let Some(s) = (unsafe { scan.as_ref() }) else {
+            return 0;
+        };
+        if (idx as usize) >= s.tree.nodes.len() {
+            return 0;
+        }
+        s.tree.nodes[idx as usize].value_logical
+    })
 }
 
 /// `value_allocated` for the node, or
@@ -368,24 +429,32 @@ pub extern "C" fn apfs_scan_node_value_logical(scan: *const ApfsScan, idx: u32) 
 /// None-collapse fired anywhere in this subtree.
 #[no_mangle]
 pub extern "C" fn apfs_scan_node_value_allocated(scan: *const ApfsScan, idx: u32) -> u64 {
-    let Some(s) = (unsafe { scan.as_ref() }) else { return APFS_ALLOCATED_TOTAL_UNCLAIMED; };
-    if (idx as usize) >= s.tree.nodes.len() {
-        return APFS_ALLOCATED_TOTAL_UNCLAIMED;
-    }
-    s.tree.nodes[idx as usize]
-        .value_allocated
-        .unwrap_or(APFS_ALLOCATED_TOTAL_UNCLAIMED)
+    ffi_guard(APFS_ALLOCATED_TOTAL_UNCLAIMED, move || {
+        let Some(s) = (unsafe { scan.as_ref() }) else {
+            return APFS_ALLOCATED_TOTAL_UNCLAIMED;
+        };
+        if (idx as usize) >= s.tree.nodes.len() {
+            return APFS_ALLOCATED_TOTAL_UNCLAIMED;
+        }
+        s.tree.nodes[idx as usize]
+            .value_allocated
+            .unwrap_or(APFS_ALLOCATED_TOTAL_UNCLAIMED)
+    })
 }
 
 /// Item count for the node — number of non-directory descendants.
 /// `apfs_scan_node_item_count(s, root) == files+symlinks total`.
 #[no_mangle]
 pub extern "C" fn apfs_scan_node_item_count(scan: *const ApfsScan, idx: u32) -> u64 {
-    let Some(s) = (unsafe { scan.as_ref() }) else { return 0; };
-    if (idx as usize) >= s.tree.nodes.len() {
-        return 0;
-    }
-    s.tree.nodes[idx as usize].item_count
+    ffi_guard(0, move || {
+        let Some(s) = (unsafe { scan.as_ref() }) else {
+            return 0;
+        };
+        if (idx as usize) >= s.tree.nodes.len() {
+            return 0;
+        }
+        s.tree.nodes[idx as usize].item_count
+    })
 }
 
 /// Borrowed (ptr, len) pair pointing into a `Tree`-owned UTF-8
@@ -414,37 +483,64 @@ pub struct ApfsPathRef {
 /// handle: the cache owns the bytes until `apfs_scan_free`.
 #[no_mangle]
 pub extern "C" fn apfs_scan_node_path(scan: *const ApfsScan, idx: u32) -> ApfsPathRef {
-    let null_ref = ApfsPathRef { bytes: ptr::null(), len: 0 };
-    let Some(s) = (unsafe { scan.as_ref() }) else { return null_ref; };
-    if (idx as usize) >= s.tree.nodes.len() {
-        return null_ref;
-    }
-    let mut cache = s.path_cache.lock().unwrap();
-    // The entry stays in the HashMap for the lifetime of
-    // `ApfsScan`, so the borrowed slice is valid until
-    // `apfs_scan_free`. The `&'static str` lifetime extension
-    // below is justified by that invariant; we only hand the
-    // pointer + length across the FFI boundary, never a
-    // reference Rust has to verify.
-    let entry = cache
-        .entry(idx)
-        .or_insert_with(|| s.tree.compute_path(idx));
-    let bytes = entry.as_ptr();
-    let len = entry.len() as u64;
-    ApfsPathRef { bytes, len }
+    ffi_guard(
+        ApfsPathRef {
+            bytes: ptr::null(),
+            len: 0,
+        },
+        move || {
+            let null_ref = ApfsPathRef {
+                bytes: ptr::null(),
+                len: 0,
+            };
+            let Some(s) = (unsafe { scan.as_ref() }) else {
+                return null_ref;
+            };
+            if (idx as usize) >= s.tree.nodes.len() {
+                return null_ref;
+            }
+            let mut cache = s.path_cache.lock().unwrap();
+            // The entry stays in the HashMap for the lifetime of
+            // `ApfsScan`, so the borrowed slice is valid until
+            // `apfs_scan_free`. The `&'static str` lifetime extension
+            // below is justified by that invariant; we only hand the
+            // pointer + length across the FFI boundary, never a
+            // reference Rust has to verify.
+            let entry = cache.entry(idx).or_insert_with(|| s.tree.compute_path(idx));
+            let bytes = entry.as_ptr();
+            let len = entry.len() as u64;
+            ApfsPathRef { bytes, len }
+        },
+    )
 }
 
 /// Borrow the node's last path component (display name). Like
 /// `apfs_scan_node_path` but returns just the leaf basename.
 #[no_mangle]
 pub extern "C" fn apfs_scan_node_name(scan: *const ApfsScan, idx: u32) -> ApfsPathRef {
-    let null_ref = ApfsPathRef { bytes: ptr::null(), len: 0 };
-    let Some(s) = (unsafe { scan.as_ref() }) else { return null_ref; };
-    if (idx as usize) >= s.tree.nodes.len() {
-        return null_ref;
-    }
-    let n = &s.tree.nodes[idx as usize].name;
-    ApfsPathRef { bytes: n.as_ptr(), len: n.len() as u64 }
+    ffi_guard(
+        ApfsPathRef {
+            bytes: ptr::null(),
+            len: 0,
+        },
+        move || {
+            let null_ref = ApfsPathRef {
+                bytes: ptr::null(),
+                len: 0,
+            };
+            let Some(s) = (unsafe { scan.as_ref() }) else {
+                return null_ref;
+            };
+            if (idx as usize) >= s.tree.nodes.len() {
+                return null_ref;
+            }
+            let n = &s.tree.nodes[idx as usize].name;
+            ApfsPathRef {
+                bytes: n.as_ptr(),
+                len: n.len() as u64,
+            }
+        },
+    )
 }
 
 /// Parent index for `idx`, or `APFS_NODE_INVALID` for the root
@@ -452,13 +548,17 @@ pub extern "C" fn apfs_scan_node_name(scan: *const ApfsScan, idx: u32) -> ApfsPa
 /// construction (walk parent chain from `currentNode` to root).
 #[no_mangle]
 pub extern "C" fn apfs_scan_node_parent(scan: *const ApfsScan, idx: u32) -> u32 {
-    let Some(s) = (unsafe { scan.as_ref() }) else { return APFS_NODE_INVALID; };
-    if (idx as usize) >= s.tree.nodes.len() {
-        return APFS_NODE_INVALID;
-    }
-    s.tree.nodes[idx as usize]
-        .parent
-        .unwrap_or(APFS_NODE_INVALID)
+    ffi_guard(APFS_NODE_INVALID, move || {
+        let Some(s) = (unsafe { scan.as_ref() }) else {
+            return APFS_NODE_INVALID;
+        };
+        if (idx as usize) >= s.tree.nodes.len() {
+            return APFS_NODE_INVALID;
+        }
+        s.tree.nodes[idx as usize]
+            .parent
+            .unwrap_or(APFS_NODE_INVALID)
+    })
 }
 
 /// Returns the node's `EntryKind` as a u32 discriminant:
@@ -466,16 +566,20 @@ pub extern "C" fn apfs_scan_node_parent(scan: *const ApfsScan, idx: u32) -> u32 
 /// Swift maps back to a `Scan.NodeKind` enum.
 #[no_mangle]
 pub extern "C" fn apfs_scan_node_kind(scan: *const ApfsScan, idx: u32) -> u32 {
-    let Some(s) = (unsafe { scan.as_ref() }) else { return 0xff; };
-    if (idx as usize) >= s.tree.nodes.len() {
-        return 0xff;
-    }
-    match s.tree.nodes[idx as usize].kind {
-        crate::EntryKind::Dir => 0,
-        crate::EntryKind::File => 1,
-        crate::EntryKind::Symlink => 2,
-        crate::EntryKind::Other => 3,
-    }
+    ffi_guard(0xff, move || {
+        let Some(s) = (unsafe { scan.as_ref() }) else {
+            return 0xff;
+        };
+        if (idx as usize) >= s.tree.nodes.len() {
+            return 0xff;
+        }
+        match s.tree.nodes[idx as usize].kind {
+            crate::EntryKind::Dir => 0,
+            crate::EntryKind::File => 1,
+            crate::EntryKind::Symlink => 2,
+            crate::EntryKind::Other => 3,
+        }
+    })
 }
 
 /// Borrowed (ptr, count) slice of child node indices. Lifetime
@@ -491,23 +595,33 @@ pub struct ApfsU32Slice {
 /// Borrow the slice of immediate-child node indices for `idx`.
 /// Returns an empty slice for invalid indices or leaves.
 #[no_mangle]
-pub extern "C" fn apfs_scan_node_children(
-    scan: *const ApfsScan,
-    idx: u32,
-) -> ApfsU32Slice {
-    let null_slice = ApfsU32Slice { items: ptr::null(), count: 0 };
-    let Some(s) = (unsafe { scan.as_ref() }) else { return null_slice; };
-    if (idx as usize) >= s.tree.nodes.len() {
-        return null_slice;
-    }
-    let children = s.tree.children_of(idx);
-    if children.is_empty() {
-        return null_slice;
-    }
-    ApfsU32Slice {
-        items: children.as_ptr(),
-        count: children.len() as u64,
-    }
+pub extern "C" fn apfs_scan_node_children(scan: *const ApfsScan, idx: u32) -> ApfsU32Slice {
+    ffi_guard(
+        ApfsU32Slice {
+            items: ptr::null(),
+            count: 0,
+        },
+        move || {
+            let null_slice = ApfsU32Slice {
+                items: ptr::null(),
+                count: 0,
+            };
+            let Some(s) = (unsafe { scan.as_ref() }) else {
+                return null_slice;
+            };
+            if (idx as usize) >= s.tree.nodes.len() {
+                return null_slice;
+            }
+            let children = s.tree.children_of(idx);
+            if children.is_empty() {
+                return null_slice;
+            }
+            ApfsU32Slice {
+                items: children.as_ptr(),
+                count: children.len() as u64,
+            }
+        },
+    )
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -555,41 +669,51 @@ pub extern "C" fn apfs_layout_new(
     width: f32,
     height: f32,
 ) -> *mut ApfsLayout {
-    let Some(s) = (unsafe { scan.as_ref() }) else { return ptr::null_mut(); };
-    let metric_enum = if metric == 1 { Metric::Allocated } else { Metric::Logical };
-    let cells = render_cells(
-        &s.tree,
-        node_idx,
-        max_depth,
-        metric_enum,
-        width as f64,
-        height as f64,
-    );
-    if cells.is_empty() {
-        return ptr::null_mut();
-    }
-    let boxed: Box<[ApfsCell]> = cells.into_boxed_slice();
-    let hit_grid = HitGrid::build(&boxed, width, height);
-    let layout = Box::new(ApfsLayout {
-        cells: boxed,
-        hit_grid,
-    });
-    Box::into_raw(layout)
+    ffi_guard(ptr::null_mut(), move || {
+        let Some(s) = (unsafe { scan.as_ref() }) else {
+            return ptr::null_mut();
+        };
+        let metric_enum = if metric == 1 {
+            Metric::Allocated
+        } else {
+            Metric::Logical
+        };
+        let cells = render_cells(
+            &s.tree,
+            node_idx,
+            max_depth,
+            metric_enum,
+            width as f64,
+            height as f64,
+        );
+        if cells.is_empty() {
+            return ptr::null_mut();
+        }
+        let boxed: Box<[ApfsCell]> = cells.into_boxed_slice();
+        let hit_grid = HitGrid::build(&boxed, width, height);
+        let layout = Box::new(ApfsLayout {
+            cells: boxed,
+            hit_grid,
+        });
+        Box::into_raw(layout)
+    })
 }
 
 /// Reclaim a layout previously returned by `apfs_layout_new`.
 /// Idempotent on NULL.
 #[no_mangle]
 pub extern "C" fn apfs_layout_free(layout: *mut ApfsLayout) {
-    if layout.is_null() {
-        return;
-    }
-    // SAFETY: caller obtained `layout` from `apfs_layout_new`
-    // and has not yet freed it. Box drop releases cells +
-    // hit_grid in one shot.
-    unsafe {
-        drop(Box::from_raw(layout));
-    }
+    ffi_guard((), move || {
+        if layout.is_null() {
+            return;
+        }
+        // SAFETY: caller obtained `layout` from `apfs_layout_new`
+        // and has not yet freed it. Box drop releases cells +
+        // hit_grid in one shot.
+        unsafe {
+            drop(Box::from_raw(layout));
+        }
+    })
 }
 
 /// Borrow the laid-out cells. Pointer lifetime is tied to the
@@ -597,20 +721,37 @@ pub extern "C" fn apfs_layout_free(layout: *mut ApfsLayout) {
 /// the layout handle's lifetime.
 #[no_mangle]
 pub extern "C" fn apfs_layout_cells(layout: *const ApfsLayout) -> ApfsCellSlice {
-    let empty = ApfsCellSlice { cells: ptr::null(), count: 0 };
-    let Some(l) = (unsafe { layout.as_ref() }) else { return empty; };
-    ApfsCellSlice {
-        cells: l.cells.as_ptr(),
-        count: l.cells.len() as u64,
-    }
+    ffi_guard(
+        ApfsCellSlice {
+            cells: ptr::null(),
+            count: 0,
+        },
+        move || {
+            let empty = ApfsCellSlice {
+                cells: ptr::null(),
+                count: 0,
+            };
+            let Some(l) = (unsafe { layout.as_ref() }) else {
+                return empty;
+            };
+            ApfsCellSlice {
+                cells: l.cells.as_ptr(),
+                count: l.cells.len() as u64,
+            }
+        },
+    )
 }
 
 /// Number of cells in the layout. Convenience accessor — the
 /// same value is on `ApfsCellSlice.count`.
 #[no_mangle]
 pub extern "C" fn apfs_layout_cell_count(layout: *const ApfsLayout) -> u64 {
-    let Some(l) = (unsafe { layout.as_ref() }) else { return 0; };
-    l.cells.len() as u64
+    ffi_guard(0, move || {
+        let Some(l) = (unsafe { layout.as_ref() }) else {
+            return 0;
+        };
+        l.cells.len() as u64
+    })
 }
 
 /// Find the deepest cell containing `(x, y)`. Returns
@@ -620,10 +761,14 @@ pub extern "C" fn apfs_layout_cell_count(layout: *const ApfsLayout) -> u64 {
 /// every mousemove.
 #[no_mangle]
 pub extern "C" fn apfs_layout_hit_test(layout: *const ApfsLayout, x: f32, y: f32) -> u32 {
-    let Some(l) = (unsafe { layout.as_ref() }) else { return APFS_CELL_INVALID; };
-    l.hit_grid
-        .hit_test(x, y, &l.cells)
-        .unwrap_or(APFS_CELL_INVALID)
+    ffi_guard(APFS_CELL_INVALID, move || {
+        let Some(l) = (unsafe { layout.as_ref() }) else {
+            return APFS_CELL_INVALID;
+        };
+        l.hit_grid
+            .hit_test(x, y, &l.cells)
+            .unwrap_or(APFS_CELL_INVALID)
+    })
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -659,32 +804,46 @@ pub extern "C" fn apfs_scan_ext_summary_new(
     node_idx: u32,
     metric: u32,
 ) -> *mut ApfsExtSummaryHandle {
-    let Some(s) = (unsafe { scan.as_ref() }) else { return ptr::null_mut(); };
-    if (node_idx as usize) >= s.tree.nodes.len() {
-        return ptr::null_mut();
-    }
-    let metric_enum = if metric == 1 { Metric::Allocated } else { Metric::Logical };
-    let summary = ExtSummary::build(&s.tree, node_idx, metric_enum);
-    Box::into_raw(Box::new(ApfsExtSummaryHandle(summary)))
+    ffi_guard(ptr::null_mut(), move || {
+        let Some(s) = (unsafe { scan.as_ref() }) else {
+            return ptr::null_mut();
+        };
+        if (node_idx as usize) >= s.tree.nodes.len() {
+            return ptr::null_mut();
+        }
+        let metric_enum = if metric == 1 {
+            Metric::Allocated
+        } else {
+            Metric::Logical
+        };
+        let summary = ExtSummary::build(&s.tree, node_idx, metric_enum);
+        Box::into_raw(Box::new(ApfsExtSummaryHandle(summary)))
+    })
 }
 
 /// Drop the summary handle. Idempotent on NULL.
 #[no_mangle]
 pub extern "C" fn apfs_scan_ext_summary_free(handle: *mut ApfsExtSummaryHandle) {
-    if handle.is_null() {
-        return;
-    }
-    // SAFETY: caller obtained `handle` from `_new` and hasn't
-    // freed it.
-    unsafe {
-        drop(Box::from_raw(handle));
-    }
+    ffi_guard((), move || {
+        if handle.is_null() {
+            return;
+        }
+        // SAFETY: caller obtained `handle` from `_new` and hasn't
+        // freed it.
+        unsafe {
+            drop(Box::from_raw(handle));
+        }
+    })
 }
 
 #[no_mangle]
 pub extern "C" fn apfs_scan_ext_summary_count(handle: *const ApfsExtSummaryHandle) -> u32 {
-    let Some(h) = (unsafe { handle.as_ref() }) else { return 0; };
-    h.0.rows.len() as u32
+    ffi_guard(0, move || {
+        let Some(h) = (unsafe { handle.as_ref() }) else {
+            return 0;
+        };
+        h.0.rows.len() as u32
+    })
 }
 
 /// Sum of the active-metric values across all rows. Used by
@@ -692,8 +851,12 @@ pub extern "C" fn apfs_scan_ext_summary_count(handle: *const ApfsExtSummaryHandl
 /// invalid handle.
 #[no_mangle]
 pub extern "C" fn apfs_scan_ext_summary_total(handle: *const ApfsExtSummaryHandle) -> u64 {
-    let Some(h) = (unsafe { handle.as_ref() }) else { return 0; };
-    h.0.total_value
+    ffi_guard(0, move || {
+        let Some(h) = (unsafe { handle.as_ref() }) else {
+            return 0;
+        };
+        h.0.total_value
+    })
 }
 
 /// True iff at least one contributing file's `allocated_size`
@@ -701,8 +864,12 @@ pub extern "C" fn apfs_scan_ext_summary_total(handle: *const ApfsExtSummaryHandl
 /// to caption the header subtitle.
 #[no_mangle]
 pub extern "C" fn apfs_scan_ext_summary_any_unclaimed(handle: *const ApfsExtSummaryHandle) -> bool {
-    let Some(h) = (unsafe { handle.as_ref() }) else { return false; };
-    h.0.any_unclaimed
+    ffi_guard(false, move || {
+        let Some(h) = (unsafe { handle.as_ref() }) else {
+            return false;
+        };
+        h.0.any_unclaimed
+    })
 }
 
 /// Fetch row `n`. Returns a zero-filled row if `n` is out of
@@ -712,38 +879,63 @@ pub extern "C" fn apfs_scan_ext_summary_row(
     handle: *const ApfsExtSummaryHandle,
     n: u32,
 ) -> ApfsExtRow {
-    let zero = ApfsExtRow {
-        ext: ApfsPathRef { bytes: ptr::null(), len: 0 },
-        value_logical: 0,
-        value_allocated: APFS_ALLOCATED_TOTAL_UNCLAIMED,
-        file_count: 0,
-        _pad: 0,
-    };
-    let Some(h) = (unsafe { handle.as_ref() }) else { return zero; };
-    let idx = n as usize;
-    if idx >= h.0.rows.len() {
-        return zero;
-    }
-    let row = &h.0.rows[idx];
-    let allocated = row.value_allocated.unwrap_or(APFS_ALLOCATED_TOTAL_UNCLAIMED);
-    ApfsExtRow {
-        ext: ApfsPathRef {
-            bytes: row.ext.as_ptr(),
-            len: row.ext.len() as u64,
+    ffi_guard(
+        ApfsExtRow {
+            ext: ApfsPathRef {
+                bytes: ptr::null(),
+                len: 0,
+            },
+            value_logical: 0,
+            value_allocated: APFS_ALLOCATED_TOTAL_UNCLAIMED,
+            file_count: 0,
+            _pad: 0,
         },
-        value_logical: row.value_logical,
-        value_allocated: allocated,
-        file_count: row.file_count,
-        _pad: 0,
-    }
+        move || {
+            let zero = ApfsExtRow {
+                ext: ApfsPathRef {
+                    bytes: ptr::null(),
+                    len: 0,
+                },
+                value_logical: 0,
+                value_allocated: APFS_ALLOCATED_TOTAL_UNCLAIMED,
+                file_count: 0,
+                _pad: 0,
+            };
+            let Some(h) = (unsafe { handle.as_ref() }) else {
+                return zero;
+            };
+            let idx = n as usize;
+            if idx >= h.0.rows.len() {
+                return zero;
+            }
+            let row = &h.0.rows[idx];
+            let allocated = row
+                .value_allocated
+                .unwrap_or(APFS_ALLOCATED_TOTAL_UNCLAIMED);
+            ApfsExtRow {
+                ext: ApfsPathRef {
+                    bytes: row.ext.as_ptr(),
+                    len: row.ext.len() as u64,
+                },
+                value_logical: row.value_logical,
+                value_allocated: allocated,
+                file_count: row.file_count,
+                _pad: 0,
+            }
+        },
+    )
 }
 
 /// `true` iff at least one entry has `allocated_size = Some(_)`.
 /// The Swift UI uses this to gate the "Allocated" metric chip.
 #[no_mangle]
 pub extern "C" fn apfs_scan_allocated_available(scan: *const ApfsScan) -> bool {
-    let Some(s) = (unsafe { scan.as_ref() }) else { return false; };
-    s.allocated_available
+    ffi_guard(false, move || {
+        let Some(s) = (unsafe { scan.as_ref() }) else {
+            return false;
+        };
+        s.allocated_available
+    })
 }
 
 /// `correctness_claim` (UTF-8, NUL-terminated). The returned
@@ -751,22 +943,34 @@ pub extern "C" fn apfs_scan_allocated_available(scan: *const ApfsScan) -> bool {
 /// `apfs_scan_free(scan)`. Swift must not free it.
 #[no_mangle]
 pub extern "C" fn apfs_scan_correctness_claim(scan: *const ApfsScan) -> *const c_char {
-    let Some(s) = (unsafe { scan.as_ref() }) else { return ptr::null(); };
-    s.correctness_claim.as_ptr()
+    ffi_guard(ptr::null(), move || {
+        let Some(s) = (unsafe { scan.as_ref() }) else {
+            return ptr::null();
+        };
+        s.correctness_claim.as_ptr()
+    })
 }
 
 /// `SourceDescriptor.source_kind` (e.g. `"mounted_directory"`,
 /// `"dmg_image"`). UTF-8, NUL-terminated; owned by `scan`.
 #[no_mangle]
 pub extern "C" fn apfs_scan_source_kind(scan: *const ApfsScan) -> *const c_char {
-    let Some(s) = (unsafe { scan.as_ref() }) else { return ptr::null(); };
-    s.source_kind.as_ptr()
+    ffi_guard(ptr::null(), move || {
+        let Some(s) = (unsafe { scan.as_ref() }) else {
+            return ptr::null();
+        };
+        s.source_kind.as_ptr()
+    })
 }
 
 /// `SourceDescriptor.requested_path`, the absolute path the user
 /// asked us to scan. UTF-8, NUL-terminated; owned by `scan`.
 #[no_mangle]
 pub extern "C" fn apfs_scan_source_requested_path(scan: *const ApfsScan) -> *const c_char {
-    let Some(s) = (unsafe { scan.as_ref() }) else { return ptr::null(); };
-    s.source_requested_path.as_ptr()
+    ffi_guard(ptr::null(), move || {
+        let Some(s) = (unsafe { scan.as_ref() }) else {
+            return ptr::null();
+        };
+        s.source_requested_path.as_ptr()
+    })
 }

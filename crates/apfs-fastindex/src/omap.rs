@@ -186,7 +186,7 @@ impl OmapResolver {
 
             let child_index = select_internal_lower_bound(&node, oid, max_xid)?;
             let entry = node.entry(child_index)?;
-            let value = node.value_bytes(&entry, OMAP_INTERNAL_VAL_SIZE);
+            let value = node.value_bytes(&entry, OMAP_INTERNAL_VAL_SIZE)?;
             current_paddr = u64::from_le_bytes(value.try_into().expect("internal paddr u64"));
             is_root = false;
         }
@@ -270,8 +270,8 @@ fn walk_node<R: Read + Seek>(
         state.leaf_node_count += 1;
         for index in 0..node.nkeys {
             let entry = node.entry(index)?;
-            let key = node.key_bytes(&entry, OMAP_KEY_SIZE);
-            let value = node.value_bytes(&entry, OMAP_VAL_SIZE);
+            let key = node.key_bytes(&entry, OMAP_KEY_SIZE)?;
+            let value = node.value_bytes(&entry, OMAP_VAL_SIZE)?;
             let oid = u64::from_le_bytes(key[0..8].try_into().unwrap());
             let xid = u64::from_le_bytes(key[8..16].try_into().unwrap());
             let flags = u32::from_le_bytes(value[0..4].try_into().unwrap());
@@ -300,7 +300,7 @@ fn walk_node<R: Read + Seek>(
     state.index_node_count += 1;
     for index in 0..node.nkeys {
         let entry = node.entry(index)?;
-        let value = node.value_bytes(&entry, OMAP_INTERNAL_VAL_SIZE);
+        let value = node.value_bytes(&entry, OMAP_INTERNAL_VAL_SIZE)?;
         let child_paddr = u64::from_le_bytes(value.try_into().expect("internal paddr u64"));
         walk_node(state, reader, child_paddr, false)?;
     }
@@ -338,7 +338,7 @@ fn select_internal_lower_bound(
     let mut chosen: Option<u32> = None;
     for index in 0..node.nkeys {
         let entry = node.entry(index)?;
-        let key = node.key_bytes(&entry, OMAP_KEY_SIZE);
+        let key = node.key_bytes(&entry, OMAP_KEY_SIZE)?;
         let entry_oid = u64::from_le_bytes(key[0..8].try_into().unwrap());
         let entry_xid = u64::from_le_bytes(key[8..16].try_into().unwrap());
         if (entry_oid, entry_xid) <= (oid, max_xid) {
@@ -358,13 +358,13 @@ fn select_leaf_lower_bound(
     let mut best: Option<(u64, u64, u32, u32, u64)> = None;
     for index in 0..node.nkeys {
         let entry = node.entry(index)?;
-        let key = node.key_bytes(&entry, OMAP_KEY_SIZE);
+        let key = node.key_bytes(&entry, OMAP_KEY_SIZE)?;
         let entry_oid = u64::from_le_bytes(key[0..8].try_into().unwrap());
         let entry_xid = u64::from_le_bytes(key[8..16].try_into().unwrap());
         if (entry_oid, entry_xid) > (oid, max_xid) {
             break;
         }
-        let value = node.value_bytes(&entry, OMAP_VAL_SIZE);
+        let value = node.value_bytes(&entry, OMAP_VAL_SIZE)?;
         let flags = u32::from_le_bytes(value[0..4].try_into().unwrap());
         let size = u32::from_le_bytes(value[4..8].try_into().unwrap());
         let paddr = u64::from_le_bytes(value[8..16].try_into().unwrap());
