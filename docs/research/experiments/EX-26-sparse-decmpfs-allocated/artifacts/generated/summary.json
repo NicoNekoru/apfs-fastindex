@@ -1,0 +1,11 @@
+{
+  "decmpfs_mismatch_count": 0,
+  "decmpfs_row_count": 2,
+  "fail_closed_count": 0,
+  "other_mismatch_count": 0,
+  "sparse_mismatch_count": 0,
+  "sparse_row_count": 4,
+  "status": "executed",
+  "verdict": "validated_sparse_and_decmpfs",
+  "verdict_detail": "Hypothesis A holds across 4 sparse rows; Hypotheses B/C hold across 2 decmpfs rows; SR-019 can lift both branches."
+}

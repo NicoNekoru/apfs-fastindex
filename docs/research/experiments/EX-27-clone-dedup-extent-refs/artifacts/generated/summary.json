@@ -1,0 +1,10 @@
+{
+  "per_inode_share_sum": 2441214,
+  "phys_ext_total_bytes": 2441216,
+  "row_count": 13,
+  "status": "executed",
+  "unique_dstreams_dedup_sum": 2441216,
+  "unique_dstreams_raw_sum": 3227648,
+  "verdict": "validated_clone_dedup",
+  "verdict_detail": "\u03a3 dstream dedup (2441216) = \u03a3 phys_ext bytes (2441216); \u03a3 per-inode share (2441214) within 2 bytes of the phys_ext total \u2014 bounded by integer-division rounding across 2 clone-shared dstreams (\u03a3 refcnt-1 = 2)."
+}

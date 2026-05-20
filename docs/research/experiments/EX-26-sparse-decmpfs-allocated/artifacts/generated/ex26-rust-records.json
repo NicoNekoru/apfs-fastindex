@@ -1,0 +1,3729 @@
+{
+  "family_counts": [
+    {
+      "count": 16,
+      "in_v1_namespace_scope": true,
+      "name": "inode",
+      "raw_type": 3
+    },
+    {
+      "count": 18,
+      "in_v1_namespace_scope": true,
+      "name": "xattr",
+      "raw_type": 4
+    },
+    {
+      "count": 2,
+      "in_v1_namespace_scope": true,
+      "name": "sibling_link",
+      "raw_type": 5
+    },
+    {
+      "count": 9,
+      "in_v1_namespace_scope": true,
+      "name": "dstream_id",
+      "raw_type": 6
+    },
+    {
+      "count": 83,
+      "in_v1_namespace_scope": false,
+      "name": "file_extent",
+      "raw_type": 8
+    },
+    {
+      "count": 17,
+      "in_v1_namespace_scope": true,
+      "name": "dir_rec",
+      "raw_type": 9
+    },
+    {
+      "count": 2,
+      "in_v1_namespace_scope": true,
+      "name": "sibling_map",
+      "raw_type": 12
+    }
+  ],
+  "leaf_record_count": 147,
+  "records": [
+    {
+      "entry_index": 0,
+      "family": "dir_rec",
+      "key": {
+        "kind": "named",
+        "name": "private-dir",
+        "name_bytes_hex": "707269766174652d64697200",
+        "name_len": 12,
+        "raw_key_form": "hashed"
+      },
+      "key_len": 24,
+      "node_paddr": 656,
+      "object_id": 1,
+      "raw_type": 9,
+      "validation_notes": [],
+      "value": {
+        "date_added": 1779285796665267603,
+        "entry_type": 4,
+        "file_id": 3,
+        "flags": 4,
+        "kind": "dir_rec",
+        "sibling_id": null,
+        "xfield_padded_total": 0,
+        "xfield_unused_trailing_bytes": 0,
+        "xfield_used_data": 0,
+        "xfields": []
+      },
+      "value_len": 18
+    },
+    {
+      "entry_index": 1,
+      "family": "dir_rec",
+      "key": {
+        "kind": "named",
+        "name": "root",
+        "name_bytes_hex": "726f6f7400",
+        "name_len": 5,
+        "raw_key_form": "hashed"
+      },
+      "key_len": 17,
+      "node_paddr": 656,
+      "object_id": 1,
+      "raw_type": 9,
+      "validation_notes": [],
+      "value": {
+        "date_added": 1779285796665263853,
+        "entry_type": 4,
+        "file_id": 2,
+        "flags": 4,
+        "kind": "dir_rec",
+        "sibling_id": null,
+        "xfield_padded_total": 0,
+        "xfield_unused_trailing_bytes": 0,
+        "xfield_used_data": 0,
+        "xfields": []
+      },
+      "value_len": 18
+    },
+    {
+      "entry_index": 2,
+      "family": "inode",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 656,
+      "object_id": 2,
+      "raw_type": 3,
+      "validation_notes": [],
+      "value": {
+        "bsd_flags": 0,
+        "dstream": null,
+        "group": 20,
+        "has_uncompressed_size": false,
+        "inode_name": "root",
+        "internal_flags": 32768,
+        "kind": "inode",
+        "mode": 16877,
+        "nchildren_or_nlink": 12,
+        "owner": 501,
+        "parent_id": 1,
+        "private_id": 2,
+        "sparse_bytes": null,
+        "uncompressed_size": 0,
+        "xfield_padded_total": 8,
+        "xfield_unused_trailing_bytes": 0,
+        "xfield_used_data": 8,
+        "xfields": [
+          {
+            "interpreted": {
+              "kind": "utf8",
+              "value": "root"
+            },
+            "padded_length": 8,
+            "value_hex": "726f6f7400",
+            "x_flags": 2,
+            "x_size": 5,
+            "x_type": 4
+          }
+        ]
+      },
+      "value_len": 108
+    },
+    {
+      "entry_index": 3,
+      "family": "xattr",
+      "key": {
+        "kind": "named",
+        "name": "purgeable-drecs-fixed",
+        "name_bytes_hex": "707572676561626c652d64726563732d666978656400",
+        "name_len": 22,
+        "raw_key_form": "xattr"
+      },
+      "key_len": 32,
+      "node_paddr": 656,
+      "object_id": 2,
+      "raw_type": 4,
+      "validation_notes": [],
+      "value": {
+        "embedded": true,
+        "flags": 2,
+        "kind": "xattr",
+        "payload_hex": "02000000",
+        "payload_utf8": "\u0002\u0000\u0000",
+        "stream": false,
+        "stream_dstream": null,
+        "stream_xattr_obj_id": null,
+        "xdata_len": 4
+      },
+      "value_len": 8
+    },
+    {
+      "entry_index": 4,
+      "family": "dir_rec",
+      "key": {
+        "kind": "named",
+        "name": "sparse-medium.bin",
+        "name_bytes_hex": "7370617273652d6d656469756d2e62696e00",
+        "name_len": 18,
+        "raw_key_form": "hashed"
+      },
+      "key_len": 30,
+      "node_paddr": 656,
+      "object_id": 2,
+      "raw_type": 9,
+      "validation_notes": [],
+      "value": {
+        "date_added": 1779285799008452404,
+        "entry_type": 8,
+        "file_id": 24,
+        "flags": 8,
+        "kind": "dir_rec",
+        "sibling_id": null,
+        "xfield_padded_total": 0,
+        "xfield_unused_trailing_bytes": 0,
+        "xfield_used_data": 0,
+        "xfields": []
+      },
+      "value_len": 18
+    },
+    {
+      "entry_index": 5,
+      "family": "dir_rec",
+      "key": {
+        "kind": "named",
+        "name": "clone.txt",
+        "name_bytes_hex": "636c6f6e652e74787400",
+        "name_len": 10,
+        "raw_key_form": "hashed"
+      },
+      "key_len": 22,
+      "node_paddr": 656,
+      "object_id": 2,
+      "raw_type": 9,
+      "validation_notes": [],
+      "value": {
+        "date_added": 1779285798204914139,
+        "entry_type": 8,
+        "file_id": 20,
+        "flags": 8,
+        "kind": "dir_rec",
+        "sibling_id": null,
+        "xfield_padded_total": 0,
+        "xfield_unused_trailing_bytes": 0,
+        "xfield_used_data": 0,
+        "xfields": []
+      },
+      "value_len": 18
+    },
+    {
+      "entry_index": 6,
+      "family": "dir_rec",
+      "key": {
+        "kind": "named",
+        "name": "sparse.bin",
+        "name_bytes_hex": "7370617273652e62696e00",
+        "name_len": 11,
+        "raw_key_form": "hashed"
+      },
+      "key_len": 23,
+      "node_paddr": 656,
+      "object_id": 2,
+      "raw_type": 9,
+      "validation_notes": [],
+      "value": {
+        "date_added": 1779285797938511376,
+        "entry_type": 8,
+        "file_id": 19,
+        "flags": 8,
+        "kind": "dir_rec",
+        "sibling_id": null,
+        "xfield_padded_total": 0,
+        "xfield_unused_trailing_bytes": 0,
+        "xfield_used_data": 0,
+        "xfields": []
+      },
+      "value_len": 18
+    },
+    {
+      "entry_index": 7,
+      "family": "dir_rec",
+      "key": {
+        "kind": "named",
+        "name": "link.txt",
+        "name_bytes_hex": "6c696e6b2e74787400",
+        "name_len": 9,
+        "raw_key_form": "hashed"
+      },
+      "key_len": 21,
+      "node_paddr": 656,
+      "object_id": 2,
+      "raw_type": 9,
+      "validation_notes": [],
+      "value": {
+        "date_added": 1779285798735009653,
+        "entry_type": 10,
+        "file_id": 23,
+        "flags": 10,
+        "kind": "dir_rec",
+        "sibling_id": null,
+        "xfield_padded_total": 0,
+        "xfield_unused_trailing_bytes": 0,
+        "xfield_used_data": 0,
+        "xfields": []
+      },
+      "value_len": 18
+    },
+    {
+      "entry_index": 8,
+      "family": "dir_rec",
+      "key": {
+        "kind": "named",
+        "name": "compressed-random.bin",
+        "name_bytes_hex": "636f6d707265737365642d72616e646f6d2e62696e00",
+        "name_len": 22,
+        "raw_key_form": "hashed"
+      },
+      "key_len": 34,
+      "node_paddr": 656,
+      "object_id": 2,
+      "raw_type": 9,
+      "validation_notes": [],
+      "value": {
+        "date_added": 1779285801159751387,
+        "entry_type": 8,
+        "file_id": 32,
+        "flags": 8,
+        "kind": "dir_rec",
+        "sibling_id": null,
+        "xfield_padded_total": 0,
+        "xfield_unused_trailing_bytes": 0,
+        "xfield_used_data": 0,
+        "xfields": []
+      },
+      "value_len": 18
+    },
+    {
+      "entry_index": 9,
+      "family": "dir_rec",
+      "key": {
+        "kind": "named",
+        "name": "hard.txt",
+        "name_bytes_hex": "686172642e74787400",
+        "name_len": 9,
+        "raw_key_form": "hashed"
+      },
+      "key_len": 21,
+      "node_paddr": 656,
+      "object_id": 2,
+      "raw_type": 9,
+      "validation_notes": [],
+      "value": {
+        "date_added": 1779285798472187948,
+        "entry_type": 8,
+        "file_id": 16,
+        "flags": 8,
+        "kind": "dir_rec",
+        "sibling_id": 22,
+        "xfield_padded_total": 8,
+        "xfield_unused_trailing_bytes": 0,
+        "xfield_used_data": 8,
+        "xfields": [
+          {
+            "interpreted": {
+              "kind": "u64",
+              "value": 22
+            },
+            "padded_length": 8,
+            "value_hex": "1600000000000000",
+            "x_flags": 2,
+            "x_size": 8,
+            "x_type": 1
+          }
+        ]
+      },
+      "value_len": 34
+    },
+    {
+      "entry_index": 10,
+      "family": "dir_rec",
+      "key": {
+        "kind": "named",
+        "name": "sparse-large.bin",
+        "name_bytes_hex": "7370617273652d6c617267652e62696e00",
+        "name_len": 17,
+        "raw_key_form": "hashed"
+      },
+      "key_len": 29,
+      "node_paddr": 656,
+      "object_id": 2,
+      "raw_type": 9,
+      "validation_notes": [],
+      "value": {
+        "date_added": 1779285799260766274,
+        "entry_type": 8,
+        "file_id": 25,
+        "flags": 8,
+        "kind": "dir_rec",
+        "sibling_id": null,
+        "xfield_padded_total": 0,
+        "xfield_unused_trailing_bytes": 0,
+        "xfield_used_data": 0,
+        "xfields": []
+      },
+      "value_len": 18
+    },
+    {
+      "entry_index": 11,
+      "family": "dir_rec",
+      "key": {
+        "kind": "named",
+        "name": ".fseventsd",
+        "name_bytes_hex": "2e66736576656e74736400",
+        "name_len": 11,
+        "raw_key_form": "hashed"
+      },
+      "key_len": 23,
+      "node_paddr": 656,
+      "object_id": 2,
+      "raw_type": 9,
+      "validation_notes": [],
+      "value": {
+        "date_added": 1779285797708165975,
+        "entry_type": 4,
+        "file_id": 17,
+        "flags": 4,
+        "kind": "dir_rec",
+        "sibling_id": null,
+        "xfield_padded_total": 0,
+        "xfield_unused_trailing_bytes": 0,
+        "xfield_used_data": 0,
+        "xfields": []
+      },
+      "value_len": 18
+    },
+    {
+      "entry_index": 12,
+      "family": "dir_rec",
+      "key": {
+        "kind": "named",
+        "name": "sparse-chunked.bin",
+        "name_bytes_hex": "7370617273652d6368756e6b65642e62696e00",
+        "name_len": 19,
+        "raw_key_form": "hashed"
+      },
+      "key_len": 31,
+      "node_paddr": 656,
+      "object_id": 2,
+      "raw_type": 9,
+      "validation_notes": [],
+      "value": {
+        "date_added": 1779285799541411848,
+        "entry_type": 8,
+        "file_id": 26,
+        "flags": 8,
+        "kind": "dir_rec",
+        "sibling_id": null,
+        "xfield_padded_total": 0,
+        "xfield_unused_trailing_bytes": 0,
+        "xfield_used_data": 0,
+        "xfields": []
+      },
+      "value_len": 18
+    },
+    {
+      "entry_index": 13,
+      "family": "dir_rec",
+      "key": {
+        "kind": "named",
+        "name": "compressed.txt",
+        "name_bytes_hex": "636f6d707265737365642e74787400",
+        "name_len": 15,
+        "raw_key_form": "hashed"
+      },
+      "key_len": 27,
+      "node_paddr": 656,
+      "object_id": 2,
+      "raw_type": 9,
+      "validation_notes": [],
+      "value": {
+        "date_added": 1779285800097118680,
+        "entry_type": 8,
+        "file_id": 27,
+        "flags": 8,
+        "kind": "dir_rec",
+        "sibling_id": null,
+        "xfield_padded_total": 0,
+        "xfield_unused_trailing_bytes": 0,
+        "xfield_used_data": 0,
+        "xfields": []
+      },
+      "value_len": 18
+    },
+    {
+      "entry_index": 14,
+      "family": "dir_rec",
+      "key": {
+        "kind": "named",
+        "name": "compressed-big.bin",
+        "name_bytes_hex": "636f6d707265737365642d6269672e62696e00",
+        "name_len": 19,
+        "raw_key_form": "hashed"
+      },
+      "key_len": 31,
+      "node_paddr": 656,
+      "object_id": 2,
+      "raw_type": 9,
+      "validation_notes": [],
+      "value": {
+        "date_added": 1779285800627551071,
+        "entry_type": 8,
+        "file_id": 30,
+        "flags": 8,
+        "kind": "dir_rec",
+        "sibling_id": null,
+        "xfield_padded_total": 0,
+        "xfield_unused_trailing_bytes": 0,
+        "xfield_used_data": 0,
+        "xfields": []
+      },
+      "value_len": 18
+    },
+    {
+      "entry_index": 15,
+      "family": "dir_rec",
+      "key": {
+        "kind": "named",
+        "name": "ordinary.txt",
+        "name_bytes_hex": "6f7264696e6172792e74787400",
+        "name_len": 13,
+        "raw_key_form": "hashed"
+      },
+      "key_len": 25,
+      "node_paddr": 656,
+      "object_id": 2,
+      "raw_type": 9,
+      "validation_notes": [],
+      "value": {
+        "date_added": 1779285797669287601,
+        "entry_type": 8,
+        "file_id": 16,
+        "flags": 8,
+        "kind": "dir_rec",
+        "sibling_id": 21,
+        "xfield_padded_total": 8,
+        "xfield_unused_trailing_bytes": 0,
+        "xfield_used_data": 8,
+        "xfields": [
+          {
+            "interpreted": {
+              "kind": "u64",
+              "value": 21
+            },
+            "padded_length": 8,
+            "value_hex": "1500000000000000",
+            "x_flags": 2,
+            "x_size": 8,
+            "x_type": 1
+          }
+        ]
+      },
+      "value_len": 34
+    },
+    {
+      "entry_index": 16,
+      "family": "inode",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 656,
+      "object_id": 3,
+      "raw_type": 3,
+      "validation_notes": [],
+      "value": {
+        "bsd_flags": 0,
+        "dstream": null,
+        "group": 0,
+        "has_uncompressed_size": false,
+        "inode_name": "private-dir",
+        "internal_flags": 32768,
+        "kind": "inode",
+        "mode": 16804,
+        "nchildren_or_nlink": 0,
+        "owner": 0,
+        "parent_id": 1,
+        "private_id": 3,
+        "sparse_bytes": null,
+        "uncompressed_size": 0,
+        "xfield_padded_total": 16,
+        "xfield_unused_trailing_bytes": 0,
+        "xfield_used_data": 16,
+        "xfields": [
+          {
+            "interpreted": {
+              "kind": "utf8",
+              "value": "private-dir"
+            },
+            "padded_length": 16,
+            "value_hex": "707269766174652d64697200",
+            "x_flags": 2,
+            "x_size": 12,
+            "x_type": 4
+          }
+        ]
+      },
+      "value_len": 116
+    },
+    {
+      "entry_index": 17,
+      "family": "inode",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 656,
+      "object_id": 16,
+      "raw_type": 3,
+      "validation_notes": [],
+      "value": {
+        "bsd_flags": 0,
+        "dstream": {
+          "alloced_size": 4096,
+          "default_crypto_id": 0,
+          "size": 29,
+          "total_bytes_read": 0,
+          "total_bytes_written": 29
+        },
+        "group": 99,
+        "has_uncompressed_size": false,
+        "inode_name": "ordinary.txt",
+        "internal_flags": 33808,
+        "kind": "inode",
+        "mode": 33188,
+        "nchildren_or_nlink": 2,
+        "owner": 99,
+        "parent_id": 2,
+        "private_id": 16,
+        "sparse_bytes": null,
+        "uncompressed_size": 0,
+        "xfield_padded_total": 56,
+        "xfield_unused_trailing_bytes": 0,
+        "xfield_used_data": 56,
+        "xfields": [
+          {
+            "interpreted": {
+              "kind": "utf8",
+              "value": "ordinary.txt"
+            },
+            "padded_length": 16,
+            "value_hex": "6f7264696e6172792e74787400",
+            "x_flags": 2,
+            "x_size": 13,
+            "x_type": 4
+          },
+          {
+            "interpreted": {
+              "kind": "dstream",
+              "value": {
+                "alloced_size": 4096,
+                "default_crypto_id": 0,
+                "size": 29,
+                "total_bytes_read": 0,
+                "total_bytes_written": 29
+              }
+            },
+            "padded_length": 40,
+            "value_hex": "1d00000000000000001000000000000000000000000000001d000000000000000000000000000000",
+            "x_flags": 32,
+            "x_size": 40,
+            "x_type": 8
+          }
+        ]
+      },
+      "value_len": 160
+    },
+    {
+      "entry_index": 18,
+      "family": "xattr",
+      "key": {
+        "kind": "named",
+        "name": "com.apple.provenance",
+        "name_bytes_hex": "636f6d2e6170706c652e70726f76656e616e636500",
+        "name_len": 21,
+        "raw_key_form": "xattr"
+      },
+      "key_len": 31,
+      "node_paddr": 656,
+      "object_id": 16,
+      "raw_type": 4,
+      "validation_notes": [],
+      "value": {
+        "embedded": true,
+        "flags": 2,
+        "kind": "xattr",
+        "payload_hex": "01020041d42f2086a64cf2",
+        "payload_utf8": null,
+        "stream": false,
+        "stream_dstream": null,
+        "stream_xattr_obj_id": null,
+        "xdata_len": 11
+      },
+      "value_len": 15
+    },
+    {
+      "entry_index": 19,
+      "family": "sibling_link",
+      "key": {
+        "kind": "sibling_link",
+        "sibling_id": 21
+      },
+      "key_len": 16,
+      "node_paddr": 656,
+      "object_id": 16,
+      "raw_type": 5,
+      "validation_notes": [],
+      "value": {
+        "kind": "sibling_link",
+        "name": "ordinary.txt",
+        "name_bytes_hex": "6f7264696e6172792e74787400",
+        "name_len": 13,
+        "parent_id": 2
+      },
+      "value_len": 23
+    },
+    {
+      "entry_index": 20,
+      "family": "sibling_link",
+      "key": {
+        "kind": "sibling_link",
+        "sibling_id": 22
+      },
+      "key_len": 16,
+      "node_paddr": 656,
+      "object_id": 16,
+      "raw_type": 5,
+      "validation_notes": [],
+      "value": {
+        "kind": "sibling_link",
+        "name": "hard.txt",
+        "name_bytes_hex": "686172642e74787400",
+        "name_len": 9,
+        "parent_id": 2
+      },
+      "value_len": 19
+    },
+    {
+      "entry_index": 21,
+      "family": "dstream_id",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 656,
+      "object_id": 16,
+      "raw_type": 6,
+      "validation_notes": [],
+      "value": {
+        "kind": "dstream_id",
+        "refcnt": 2
+      },
+      "value_len": 4
+    },
+    {
+      "entry_index": 22,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 656,
+      "object_id": 16,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 23,
+      "family": "inode",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 656,
+      "object_id": 17,
+      "raw_type": 3,
+      "validation_notes": [],
+      "value": {
+        "bsd_flags": 0,
+        "dstream": null,
+        "group": 99,
+        "has_uncompressed_size": false,
+        "inode_name": ".fseventsd",
+        "internal_flags": 32832,
+        "kind": "inode",
+        "mode": 16832,
+        "nchildren_or_nlink": 3,
+        "owner": 99,
+        "parent_id": 2,
+        "private_id": 17,
+        "sparse_bytes": null,
+        "uncompressed_size": 0,
+        "xfield_padded_total": 16,
+        "xfield_unused_trailing_bytes": 0,
+        "xfield_used_data": 16,
+        "xfields": [
+          {
+            "interpreted": {
+              "kind": "utf8",
+              "value": ".fseventsd"
+            },
+            "padded_length": 16,
+            "value_hex": "2e66736576656e74736400",
+            "x_flags": 2,
+            "x_size": 11,
+            "x_type": 4
+          }
+        ]
+      },
+      "value_len": 116
+    },
+    {
+      "entry_index": 24,
+      "family": "xattr",
+      "key": {
+        "kind": "named",
+        "name": "com.apple.system.Security",
+        "name_bytes_hex": "636f6d2e6170706c652e73797374656d2e536563757269747900",
+        "name_len": 26,
+        "raw_key_form": "xattr"
+      },
+      "key_len": 36,
+      "node_paddr": 656,
+      "object_id": 17,
+      "raw_type": 4,
+      "validation_notes": [],
+      "value": {
+        "embedded": true,
+        "flags": 2,
+        "kind": "xattr",
+        "payload_hex": "012cc16d00000000000000000000000000000000000000000000000000000000000000000000000100000000abcdefabcdefabcdefabcdef0000000c0000000100000200",
+        "payload_utf8": null,
+        "stream": false,
+        "stream_dstream": null,
+        "stream_xattr_obj_id": null,
+        "xdata_len": 68
+      },
+      "value_len": 72
+    },
+    {
+      "entry_index": 25,
+      "family": "dir_rec",
+      "key": {
+        "kind": "named",
+        "name": "fseventsd-uuid",
+        "name_bytes_hex": "66736576656e7473642d7575696400",
+        "name_len": 15,
+        "raw_key_form": "hashed"
+      },
+      "key_len": 27,
+      "node_paddr": 656,
+      "object_id": 17,
+      "raw_type": 9,
+      "validation_notes": [],
+      "value": {
+        "date_added": 1779285797708404893,
+        "entry_type": 8,
+        "file_id": 18,
+        "flags": 8,
+        "kind": "dir_rec",
+        "sibling_id": null,
+        "xfield_padded_total": 0,
+        "xfield_unused_trailing_bytes": 0,
+        "xfield_used_data": 0,
+        "xfields": []
+      },
+      "value_len": 18
+    },
+    {
+      "entry_index": 26,
+      "family": "dir_rec",
+      "key": {
+        "kind": "named",
+        "name": "000000000e292899",
+        "name_bytes_hex": "3030303030303030306532393238393900",
+        "name_len": 17,
+        "raw_key_form": "hashed"
+      },
+      "key_len": 29,
+      "node_paddr": 656,
+      "object_id": 17,
+      "raw_type": 9,
+      "validation_notes": [],
+      "value": {
+        "date_added": 1779285801503209562,
+        "entry_type": 8,
+        "file_id": 35,
+        "flags": 8,
+        "kind": "dir_rec",
+        "sibling_id": null,
+        "xfield_padded_total": 0,
+        "xfield_unused_trailing_bytes": 0,
+        "xfield_used_data": 0,
+        "xfields": []
+      },
+      "value_len": 18
+    },
+    {
+      "entry_index": 27,
+      "family": "dir_rec",
+      "key": {
+        "kind": "named",
+        "name": "000000000e292898",
+        "name_bytes_hex": "3030303030303030306532393238393800",
+        "name_len": 17,
+        "raw_key_form": "hashed"
+      },
+      "key_len": 29,
+      "node_paddr": 656,
+      "object_id": 17,
+      "raw_type": 9,
+      "validation_notes": [],
+      "value": {
+        "date_added": 1779285801502773061,
+        "entry_type": 8,
+        "file_id": 34,
+        "flags": 8,
+        "kind": "dir_rec",
+        "sibling_id": null,
+        "xfield_padded_total": 0,
+        "xfield_unused_trailing_bytes": 0,
+        "xfield_used_data": 0,
+        "xfields": []
+      },
+      "value_len": 18
+    },
+    {
+      "entry_index": 28,
+      "family": "inode",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 656,
+      "object_id": 18,
+      "raw_type": 3,
+      "validation_notes": [],
+      "value": {
+        "bsd_flags": 0,
+        "dstream": {
+          "alloced_size": 4096,
+          "default_crypto_id": 0,
+          "size": 36,
+          "total_bytes_read": 0,
+          "total_bytes_written": 36
+        },
+        "group": 99,
+        "has_uncompressed_size": false,
+        "inode_name": "fseventsd-uuid",
+        "internal_flags": 32768,
+        "kind": "inode",
+        "mode": 33152,
+        "nchildren_or_nlink": 1,
+        "owner": 99,
+        "parent_id": 17,
+        "private_id": 18,
+        "sparse_bytes": null,
+        "uncompressed_size": 0,
+        "xfield_padded_total": 56,
+        "xfield_unused_trailing_bytes": 0,
+        "xfield_used_data": 56,
+        "xfields": [
+          {
+            "interpreted": {
+              "kind": "utf8",
+              "value": "fseventsd-uuid"
+            },
+            "padded_length": 16,
+            "value_hex": "66736576656e7473642d7575696400",
+            "x_flags": 2,
+            "x_size": 15,
+            "x_type": 4
+          },
+          {
+            "interpreted": {
+              "kind": "dstream",
+              "value": {
+                "alloced_size": 4096,
+                "default_crypto_id": 0,
+                "size": 36,
+                "total_bytes_read": 0,
+                "total_bytes_written": 36
+              }
+            },
+            "padded_length": 40,
+            "value_hex": "24000000000000000010000000000000000000000000000024000000000000000000000000000000",
+            "x_flags": 32,
+            "x_size": 40,
+            "x_type": 8
+          }
+        ]
+      },
+      "value_len": 160
+    },
+    {
+      "entry_index": 29,
+      "family": "dstream_id",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 656,
+      "object_id": 18,
+      "raw_type": 6,
+      "validation_notes": [],
+      "value": {
+        "kind": "dstream_id",
+        "refcnt": 1
+      },
+      "value_len": 4
+    },
+    {
+      "entry_index": 30,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 656,
+      "object_id": 18,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 31,
+      "family": "inode",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 656,
+      "object_id": 19,
+      "raw_type": 3,
+      "validation_notes": [],
+      "value": {
+        "bsd_flags": 0,
+        "dstream": {
+          "alloced_size": 1056768,
+          "default_crypto_id": 0,
+          "size": 1052897,
+          "total_bytes_read": 0,
+          "total_bytes_written": 8
+        },
+        "group": 99,
+        "has_uncompressed_size": false,
+        "inode_name": "sparse.bin",
+        "internal_flags": 33280,
+        "kind": "inode",
+        "mode": 33188,
+        "nchildren_or_nlink": 1,
+        "owner": 99,
+        "parent_id": 2,
+        "private_id": 19,
+        "sparse_bytes": 1032192,
+        "uncompressed_size": 0,
+        "xfield_padded_total": 64,
+        "xfield_unused_trailing_bytes": 0,
+        "xfield_used_data": 64,
+        "xfields": [
+          {
+            "interpreted": {
+              "kind": "utf8",
+              "value": "sparse.bin"
+            },
+            "padded_length": 16,
+            "value_hex": "7370617273652e62696e00",
+            "x_flags": 2,
+            "x_size": 11,
+            "x_type": 4
+          },
+          {
+            "interpreted": {
+              "kind": "dstream",
+              "value": {
+                "alloced_size": 1056768,
+                "default_crypto_id": 0,
+                "size": 1052897,
+                "total_bytes_read": 0,
+                "total_bytes_written": 8
+              }
+            },
+            "padded_length": 40,
+            "value_hex": "e1101000000000000020100000000000000000000000000008000000000000000000000000000000",
+            "x_flags": 32,
+            "x_size": 40,
+            "x_type": 8
+          },
+          {
+            "interpreted": {
+              "kind": "u64",
+              "value": 1032192
+            },
+            "padded_length": 8,
+            "value_hex": "00c00f0000000000",
+            "x_flags": 40,
+            "x_size": 8,
+            "x_type": 13
+          }
+        ]
+      },
+      "value_len": 172
+    },
+    {
+      "entry_index": 32,
+      "family": "xattr",
+      "key": {
+        "kind": "named",
+        "name": "com.apple.provenance",
+        "name_bytes_hex": "636f6d2e6170706c652e70726f76656e616e636500",
+        "name_len": 21,
+        "raw_key_form": "xattr"
+      },
+      "key_len": 31,
+      "node_paddr": 656,
+      "object_id": 19,
+      "raw_type": 4,
+      "validation_notes": [],
+      "value": {
+        "embedded": true,
+        "flags": 2,
+        "kind": "xattr",
+        "payload_hex": "01020041d42f2086a64cf2",
+        "payload_utf8": null,
+        "stream": false,
+        "stream_dstream": null,
+        "stream_xattr_obj_id": null,
+        "xdata_len": 11
+      },
+      "value_len": 15
+    },
+    {
+      "entry_index": 33,
+      "family": "dstream_id",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 656,
+      "object_id": 19,
+      "raw_type": 6,
+      "validation_notes": [],
+      "value": {
+        "kind": "dstream_id",
+        "refcnt": 1
+      },
+      "value_len": 4
+    },
+    {
+      "entry_index": 34,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 656,
+      "object_id": 19,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 35,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 656,
+      "object_id": 19,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 36,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 656,
+      "object_id": 19,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 37,
+      "family": "inode",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 656,
+      "object_id": 20,
+      "raw_type": 3,
+      "validation_notes": [],
+      "value": {
+        "bsd_flags": 0,
+        "dstream": {
+          "alloced_size": 4096,
+          "default_crypto_id": 0,
+          "size": 29,
+          "total_bytes_read": 0,
+          "total_bytes_written": 29
+        },
+        "group": 99,
+        "has_uncompressed_size": false,
+        "inode_name": "clone.txt",
+        "internal_flags": 33808,
+        "kind": "inode",
+        "mode": 33188,
+        "nchildren_or_nlink": 1,
+        "owner": 99,
+        "parent_id": 2,
+        "private_id": 16,
+        "sparse_bytes": null,
+        "uncompressed_size": 0,
+        "xfield_padded_total": 56,
+        "xfield_unused_trailing_bytes": 0,
+        "xfield_used_data": 56,
+        "xfields": [
+          {
+            "interpreted": {
+              "kind": "dstream",
+              "value": {
+                "alloced_size": 4096,
+                "default_crypto_id": 0,
+                "size": 29,
+                "total_bytes_read": 0,
+                "total_bytes_written": 29
+              }
+            },
+            "padded_length": 40,
+            "value_hex": "1d00000000000000001000000000000000000000000000001d000000000000000000000000000000",
+            "x_flags": 32,
+            "x_size": 40,
+            "x_type": 8
+          },
+          {
+            "interpreted": {
+              "kind": "utf8",
+              "value": "clone.txt"
+            },
+            "padded_length": 16,
+            "value_hex": "636c6f6e652e74787400",
+            "x_flags": 2,
+            "x_size": 10,
+            "x_type": 4
+          }
+        ]
+      },
+      "value_len": 160
+    },
+    {
+      "entry_index": 38,
+      "family": "xattr",
+      "key": {
+        "kind": "named",
+        "name": "com.apple.provenance",
+        "name_bytes_hex": "636f6d2e6170706c652e70726f76656e616e636500",
+        "name_len": 21,
+        "raw_key_form": "xattr"
+      },
+      "key_len": 31,
+      "node_paddr": 656,
+      "object_id": 20,
+      "raw_type": 4,
+      "validation_notes": [],
+      "value": {
+        "embedded": true,
+        "flags": 2,
+        "kind": "xattr",
+        "payload_hex": "01020041d42f2086a64cf2",
+        "payload_utf8": null,
+        "stream": false,
+        "stream_dstream": null,
+        "stream_xattr_obj_id": null,
+        "xdata_len": 11
+      },
+      "value_len": 15
+    },
+    {
+      "entry_index": 39,
+      "family": "sibling_map",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 656,
+      "object_id": 21,
+      "raw_type": 12,
+      "validation_notes": [],
+      "value": {
+        "file_id": 16,
+        "kind": "sibling_map"
+      },
+      "value_len": 8
+    },
+    {
+      "entry_index": 40,
+      "family": "sibling_map",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 656,
+      "object_id": 22,
+      "raw_type": 12,
+      "validation_notes": [],
+      "value": {
+        "file_id": 16,
+        "kind": "sibling_map"
+      },
+      "value_len": 8
+    },
+    {
+      "entry_index": 41,
+      "family": "inode",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 656,
+      "object_id": 23,
+      "raw_type": 3,
+      "validation_notes": [],
+      "value": {
+        "bsd_flags": 0,
+        "dstream": null,
+        "group": 99,
+        "has_uncompressed_size": false,
+        "inode_name": "link.txt",
+        "internal_flags": 32768,
+        "kind": "inode",
+        "mode": 41453,
+        "nchildren_or_nlink": 1,
+        "owner": 99,
+        "parent_id": 2,
+        "private_id": 23,
+        "sparse_bytes": null,
+        "uncompressed_size": 0,
+        "xfield_padded_total": 16,
+        "xfield_unused_trailing_bytes": 0,
+        "xfield_used_data": 16,
+        "xfields": [
+          {
+            "interpreted": {
+              "kind": "utf8",
+              "value": "link.txt"
+            },
+            "padded_length": 16,
+            "value_hex": "6c696e6b2e74787400",
+            "x_flags": 2,
+            "x_size": 9,
+            "x_type": 4
+          }
+        ]
+      },
+      "value_len": 116
+    },
+    {
+      "entry_index": 42,
+      "family": "xattr",
+      "key": {
+        "kind": "named",
+        "name": "com.apple.fs.symlink",
+        "name_bytes_hex": "636f6d2e6170706c652e66732e73796d6c696e6b00",
+        "name_len": 21,
+        "raw_key_form": "xattr"
+      },
+      "key_len": 31,
+      "node_paddr": 656,
+      "object_id": 23,
+      "raw_type": 4,
+      "validation_notes": [],
+      "value": {
+        "embedded": true,
+        "flags": 6,
+        "kind": "xattr",
+        "payload_hex": "6f7264696e6172792e74787400",
+        "payload_utf8": "ordinary.txt",
+        "stream": false,
+        "stream_dstream": null,
+        "stream_xattr_obj_id": null,
+        "xdata_len": 13
+      },
+      "value_len": 17
+    },
+    {
+      "entry_index": 43,
+      "family": "xattr",
+      "key": {
+        "kind": "named",
+        "name": "com.apple.provenance",
+        "name_bytes_hex": "636f6d2e6170706c652e70726f76656e616e636500",
+        "name_len": 21,
+        "raw_key_form": "xattr"
+      },
+      "key_len": 31,
+      "node_paddr": 656,
+      "object_id": 23,
+      "raw_type": 4,
+      "validation_notes": [],
+      "value": {
+        "embedded": true,
+        "flags": 2,
+        "kind": "xattr",
+        "payload_hex": "01020041d42f2086a64cf2",
+        "payload_utf8": null,
+        "stream": false,
+        "stream_dstream": null,
+        "stream_xattr_obj_id": null,
+        "xdata_len": 11
+      },
+      "value_len": 15
+    },
+    {
+      "entry_index": 44,
+      "family": "inode",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 656,
+      "object_id": 24,
+      "raw_type": 3,
+      "validation_notes": [],
+      "value": {
+        "bsd_flags": 0,
+        "dstream": {
+          "alloced_size": 10485760,
+          "default_crypto_id": 0,
+          "size": 10485760,
+          "total_bytes_read": 0,
+          "total_bytes_written": 8
+        },
+        "group": 99,
+        "has_uncompressed_size": false,
+        "inode_name": "sparse-medium.bin",
+        "internal_flags": 33280,
+        "kind": "inode",
+        "mode": 33188,
+        "nchildren_or_nlink": 1,
+        "owner": 99,
+        "parent_id": 2,
+        "private_id": 24,
+        "sparse_bytes": 10452992,
+        "uncompressed_size": 0,
+        "xfield_padded_total": 72,
+        "xfield_unused_trailing_bytes": 0,
+        "xfield_used_data": 72,
+        "xfields": [
+          {
+            "interpreted": {
+              "kind": "utf8",
+              "value": "sparse-medium.bin"
+            },
+            "padded_length": 24,
+            "value_hex": "7370617273652d6d656469756d2e62696e00",
+            "x_flags": 2,
+            "x_size": 18,
+            "x_type": 4
+          },
+          {
+            "interpreted": {
+              "kind": "dstream",
+              "value": {
+                "alloced_size": 10485760,
+                "default_crypto_id": 0,
+                "size": 10485760,
+                "total_bytes_read": 0,
+                "total_bytes_written": 8
+              }
+            },
+            "padded_length": 40,
+            "value_hex": "0000a000000000000000a00000000000000000000000000008000000000000000000000000000000",
+            "x_flags": 32,
+            "x_size": 40,
+            "x_type": 8
+          },
+          {
+            "interpreted": {
+              "kind": "u64",
+              "value": 10452992
+            },
+            "padded_length": 8,
+            "value_hex": "00809f0000000000",
+            "x_flags": 40,
+            "x_size": 8,
+            "x_type": 13
+          }
+        ]
+      },
+      "value_len": 180
+    },
+    {
+      "entry_index": 45,
+      "family": "xattr",
+      "key": {
+        "kind": "named",
+        "name": "com.apple.provenance",
+        "name_bytes_hex": "636f6d2e6170706c652e70726f76656e616e636500",
+        "name_len": 21,
+        "raw_key_form": "xattr"
+      },
+      "key_len": 31,
+      "node_paddr": 656,
+      "object_id": 24,
+      "raw_type": 4,
+      "validation_notes": [],
+      "value": {
+        "embedded": true,
+        "flags": 2,
+        "kind": "xattr",
+        "payload_hex": "01020041d42f2086a64cf2",
+        "payload_utf8": null,
+        "stream": false,
+        "stream_dstream": null,
+        "stream_xattr_obj_id": null,
+        "xdata_len": 11
+      },
+      "value_len": 15
+    },
+    {
+      "entry_index": 46,
+      "family": "dstream_id",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 656,
+      "object_id": 24,
+      "raw_type": 6,
+      "validation_notes": [],
+      "value": {
+        "kind": "dstream_id",
+        "refcnt": 1
+      },
+      "value_len": 4
+    },
+    {
+      "entry_index": 47,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 656,
+      "object_id": 24,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 48,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 656,
+      "object_id": 24,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 49,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 656,
+      "object_id": 24,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 50,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 656,
+      "object_id": 24,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 51,
+      "family": "inode",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 656,
+      "object_id": 25,
+      "raw_type": 3,
+      "validation_notes": [],
+      "value": {
+        "bsd_flags": 0,
+        "dstream": {
+          "alloced_size": 52428800,
+          "default_crypto_id": 0,
+          "size": 52428800,
+          "total_bytes_read": 0,
+          "total_bytes_written": 8
+        },
+        "group": 99,
+        "has_uncompressed_size": false,
+        "inode_name": "sparse-large.bin",
+        "internal_flags": 33280,
+        "kind": "inode",
+        "mode": 33188,
+        "nchildren_or_nlink": 1,
+        "owner": 99,
+        "parent_id": 2,
+        "private_id": 25,
+        "sparse_bytes": 52396032,
+        "uncompressed_size": 0,
+        "xfield_padded_total": 72,
+        "xfield_unused_trailing_bytes": 0,
+        "xfield_used_data": 72,
+        "xfields": [
+          {
+            "interpreted": {
+              "kind": "utf8",
+              "value": "sparse-large.bin"
+            },
+            "padded_length": 24,
+            "value_hex": "7370617273652d6c617267652e62696e00",
+            "x_flags": 2,
+            "x_size": 17,
+            "x_type": 4
+          },
+          {
+            "interpreted": {
+              "kind": "dstream",
+              "value": {
+                "alloced_size": 52428800,
+                "default_crypto_id": 0,
+                "size": 52428800,
+                "total_bytes_read": 0,
+                "total_bytes_written": 8
+              }
+            },
+            "padded_length": 40,
+            "value_hex": "00002003000000000000200300000000000000000000000008000000000000000000000000000000",
+            "x_flags": 32,
+            "x_size": 40,
+            "x_type": 8
+          },
+          {
+            "interpreted": {
+              "kind": "u64",
+              "value": 52396032
+            },
+            "padded_length": 8,
+            "value_hex": "00801f0300000000",
+            "x_flags": 40,
+            "x_size": 8,
+            "x_type": 13
+          }
+        ]
+      },
+      "value_len": 180
+    },
+    {
+      "entry_index": 52,
+      "family": "xattr",
+      "key": {
+        "kind": "named",
+        "name": "com.apple.provenance",
+        "name_bytes_hex": "636f6d2e6170706c652e70726f76656e616e636500",
+        "name_len": 21,
+        "raw_key_form": "xattr"
+      },
+      "key_len": 31,
+      "node_paddr": 656,
+      "object_id": 25,
+      "raw_type": 4,
+      "validation_notes": [],
+      "value": {
+        "embedded": true,
+        "flags": 2,
+        "kind": "xattr",
+        "payload_hex": "01020041d42f2086a64cf2",
+        "payload_utf8": null,
+        "stream": false,
+        "stream_dstream": null,
+        "stream_xattr_obj_id": null,
+        "xdata_len": 11
+      },
+      "value_len": 15
+    },
+    {
+      "entry_index": 53,
+      "family": "dstream_id",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 656,
+      "object_id": 25,
+      "raw_type": 6,
+      "validation_notes": [],
+      "value": {
+        "kind": "dstream_id",
+        "refcnt": 1
+      },
+      "value_len": 4
+    },
+    {
+      "entry_index": 54,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 656,
+      "object_id": 25,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 55,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 656,
+      "object_id": 25,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 56,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 656,
+      "object_id": 25,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 57,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 656,
+      "object_id": 25,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 0,
+      "family": "inode",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 636,
+      "object_id": 26,
+      "raw_type": 3,
+      "validation_notes": [],
+      "value": {
+        "bsd_flags": 0,
+        "dstream": {
+          "alloced_size": 2097152,
+          "default_crypto_id": 0,
+          "size": 2097152,
+          "total_bytes_read": 0,
+          "total_bytes_written": 131072
+        },
+        "group": 99,
+        "has_uncompressed_size": false,
+        "inode_name": "sparse-chunked.bin",
+        "internal_flags": 33280,
+        "kind": "inode",
+        "mode": 33188,
+        "nchildren_or_nlink": 1,
+        "owner": 99,
+        "parent_id": 2,
+        "private_id": 26,
+        "sparse_bytes": 1572864,
+        "uncompressed_size": 0,
+        "xfield_padded_total": 72,
+        "xfield_unused_trailing_bytes": 0,
+        "xfield_used_data": 72,
+        "xfields": [
+          {
+            "interpreted": {
+              "kind": "utf8",
+              "value": "sparse-chunked.bin"
+            },
+            "padded_length": 24,
+            "value_hex": "7370617273652d6368756e6b65642e62696e00",
+            "x_flags": 2,
+            "x_size": 19,
+            "x_type": 4
+          },
+          {
+            "interpreted": {
+              "kind": "dstream",
+              "value": {
+                "alloced_size": 2097152,
+                "default_crypto_id": 0,
+                "size": 2097152,
+                "total_bytes_read": 0,
+                "total_bytes_written": 131072
+              }
+            },
+            "padded_length": 40,
+            "value_hex": "00002000000000000000200000000000000000000000000000000200000000000000000000000000",
+            "x_flags": 32,
+            "x_size": 40,
+            "x_type": 8
+          },
+          {
+            "interpreted": {
+              "kind": "u64",
+              "value": 1572864
+            },
+            "padded_length": 8,
+            "value_hex": "0000180000000000",
+            "x_flags": 40,
+            "x_size": 8,
+            "x_type": 13
+          }
+        ]
+      },
+      "value_len": 180
+    },
+    {
+      "entry_index": 0,
+      "family": "xattr",
+      "key": {
+        "kind": "named",
+        "name": "com.apple.provenance",
+        "name_bytes_hex": "636f6d2e6170706c652e70726f76656e616e636500",
+        "name_len": 21,
+        "raw_key_form": "xattr"
+      },
+      "key_len": 31,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 4,
+      "validation_notes": [],
+      "value": {
+        "embedded": true,
+        "flags": 2,
+        "kind": "xattr",
+        "payload_hex": "01020041d42f2086a64cf2",
+        "payload_utf8": null,
+        "stream": false,
+        "stream_dstream": null,
+        "stream_xattr_obj_id": null,
+        "xdata_len": 11
+      },
+      "value_len": 15
+    },
+    {
+      "entry_index": 1,
+      "family": "dstream_id",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 6,
+      "validation_notes": [],
+      "value": {
+        "kind": "dstream_id",
+        "refcnt": 1
+      },
+      "value_len": 4
+    },
+    {
+      "entry_index": 2,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 3,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 4,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 5,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 6,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 7,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 8,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 9,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 10,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 11,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 12,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 13,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 14,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 15,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 16,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 17,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 18,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 19,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 20,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 21,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 22,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 23,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 24,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 25,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 26,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 27,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 28,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 29,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 30,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 31,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 32,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 33,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 34,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 35,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 36,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 37,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 38,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 39,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 40,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 41,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 42,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 43,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 44,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 45,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 46,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 47,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 48,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 49,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 50,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 51,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 52,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 53,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 54,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 55,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 56,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 57,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 58,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 59,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 60,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 61,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 62,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 63,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 64,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 65,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 66,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 26,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 67,
+      "family": "inode",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 595,
+      "object_id": 27,
+      "raw_type": 3,
+      "validation_notes": [],
+      "value": {
+        "bsd_flags": 32,
+        "dstream": null,
+        "group": 99,
+        "has_uncompressed_size": true,
+        "inode_name": "compressed.txt",
+        "internal_flags": 262144,
+        "kind": "inode",
+        "mode": 33188,
+        "nchildren_or_nlink": 1,
+        "owner": 99,
+        "parent_id": 2,
+        "private_id": 27,
+        "sparse_bytes": null,
+        "uncompressed_size": 53248,
+        "xfield_padded_total": 16,
+        "xfield_unused_trailing_bytes": 0,
+        "xfield_used_data": 16,
+        "xfields": [
+          {
+            "interpreted": {
+              "kind": "utf8",
+              "value": "compressed.txt"
+            },
+            "padded_length": 16,
+            "value_hex": "636f6d707265737365642e74787400",
+            "x_flags": 2,
+            "x_size": 15,
+            "x_type": 4
+          }
+        ]
+      },
+      "value_len": 116
+    },
+    {
+      "entry_index": 68,
+      "family": "xattr",
+      "key": {
+        "kind": "named",
+        "name": "com.apple.ResourceFork",
+        "name_bytes_hex": "636f6d2e6170706c652e5265736f75726365466f726b00",
+        "name_len": 23,
+        "raw_key_form": "xattr"
+      },
+      "key_len": 33,
+      "node_paddr": 595,
+      "object_id": 27,
+      "raw_type": 4,
+      "validation_notes": [],
+      "value": {
+        "embedded": false,
+        "flags": 1,
+        "kind": "xattr",
+        "payload_hex": "1c0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "payload_utf8": null,
+        "stream": true,
+        "stream_dstream": {
+          "alloced_size": 0,
+          "default_crypto_id": 0,
+          "size": 0,
+          "total_bytes_read": 0,
+          "total_bytes_written": 0
+        },
+        "stream_xattr_obj_id": 28,
+        "xdata_len": 48
+      },
+      "value_len": 52
+    },
+    {
+      "entry_index": 69,
+      "family": "xattr",
+      "key": {
+        "kind": "named",
+        "name": "com.apple.decmpfs",
+        "name_bytes_hex": "636f6d2e6170706c652e6465636d70667300",
+        "name_len": 18,
+        "raw_key_form": "xattr"
+      },
+      "key_len": 28,
+      "node_paddr": 595,
+      "object_id": 27,
+      "raw_type": 4,
+      "validation_notes": [],
+      "value": {
+        "embedded": false,
+        "flags": 1,
+        "kind": "xattr",
+        "payload_hex": "1d00000000000000b50100000000000000100000000000000000000000000000b5010000000000000000000000000000",
+        "payload_utf8": null,
+        "stream": true,
+        "stream_dstream": {
+          "alloced_size": 4096,
+          "default_crypto_id": 0,
+          "size": 437,
+          "total_bytes_read": 0,
+          "total_bytes_written": 437
+        },
+        "stream_xattr_obj_id": 29,
+        "xdata_len": 48
+      },
+      "value_len": 52
+    },
+    {
+      "entry_index": 70,
+      "family": "xattr",
+      "key": {
+        "kind": "named",
+        "name": "com.apple.provenance",
+        "name_bytes_hex": "636f6d2e6170706c652e70726f76656e616e636500",
+        "name_len": 21,
+        "raw_key_form": "xattr"
+      },
+      "key_len": 31,
+      "node_paddr": 595,
+      "object_id": 27,
+      "raw_type": 4,
+      "validation_notes": [],
+      "value": {
+        "embedded": true,
+        "flags": 2,
+        "kind": "xattr",
+        "payload_hex": "01020041d42f2086a64cf2",
+        "payload_utf8": null,
+        "stream": false,
+        "stream_dstream": null,
+        "stream_xattr_obj_id": null,
+        "xdata_len": 11
+      },
+      "value_len": 15
+    },
+    {
+      "entry_index": 71,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 29,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 72,
+      "family": "inode",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 595,
+      "object_id": 30,
+      "raw_type": 3,
+      "validation_notes": [],
+      "value": {
+        "bsd_flags": 32,
+        "dstream": null,
+        "group": 99,
+        "has_uncompressed_size": true,
+        "inode_name": "compressed-big.bin",
+        "internal_flags": 278528,
+        "kind": "inode",
+        "mode": 33188,
+        "nchildren_or_nlink": 1,
+        "owner": 99,
+        "parent_id": 2,
+        "private_id": 30,
+        "sparse_bytes": null,
+        "uncompressed_size": 262144,
+        "xfield_padded_total": 24,
+        "xfield_unused_trailing_bytes": 0,
+        "xfield_used_data": 24,
+        "xfields": [
+          {
+            "interpreted": {
+              "kind": "utf8",
+              "value": "compressed-big.bin"
+            },
+            "padded_length": 24,
+            "value_hex": "636f6d707265737365642d6269672e62696e00",
+            "x_flags": 2,
+            "x_size": 19,
+            "x_type": 4
+          }
+        ]
+      },
+      "value_len": 124
+    },
+    {
+      "entry_index": 73,
+      "family": "xattr",
+      "key": {
+        "kind": "named",
+        "name": "com.apple.ResourceFork",
+        "name_bytes_hex": "636f6d2e6170706c652e5265736f75726365466f726b00",
+        "name_len": 23,
+        "raw_key_form": "xattr"
+      },
+      "key_len": 33,
+      "node_paddr": 595,
+      "object_id": 30,
+      "raw_type": 4,
+      "validation_notes": [],
+      "value": {
+        "embedded": false,
+        "flags": 1,
+        "kind": "xattr",
+        "payload_hex": "1f0000000000000010080000000000000010000000000000000000000000000010080000000000000000000000000000",
+        "payload_utf8": null,
+        "stream": true,
+        "stream_dstream": {
+          "alloced_size": 4096,
+          "default_crypto_id": 0,
+          "size": 2064,
+          "total_bytes_read": 0,
+          "total_bytes_written": 2064
+        },
+        "stream_xattr_obj_id": 31,
+        "xdata_len": 48
+      },
+      "value_len": 52
+    },
+    {
+      "entry_index": 74,
+      "family": "xattr",
+      "key": {
+        "kind": "named",
+        "name": "com.apple.decmpfs",
+        "name_bytes_hex": "636f6d2e6170706c652e6465636d70667300",
+        "name_len": 18,
+        "raw_key_form": "xattr"
+      },
+      "key_len": 28,
+      "node_paddr": 595,
+      "object_id": 30,
+      "raw_type": 4,
+      "validation_notes": [],
+      "value": {
+        "embedded": true,
+        "flags": 2,
+        "kind": "xattr",
+        "payload_hex": "66706d63080000000000040000000000",
+        "payload_utf8": "fpmc\b\u0000\u0000\u0000\u0000\u0000\u0004\u0000\u0000\u0000\u0000",
+        "stream": false,
+        "stream_dstream": null,
+        "stream_xattr_obj_id": null,
+        "xdata_len": 16
+      },
+      "value_len": 20
+    },
+    {
+      "entry_index": 75,
+      "family": "xattr",
+      "key": {
+        "kind": "named",
+        "name": "com.apple.provenance",
+        "name_bytes_hex": "636f6d2e6170706c652e70726f76656e616e636500",
+        "name_len": 21,
+        "raw_key_form": "xattr"
+      },
+      "key_len": 31,
+      "node_paddr": 595,
+      "object_id": 30,
+      "raw_type": 4,
+      "validation_notes": [],
+      "value": {
+        "embedded": true,
+        "flags": 2,
+        "kind": "xattr",
+        "payload_hex": "01020041d42f2086a64cf2",
+        "payload_utf8": null,
+        "stream": false,
+        "stream_dstream": null,
+        "stream_xattr_obj_id": null,
+        "xdata_len": 11
+      },
+      "value_len": 15
+    },
+    {
+      "entry_index": 76,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 595,
+      "object_id": 31,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 0,
+      "family": "inode",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 652,
+      "object_id": 32,
+      "raw_type": 3,
+      "validation_notes": [],
+      "value": {
+        "bsd_flags": 0,
+        "dstream": {
+          "alloced_size": 131072,
+          "default_crypto_id": 0,
+          "size": 131072,
+          "total_bytes_read": 0,
+          "total_bytes_written": 131072
+        },
+        "group": 99,
+        "has_uncompressed_size": false,
+        "inode_name": "compressed-random.bin",
+        "internal_flags": 0,
+        "kind": "inode",
+        "mode": 33188,
+        "nchildren_or_nlink": 1,
+        "owner": 99,
+        "parent_id": 2,
+        "private_id": 32,
+        "sparse_bytes": null,
+        "uncompressed_size": 0,
+        "xfield_padded_total": 64,
+        "xfield_unused_trailing_bytes": 0,
+        "xfield_used_data": 64,
+        "xfields": [
+          {
+            "interpreted": {
+              "kind": "utf8",
+              "value": "compressed-random.bin"
+            },
+            "padded_length": 24,
+            "value_hex": "636f6d707265737365642d72616e646f6d2e62696e00",
+            "x_flags": 2,
+            "x_size": 22,
+            "x_type": 4
+          },
+          {
+            "interpreted": {
+              "kind": "dstream",
+              "value": {
+                "alloced_size": 131072,
+                "default_crypto_id": 0,
+                "size": 131072,
+                "total_bytes_read": 0,
+                "total_bytes_written": 131072
+              }
+            },
+            "padded_length": 40,
+            "value_hex": "00000200000000000000020000000000000000000000000000000200000000000000000000000000",
+            "x_flags": 32,
+            "x_size": 40,
+            "x_type": 8
+          }
+        ]
+      },
+      "value_len": 168
+    },
+    {
+      "entry_index": 1,
+      "family": "xattr",
+      "key": {
+        "kind": "named",
+        "name": "com.apple.ResourceFork",
+        "name_bytes_hex": "636f6d2e6170706c652e5265736f75726365466f726b00",
+        "name_len": 23,
+        "raw_key_form": "xattr"
+      },
+      "key_len": 33,
+      "node_paddr": 652,
+      "object_id": 32,
+      "raw_type": 4,
+      "validation_notes": [],
+      "value": {
+        "embedded": false,
+        "flags": 1,
+        "kind": "xattr",
+        "payload_hex": "210000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "payload_utf8": null,
+        "stream": true,
+        "stream_dstream": {
+          "alloced_size": 0,
+          "default_crypto_id": 0,
+          "size": 0,
+          "total_bytes_read": 0,
+          "total_bytes_written": 0
+        },
+        "stream_xattr_obj_id": 33,
+        "xdata_len": 48
+      },
+      "value_len": 52
+    },
+    {
+      "entry_index": 2,
+      "family": "xattr",
+      "key": {
+        "kind": "named",
+        "name": "com.apple.provenance",
+        "name_bytes_hex": "636f6d2e6170706c652e70726f76656e616e636500",
+        "name_len": 21,
+        "raw_key_form": "xattr"
+      },
+      "key_len": 31,
+      "node_paddr": 652,
+      "object_id": 32,
+      "raw_type": 4,
+      "validation_notes": [],
+      "value": {
+        "embedded": true,
+        "flags": 2,
+        "kind": "xattr",
+        "payload_hex": "01020041d42f2086a64cf2",
+        "payload_utf8": null,
+        "stream": false,
+        "stream_dstream": null,
+        "stream_xattr_obj_id": null,
+        "xdata_len": 11
+      },
+      "value_len": 15
+    },
+    {
+      "entry_index": 3,
+      "family": "dstream_id",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 652,
+      "object_id": 32,
+      "raw_type": 6,
+      "validation_notes": [],
+      "value": {
+        "kind": "dstream_id",
+        "refcnt": 1
+      },
+      "value_len": 4
+    },
+    {
+      "entry_index": 4,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 652,
+      "object_id": 32,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 5,
+      "family": "inode",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 652,
+      "object_id": 34,
+      "raw_type": 3,
+      "validation_notes": [],
+      "value": {
+        "bsd_flags": 0,
+        "dstream": {
+          "alloced_size": 4096,
+          "default_crypto_id": 0,
+          "size": 303,
+          "total_bytes_read": 0,
+          "total_bytes_written": 303
+        },
+        "group": 99,
+        "has_uncompressed_size": false,
+        "inode_name": "000000000e292898",
+        "internal_flags": 32768,
+        "kind": "inode",
+        "mode": 33152,
+        "nchildren_or_nlink": 1,
+        "owner": 99,
+        "parent_id": 17,
+        "private_id": 34,
+        "sparse_bytes": null,
+        "uncompressed_size": 0,
+        "xfield_padded_total": 64,
+        "xfield_unused_trailing_bytes": 0,
+        "xfield_used_data": 64,
+        "xfields": [
+          {
+            "interpreted": {
+              "kind": "utf8",
+              "value": "000000000e292898"
+            },
+            "padded_length": 24,
+            "value_hex": "3030303030303030306532393238393800",
+            "x_flags": 2,
+            "x_size": 17,
+            "x_type": 4
+          },
+          {
+            "interpreted": {
+              "kind": "dstream",
+              "value": {
+                "alloced_size": 4096,
+                "default_crypto_id": 0,
+                "size": 303,
+                "total_bytes_read": 0,
+                "total_bytes_written": 303
+              }
+            },
+            "padded_length": 40,
+            "value_hex": "2f01000000000000001000000000000000000000000000002f010000000000000000000000000000",
+            "x_flags": 32,
+            "x_size": 40,
+            "x_type": 8
+          }
+        ]
+      },
+      "value_len": 168
+    },
+    {
+      "entry_index": 6,
+      "family": "dstream_id",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 652,
+      "object_id": 34,
+      "raw_type": 6,
+      "validation_notes": [],
+      "value": {
+        "kind": "dstream_id",
+        "refcnt": 1
+      },
+      "value_len": 4
+    },
+    {
+      "entry_index": 7,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 652,
+      "object_id": 34,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    },
+    {
+      "entry_index": 8,
+      "family": "inode",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 652,
+      "object_id": 35,
+      "raw_type": 3,
+      "validation_notes": [],
+      "value": {
+        "bsd_flags": 0,
+        "dstream": {
+          "alloced_size": 4096,
+          "default_crypto_id": 0,
+          "size": 72,
+          "total_bytes_read": 0,
+          "total_bytes_written": 72
+        },
+        "group": 99,
+        "has_uncompressed_size": false,
+        "inode_name": "000000000e292899",
+        "internal_flags": 32768,
+        "kind": "inode",
+        "mode": 33152,
+        "nchildren_or_nlink": 1,
+        "owner": 99,
+        "parent_id": 17,
+        "private_id": 35,
+        "sparse_bytes": null,
+        "uncompressed_size": 0,
+        "xfield_padded_total": 64,
+        "xfield_unused_trailing_bytes": 0,
+        "xfield_used_data": 64,
+        "xfields": [
+          {
+            "interpreted": {
+              "kind": "utf8",
+              "value": "000000000e292899"
+            },
+            "padded_length": 24,
+            "value_hex": "3030303030303030306532393238393900",
+            "x_flags": 2,
+            "x_size": 17,
+            "x_type": 4
+          },
+          {
+            "interpreted": {
+              "kind": "dstream",
+              "value": {
+                "alloced_size": 4096,
+                "default_crypto_id": 0,
+                "size": 72,
+                "total_bytes_read": 0,
+                "total_bytes_written": 72
+              }
+            },
+            "padded_length": 40,
+            "value_hex": "48000000000000000010000000000000000000000000000048000000000000000000000000000000",
+            "x_flags": 32,
+            "x_size": 40,
+            "x_type": 8
+          }
+        ]
+      },
+      "value_len": 168
+    },
+    {
+      "entry_index": 9,
+      "family": "dstream_id",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 8,
+      "node_paddr": 652,
+      "object_id": 35,
+      "raw_type": 6,
+      "validation_notes": [],
+      "value": {
+        "kind": "dstream_id",
+        "refcnt": 1
+      },
+      "value_len": 4
+    },
+    {
+      "entry_index": 10,
+      "family": "file_extent",
+      "key": {
+        "kind": "plain"
+      },
+      "key_len": 16,
+      "node_paddr": 652,
+      "object_id": 35,
+      "raw_type": 8,
+      "validation_notes": [],
+      "value": {
+        "kind": "unsupported",
+        "reason": "record family is outside the v1 body decoder allowlist"
+      },
+      "value_len": 24
+    }
+  ],
+  "unsupported_record_count": 0
+}

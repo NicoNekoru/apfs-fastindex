@@ -1,0 +1,11 @@
+{
+  "diskutil_total": 1,
+  "sealed_system_excluded": [
+    "com.apple.os.update-5514FF97DEE9C60C7FBF462B06A418D5FC4A882D5AF41D2BAF0A1419FB9B9F86"
+  ],
+  "tmutil_total": 0,
+  "user_visible_diskutil": 0,
+  "user_visible_diskutil_names": [],
+  "user_visible_tmutil": 0,
+  "user_visible_tmutil_names": []
+}

@@ -207,8 +207,14 @@ named investigation lanes (see RL-07b):
 - **Physical / allocated size per file**. The size source candidates
   (`j_dstream_t.alloced_size`, file-extent records, extent-reference
   tree) are already partially decoded by the v1 body parser; R2 promotes
-  them from "diagnostic" to an oracle-validated product metric. This is
-  the most visible WizTree feature R1 currently lacks.
+  them from "diagnostic" to an oracle-validated product metric. EX-22
+  validated the ordinary / clone / hard-link / symlink / directory
+  cases against `st_blocks * 512`; EX-26 extended that to sparse files
+  (`alloced_size - sparse_bytes`) and decmpfs-compressed files (sum of
+  stream-backed xattr dstreams' allocated bytes), so every shape the
+  macOS write-path produces now emits a value the parser can defend.
+  The extent-reference tree (clone-deduplicated allocated bytes) is a
+  separate R5 phase (EX-27) for the "Real Bytes" metric.
 
 The following remain longer-range future modes; opening them requires
 explicit support-matrix approval and a dedicated oracle:

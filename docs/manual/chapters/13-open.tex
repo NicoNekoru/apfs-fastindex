@@ -21,39 +21,25 @@ on-disk story is least settled.
 \textbf{The question.} For each inode, what number of bytes does
 APFS allocate to its content on disk?
 
-\textbf{The result.} Five of six case classes emit a per-inode
-\texttt{allocated\_size} that matches macOS's
-\texttt{st\_blocks * 512} oracle exactly. Two cases fail closed:
-sparse files (where \texttt{j\_dstream\_t.alloced\_size} overstates
-the actual allocation by the sparse-bytes hint) and
-decmpfs-compressed files (where no on-disk field has been
-oracle-validated against the macOS number). Chapter~8 gives the
-precedence rule, the case-class table, and the per-row evidence;
-chapter~11 records that the visualisation greys the metric toggle
-out for any row that lacks a value, and any directory aggregate
-containing such a row propagates \texttt{None} upward.
-
-The fail-closed cases are not bugs. They are scope choices: the
-sparse hypothesis (\texttt{alloced\_size} $-$ \texttt{sparse\_bytes}
-$=$ \texttt{st\_blocks * 512}) holds on the one fixture that
-exercises it, but is one data point and needs a broader sparse
-corpus before it can be promoted from Hypothesis to Observation.
-The decmpfs gap is genuine: no public reader has been validated for
-the resource-fork-backed decmpfs path on macOS, and a parser that
-fails closed should not emit a number it cannot defend.
+\textbf{The result.} Every case class the EX-26 corpus exercises
+emits a per-inode \texttt{allocated\_size} that matches macOS's
+\texttt{st\_blocks * 512} oracle exactly. Sparse files emit
+\texttt{alloced\_size - sparse\_bytes} (EX-26 Hypothesis~A,
+validated across four sparse shapes after EX-22 first observed the
+identity on one). Decmpfs-compressed files emit the sum of any
+stream-backed xattr dstreams' allocated bytes (EX-26 Hypothesis~F,
+validated across both ditto-produced shapes: xattr-stream-stored
+and resource-fork-stored). Chapter~8 gives the precedence rule,
+the case-class table, and the per-row evidence.
 
 \textbf{What is still open.} Exclusive bytes (bytes only this inode
 owns, after accounting for clones and snapshots) and shared bytes
 (bytes shared across inodes or snapshots) require the
 extent-reference tree to be opened and joined against per-inode
 extents. Neither has been validated end to end against a public
-oracle; both are separate questions with their own corpora.
-
-\textbf{The smallest probe that would close it.} A sparse-corpus
-probe (leading hole, trailing hole, multi-hole, hole-larger-than-
-file, zero-hole boundary) would settle the sparse case. The
-\texttt{alloced\_size - sparse\_bytes} identity is the candidate
-rule; the oracle remains \texttt{st\_blocks * 512}.
+oracle; both are separate questions with their own corpora. EX-27
+is the planned probe for clone-deduplicated allocated bytes via the
+extent-reference tree.
 
 \section{Snapshot-Assisted Scanning}
 

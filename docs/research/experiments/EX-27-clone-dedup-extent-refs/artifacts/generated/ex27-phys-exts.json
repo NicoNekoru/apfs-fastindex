@@ -1,0 +1,75 @@
+{
+  "count": 10,
+  "records": [
+    {
+      "kind": 1,
+      "length_blocks": 1,
+      "owning_obj_id": 16,
+      "paddr_first": 826,
+      "refcnt": 1
+    },
+    {
+      "kind": 1,
+      "length_blocks": 1,
+      "owning_obj_id": 18,
+      "paddr_first": 834,
+      "refcnt": 1
+    },
+    {
+      "kind": 1,
+      "length_blocks": 16,
+      "owning_obj_id": 23,
+      "paddr_first": 848,
+      "refcnt": 1
+    },
+    {
+      "kind": 1,
+      "length_blocks": 256,
+      "owning_obj_id": 29,
+      "paddr_first": 895,
+      "refcnt": 1
+    },
+    {
+      "kind": 1,
+      "length_blocks": 96,
+      "owning_obj_id": 33,
+      "paddr_first": 1176,
+      "refcnt": 2
+    },
+    {
+      "kind": 1,
+      "length_blocks": 64,
+      "owning_obj_id": 33,
+      "paddr_first": 1272,
+      "refcnt": 1
+    },
+    {
+      "kind": 1,
+      "length_blocks": 96,
+      "owning_obj_id": 33,
+      "paddr_first": 1336,
+      "refcnt": 2
+    },
+    {
+      "kind": 1,
+      "length_blocks": 64,
+      "owning_obj_id": 34,
+      "paddr_first": 1449,
+      "refcnt": 1
+    },
+    {
+      "kind": 1,
+      "length_blocks": 1,
+      "owning_obj_id": 36,
+      "paddr_first": 1520,
+      "refcnt": 1
+    },
+    {
+      "kind": 1,
+      "length_blocks": 1,
+      "owning_obj_id": 37,
+      "paddr_first": 1522,
+      "refcnt": 1
+    }
+  ]
+}

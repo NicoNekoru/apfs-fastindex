@@ -374,6 +374,96 @@ Long-range product roadmap:
   200k → 313k ent/s = +56% over the r2c-fallback-perf tip
   (+82% cumulative since the pre-perf baseline; 1.82× total).
   Test count 69 → 70 (parallel_walker_matches_serial_shape).
+- `EX-26` SR-019 sparse + decmpfs allocated-size precedence
+  (R5 phase 1; **closed**, verdict
+  `validated_sparse_and_decmpfs`). Extended the EX-22 fixture
+  with three sparse shapes (1 MiB, 10 MiB, 50 MiB HEAD/TAIL
+  holes plus a chunked 4 KiB-data-per-64 KiB stride) and three
+  decmpfs variants (small compressible JSON →
+  xattr-stream-stored; 256 KiB compressible binary →
+  resource-fork-stored; incompressible → ditto declined to
+  compress). All 10 rows match `st_blocks * 512` exactly under
+  the lifted rules: sparse = `alloced_size - sparse_bytes`
+  (Hypothesis A, held across all 4 sparse shapes); decmpfs =
+  `Σ stream-backed xattr alloced_size + primary dstream`
+  (Hypothesis F, supersedes the originally-planned B/C/D
+  compression-type-conditional split). Lift landed in
+  `crates/apfs-fastindex/src/namespace.rs::compute_allocated_size`
+  (refactored as a free helper for direct unit-testing). 8 new
+  regression tests in `namespace.rs::tests`. Manual chapter 8
+  updated with EX-26 per-shape tables; chapter 1 and 13's
+  "fail-closed gap" callouts dropped. The Allocated metric now
+  populates for every shape the macOS write-path produces; the
+  only fail-closed branch left in SR-019 is the "anything else"
+  catch-all (FIFOs, sockets, block devices).
+- `EX-27` clone-dedup via extent-reference tree (R5 phase 2;
+  **Python-direct probe closed**, verdict `validated_clone_dedup`;
+  Rust port pending as the next engineering phase). The fixture
+  ships three clone families: 5-way (64 KiB shared), 3-way (1 MiB
+  shared), and a partial-share rewrite case (1 MiB src + clone
+  with 256 KiB COW'd in the middle). The probe walks the
+  extent-reference tree and fs-tree directly off a detached
+  `.dmg`, joins `file_extent` records (keyed by `dstream_id`,
+  not inode obj_id — clones share a dstream) with `phys_ext`
+  refcnts (one record per shared physical extent), and computes
+  per-inode `real_size = dstream_dedup ÷ dstream.refcnt`.
+  Productive discovery: `du -A` on macOS reports apparent
+  (logical) size and is **not** clone-aware — there is no public
+  per-path macOS oracle for clone-deduplicated bytes. The
+  authoritative oracle is the extent-reference tree itself:
+  `Σ phys_ext.length` is the ground truth. On the EX-27 fixture:
+  `Σ dstream dedup = Σ phys_ext bytes = 2,441,216` exactly;
+  `Σ per-inode share = 2,441,214` (2-byte rounding residue across
+  2 clone-shared dstreams, exactly as bounded by integer division).
+  Rust port plan (next session): file_extent + phys_ext body
+  decoders, extent-reference-tree walker (storage class
+  `OBJECT_TYPE_PHYSICAL` on hdiutil-created `.dmg`s; live volumes
+  may use virtual), dstream-aware dedup in `namespace.rs`, new
+  `real_size` field on `NamespaceEntry`, metric picker option
+  "Real" in the native renderer. Documented in
+  `experiments/EX-27-clone-dedup-extent-refs/README.md`.
+- `EX-28` root mode + raw parser on live system volume (R5
+  phase 3; **closed 2026-05-20**, verdict
+  `live_raw_blocked_by_kernel`). The Rust crate carries the
+  public `parity::compare_namespace_shapes` comparator
+  (7 unit tests) and the env-gated integration harness in
+  `tests/ex28_live_parity.rs`. First privileged run on the
+  project owner's Apple silicon host produced Hypothesis C: macOS
+  returned `EPERM` (errno 1) on the first `read(2)` of
+  `/dev/disk3s1`'s block 0 despite running under `sudo`. The
+  kernel's storage-system security policy refuses raw block
+  access to the live boot data partition independently of POSIX
+  file permissions; SIP and the sealed-system-volume seal both
+  contribute. The harness classifies this as
+  `LiveScanOutcome::BlockedByKernel`, records the verdict, and
+  exits cleanly. Live boot raw mode is not viable on this host
+  class; the "Scan as administrator…" path stays on the
+  fallback walker even under root. Comparator + harness remain
+  useful for future hosts and for EX-29 snapshot-vs-live diffs.
+  Documented in
+  `experiments/EX-28-root-mode-raw-on-live/README.md`; manual
+  chapter 11 records the empirical verdict.
+- `EX-29` local-snapshot extent-set contribution (R5 phase 4;
+  **closed 2026-05-20**, verdict `blocked_no_user_snapshots`).
+  After EX-28 closed with `live_raw_blocked_by_kernel`, EX-29's
+  original raw-extent-diff path is unviable on this host class
+  too (a `mount_apfs -s` snapshot device is gated by the same
+  SIP/sealed-system policy). EX-29's redesigned deliverable is
+  unprivileged enumeration: `tmutil listlocalsnapshots` +
+  `diskutil apfs listSnapshots` parsed in
+  `crates/apfs-fastindex/src/snapshots.rs`, with the SR-020
+  sealed-system-prefix filter and a `SnapshotVerdict` classifier
+  (Enumerated / NoUserSnapshots / ToolingUnavailable). On the
+  project owner's 2026-05-20 host: 0 user-visible TM local
+  snapshots; 1 sealed-system OS-update snapshot on `disk3s1s1`
+  (SR-020-excluded). Same shape EX-23 found. Reclaimable bytes
+  are explicitly unclaimed — no public read-only macOS oracle
+  surfaces them, and EX-28's verdict blocks the raw alternative.
+  Tests: 8 unit + 2 integration (one unconditional, one gated
+  on `APFS_FASTINDEX_EX29_SNAPSHOT_DEVICE` that reuses EX-28's
+  LiveScanOutcome classifier). Manual chapter 11 records the
+  enumeration cell. Documented in
+  `experiments/EX-29-snapshot-contribution/README.md`.
 - `EX-21` fallback path skeleton; landed a POSIX-traversal-backed
   fallback in `src/apfs_fastindex/fallback_traversal.py` that emits the
   same `NamespaceEntry` + `DirectoryAggregate` shape as the Rust raw

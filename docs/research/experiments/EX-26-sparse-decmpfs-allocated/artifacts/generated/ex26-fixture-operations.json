@@ -1,0 +1,49 @@
+{
+  "operations": [
+    {
+      "path": "ordinary.txt",
+      "step": "create ordinary.txt"
+    },
+    {
+      "hole_size": 1052897,
+      "path": "sparse.bin",
+      "step": "create sparse.bin (HEAD/TAIL, ~1 MiB hole)"
+    },
+    {
+      "path": "clone.txt",
+      "step": "clone ordinary.txt -> clone.txt"
+    },
+    {
+      "path": "hard.txt",
+      "step": "hard link ordinary.txt <- hard.txt"
+    },
+    {
+      "path": "link.txt",
+      "step": "symlink link.txt -> ordinary.txt"
+    },
+    {
+      "path": "sparse-medium.bin",
+      "step": "create sparse-medium.bin (~10 MiB hole)"
+    },
+    {
+      "path": "sparse-large.bin",
+      "step": "create sparse-large.bin (~50 MiB hole)"
+    },
+    {
+      "path": "sparse-chunked.bin",
+      "step": "create sparse-chunked.bin (4 KiB data every 64 KiB, 2 MiB total)"
+    },
+    {
+      "path": "compressed.txt",
+      "step": "ditto --hfsCompression -> compressed.txt"
+    },
+    {
+      "path": "compressed-big.bin",
+      "step": "ditto --hfsCompression -> compressed-big.bin (~256 KiB compressible)"
+    },
+    {
+      "path": "compressed-random.bin",
+      "step": "ditto --hfsCompression -> compressed-random.bin (incompressible)"
+    }
+  ]
+}

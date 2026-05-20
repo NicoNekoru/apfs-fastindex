@@ -1,0 +1,41 @@
+{
+  "mount_points": [
+    {
+      "diskutil_returncode": 0,
+      "diskutil_snapshots": [
+        {
+          "name": "com.apple.os.update-5514FF97DEE9C60C7FBF462B06A418D5FC4A882D5AF41D2BAF0A1419FB9B9F86",
+          "notes": [
+            "This snapshot limits the minimum size of APFS Container disk3"
+          ],
+          "purgeable": "No",
+          "user_visible": false,
+          "uuid": "3E1AC922-F4EC-433E-B4D0-0052ADD81E03",
+          "xid": 2293965
+        }
+      ],
+      "diskutil_stderr": "",
+      "diskutil_stdout": "Snapshot for disk3s1s1 (1 found)\n|\n+-- 3E1AC922-F4EC-433E-B4D0-0052ADD81E03\n    Name:        com.apple.os.update-5514FF97DEE9C60C7FBF462B06A418D5FC4A882D5AF41D2BAF0A1419FB9B9F86\n    XID:         2293965\n    Purgeable:   No\n    NOTE:        This snapshot limits the minimum size of APFS Container disk3\n",
+      "mount_point": "/",
+      "tmutil_returncode": 0,
+      "tmutil_snapshots": [],
+      "tmutil_stderr": "",
+      "tmutil_stdout": "Snapshots for disk /:\n",
+      "user_visible_diskutil_count": 0,
+      "user_visible_tmutil_count": 0
+    },
+    {
+      "diskutil_returncode": 0,
+      "diskutil_snapshots": [],
+      "diskutil_stderr": "",
+      "diskutil_stdout": "No snapshots for disk3s5\n",
+      "mount_point": "/System/Volumes/Data",
+      "tmutil_returncode": 0,
+      "tmutil_snapshots": [],
+      "tmutil_stderr": "",
+      "tmutil_stdout": "Snapshots for disk /System/Volumes/Data:\n",
+      "user_visible_diskutil_count": 0,
+      "user_visible_tmutil_count": 0
+    }
+  ]
+}
