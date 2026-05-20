@@ -1,4 +1,5 @@
 import AppKit
+import ApfsCore
 import CApfsFastindex
 import SwiftUI
 
@@ -359,16 +360,30 @@ final class TreemapView: NSView {
     }
 
     /// Resolve a node's scan-relative path against the scan's
-    /// requested-path root so the result is a fully qualified
-    /// filesystem path. Returns nil if the requested-path root is
-    /// empty (shouldn't happen for a normal `mounted_directory`
-    /// scan — included as a guard for synthetic sources).
+    /// requested-path root and return the canonical absolute
+    /// path, **only if** that path stays contained inside the
+    /// scan root. Returns nil for paths that escape via `..`
+    /// segments or absolute-path relative entries — those go to
+    /// the OS verbatim, and would let a crafted image direct
+    /// `Reveal in Finder` / `Move to Trash` at `/etc/passwd` or
+    /// similar (audit fix #5).
+    ///
+    /// Containment is verified by path-component prefix match
+    /// after both sides are `.standardizedFileURL`-normalized
+    /// (which resolves `.` and `..` but does *not* follow
+    /// symlinks — Trash and Reveal want the symlink itself,
+    /// not its target, which matches Finder semantics).
     private func absolutePath(forNode nodeIndex: UInt32, scan: Scan) -> String? {
         let relative = scan.path(of: nodeIndex) ?? ""
         let root = scan.sourceRequestedPath
-        guard !root.isEmpty else { return relative.isEmpty ? nil : relative }
-        if relative.isEmpty { return root }
-        return (root as NSString).appendingPathComponent(relative)
+        guard let resolved = PathContainment.resolveContained(scanRoot: root, relative: relative)
+        else {
+            appLogger.error(
+                "context menu: path containment violation — root=\(root, privacy: .public) relative=\(relative, privacy: .public)"
+            )
+            return nil
+        }
+        return resolved
     }
 
     @objc private func contextRevealInFinder(_ sender: NSMenuItem) {

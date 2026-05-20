@@ -1,4 +1,5 @@
 import Foundation
+import ApfsCore
 import CApfsFastindex
 
 /// FFI-surface test runner for the Swift side. Defends the
@@ -104,6 +105,88 @@ test("last_error clears after read") {
     let secondPtr = apfs_last_error()
     expect(secondPtr == nil,
            "last_error should clear after read; got non-null pointer")
+}
+
+// MARK: - Path containment (audit fix #5)
+
+test("PathContainment: accepts ordinary in-tree relative paths") {
+    let resolved = PathContainment.resolveContained(
+        scanRoot: "/Users/me",
+        relative: "Library/Caches/something"
+    )
+    expect(resolved == "/Users/me/Library/Caches/something",
+           "in-tree path should round-trip; got \(String(describing: resolved))")
+}
+
+test("PathContainment: accepts the scan root itself") {
+    let resolved = PathContainment.resolveContained(
+        scanRoot: "/Users/me",
+        relative: ""
+    )
+    expect(resolved == "/Users/me",
+           "empty relative path resolves to the scan root")
+}
+
+test("PathContainment: rejects ../ escape from a crafted entry") {
+    // The audit's exact attack — a malformed image supplies a
+    // relative path whose `..` segments climb out of the scan
+    // root. `standardizedFileURL` resolves the `..` lexically;
+    // the component prefix check then fails containment.
+    let resolved = PathContainment.resolveContained(
+        scanRoot: "/Users/me",
+        relative: "../../../etc/passwd"
+    )
+    expect(resolved == nil,
+           "../ escape must be refused; got \(String(describing: resolved))")
+}
+
+test("PathContainment: rejects deep ../ that lands in /") {
+    let resolved = PathContainment.resolveContained(
+        scanRoot: "/Users/me",
+        relative: "../../"
+    )
+    expect(resolved == nil,
+           "../ to root must be refused; got \(String(describing: resolved))")
+}
+
+test("PathContainment: doesn't confuse sibling prefix names") {
+    // String-prefix containment would accept this; the
+    // component-by-component check refuses it.
+    let resolved = PathContainment.resolveContained(
+        scanRoot: "/Users/kai",
+        relative: ""
+    )
+    expect(resolved == "/Users/kai", "trivial sanity")
+    // Now verify the same root does NOT accept a path that
+    // would lexically prefix-match — we construct it via the
+    // helper directly with a crafted "relative" that resolves
+    // outside, simulating what a malicious entry could try.
+    let escape = PathContainment.resolveContained(
+        scanRoot: "/Users/kai",
+        relative: "../kaiserwilhelm/secrets"
+    )
+    expect(escape == nil,
+           "sibling-prefix path must be refused; got \(String(describing: escape))")
+}
+
+test("PathContainment: refuses empty scan root") {
+    let resolved = PathContainment.resolveContained(
+        scanRoot: "",
+        relative: "anything"
+    )
+    expect(resolved == nil,
+           "empty scan root must fail-closed; got \(String(describing: resolved))")
+}
+
+test("PathContainment: normalises ./ segments") {
+    // Harmless `.` segments — the standardization step erases
+    // them and containment passes.
+    let resolved = PathContainment.resolveContained(
+        scanRoot: "/Users/me",
+        relative: "./Documents/./report.txt"
+    )
+    expect(resolved == "/Users/me/Documents/report.txt",
+           "in-tree `.` normalisation should round-trip; got \(String(describing: resolved))")
 }
 
 // MARK: - Wrap up

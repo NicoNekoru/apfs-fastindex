@@ -21,9 +21,19 @@ let package = Package(
             name: "CApfsFastindex",
             path: "Sources/CApfsFastindex"
         ),
+        // Pure-Swift utility library — nothing SwiftUI- or
+        // AppKit-coupled. Lives here so the app target and the
+        // FFI test runner can both depend on it without one
+        // pulling in the other. Currently carries the
+        // path-containment helper used by the right-click menu's
+        // security guard (audit fix #5).
+        .target(
+            name: "ApfsCore",
+            path: "Sources/ApfsCore"
+        ),
         .executableTarget(
             name: "ApfsFastindex",
-            dependencies: ["CApfsFastindex"],
+            dependencies: ["CApfsFastindex", "ApfsCore"],
             path: "Sources/ApfsFastindex",
             linkerSettings: [
                 // Tells the linker where to find
@@ -44,11 +54,10 @@ let package = Package(
         //
         // Same `-L` flag the app uses so the static lib
         // (staged by `make-release.sh`) resolves at link time.
-        // Run via: `swift run --package-path app apfs-ffi-tests`
-        // — `make-release.sh test` wires this up.
+        // Run via: `swift run --package-path app apfs-ffi-tests`.
         .executableTarget(
             name: "apfs-ffi-tests",
-            dependencies: ["CApfsFastindex"],
+            dependencies: ["CApfsFastindex", "ApfsCore"],
             path: "Tests/ApfsFastindexTests",
             linkerSettings: [
                 .unsafeFlags([
