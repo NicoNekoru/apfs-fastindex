@@ -1,3 +1,4 @@
+import Darwin
 import SwiftUI
 
 /// Persisted user preferences. Settings panel reads/writes these
@@ -13,6 +14,28 @@ enum AppPrefs {
     /// treats `0` and `1` as the serial implementation; anything
     /// ≥ 2 uses the parallel walker.
     static let threadsKey = "apfs.threads"
+
+    /// Upper bound on the worker-threads stepper. Pulled from
+    /// `sysctl hw.physicalcpu` — the count of physical CPU
+    /// cores, *not* the SMT-doubled logical count. EX-25
+    /// measured sub-linear scaling past the physical-core count
+    /// on Apple silicon (T=8 cost 4× T=1 sys-CPU for 1.94×
+    /// throughput, T=14 cost 9.3× for 1.38×), so the stepper
+    /// shouldn't offer values that we know regress performance.
+    /// Falls back to `activeProcessorCount` if sysctl ever
+    /// fails — that's the logical count on macOS, a safe upper
+    /// bound but not the recommended ceiling.
+    /// Cached lazily; the value doesn't change over the process
+    /// lifetime.
+    static let maxWorkerThreads: Int = {
+        var count: Int32 = 0
+        var size = MemoryLayout<Int32>.size
+        let rc = sysctlbyname("hw.physicalcpu", &count, &size, nil, 0)
+        if rc == 0 && count > 0 {
+            return Int(count)
+        }
+        return ProcessInfo.processInfo.activeProcessorCount
+    }()
 }
 
 struct SettingsView: View {
@@ -50,7 +73,7 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Worker threads")
                             .font(AppFont.ui(13, weight: .semibold))
-                        Text("Parallel-walker thread count. 0 (auto) picks min(hw.physicalcpu, 4). Higher counts hit diminishing returns past 4 on Apple silicon.")
+                        Text("Parallel-walker thread count. 0 (auto) picks min(hw.physicalcpu, 4). Capped at \(AppPrefs.maxWorkerThreads) — your machine's physical-core count; SMT-doubled logical counts regress under APFS container-lock contention (EX-25).")
                             .font(AppFont.ui(11))
                             .foregroundStyle(.secondary)
                             .lineLimit(3)
@@ -61,8 +84,20 @@ struct SettingsView: View {
                         .font(AppFont.ui(13))
                         .monospacedDigit()
                         .frame(minWidth: 44, alignment: .trailing)
-                    Stepper("", value: $threads, in: 0...32)
+                    Stepper("", value: $threads, in: 0...AppPrefs.maxWorkerThreads)
                         .labelsHidden()
+                }
+                .onAppear {
+                    // A user who saved a thread count above the
+                    // cap (older build that used `0...32`, or
+                    // moved their prefs from a higher-core
+                    // machine) would see the stepper unable to
+                    // step *up* from the stale value. Clamp on
+                    // appear so the displayed number always
+                    // matches what the stepper can produce.
+                    if threads > AppPrefs.maxWorkerThreads {
+                        threads = AppPrefs.maxWorkerThreads
+                    }
                 }
             } header: {
                 Text("Scan")
