@@ -55,16 +55,21 @@ const XATTR_DECMPFS_NAME: &str = "com.apple.decmpfs";
 /// Returns `(entries, aggregates)` in stable sorted-by-path order.
 pub(crate) fn build_namespace(
     dump: &FsRecordDump,
-) -> (Vec<NamespaceEntry>, Vec<DirectoryAggregate>) {
+) -> (Vec<NamespaceEntry>, Vec<DirectoryAggregate>, Vec<crate::WalkSkip>) {
     let index = NamespaceIndex::from_records(&dump.records);
     let mut entries: Vec<NamespaceEntry> = Vec::new();
-    index.walk_into(&mut entries);
+    // Round-2 audit #N4: surface depth-cap truncation as
+    // `WalkSkip`s so the user sees subtrees the walker refused
+    // to descend into instead of silently missing them. One
+    // entry per subtree-root that hit the cap.
+    let mut depth_truncations: Vec<crate::WalkSkip> = Vec::new();
+    index.walk_into(&mut entries, &mut depth_truncations);
     // Paths inside a single volume's namespace are unique, so stable
     // sort is not required; sort_unstable_by is faster on the
     // post-walk ordering pass.
     entries.sort_unstable_by(|a, b| a.path.cmp(&b.path));
     let aggregates = build_aggregates(&entries);
-    (entries, aggregates)
+    (entries, aggregates, depth_truncations)
 }
 
 struct NamespaceIndex<'a> {
@@ -133,13 +138,13 @@ impl<'a> NamespaceIndex<'a> {
         }
     }
 
-    fn walk_into(&self, out: &mut Vec<NamespaceEntry>) {
+    fn walk_into(&self, out: &mut Vec<NamespaceEntry>, truncated: &mut Vec<crate::WalkSkip>) {
         // Root `.` is not part of `NamespaceEntry` output (the Python
         // `oracle_diff` and `ProofRawWalkBackend` both omit it). The root
         // still owns the per-directory aggregate row keyed by `.`.
         let mut visited: BTreeSet<u64> = BTreeSet::new();
         visited.insert(APFS_ROOT_DIR_OID);
-        self.walk_dir(APFS_ROOT_DIR_OID, ".", out, &mut visited, 0);
+        self.walk_dir(APFS_ROOT_DIR_OID, ".", out, &mut visited, 0, truncated);
     }
 
     fn walk_dir(
@@ -149,16 +154,22 @@ impl<'a> NamespaceIndex<'a> {
         out: &mut Vec<NamespaceEntry>,
         visited: &mut BTreeSet<u64>,
         depth: usize,
+        truncated: &mut Vec<crate::WalkSkip>,
     ) {
         // Stack-safety cap (audit #3). The `visited` set above
         // catches DREC cycles by file_id; the depth bound catches
         // pathologically deep but non-cyclic chains (a hostile
         // image could supply 100k nested directories with unique
         // file_ids). Refuse to recurse past `MAX_TREE_DEPTH` and
-        // drop the subtree silently — this walker has no error
-        // channel, so silently truncating matches its existing
-        // behaviour on `walk_skips`.
+        // record the truncation so the user sees subtrees we
+        // refused to descend into (audit #N4 — the previous
+        // silent-truncation behaviour let a crafted image make
+        // real content invisible).
         if depth >= crate::MAX_TREE_DEPTH {
+            truncated.push(crate::WalkSkip {
+                path: parent_path.to_string(),
+                reason: format!("depth_cap_reached({})", crate::MAX_TREE_DEPTH),
+            });
             return;
         }
         let Some(children) = self.drec_children.get(&parent_id) else {
@@ -184,7 +195,7 @@ impl<'a> NamespaceIndex<'a> {
                 // Recurse before the entry move so we can hand the
                 // child path in by reference; the parent path Vec push
                 // still consumes its own owned String afterwards.
-                self.walk_dir(child.file_id, &path, out, visited, depth + 1);
+                self.walk_dir(child.file_id, &path, out, visited, depth + 1, truncated);
             }
             out.push(NamespaceEntry {
                 path: path.into_boxed_str(),

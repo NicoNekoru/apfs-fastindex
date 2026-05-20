@@ -518,13 +518,13 @@ pub fn checkpoint_scan_source<P: AsRef<Path>>(
     // entry emission on `selected_checkpoint` + the volume's
     // `fs_record_dump` keeps the emission off when any earlier
     // fail-closed gate trips.
-    let (entries, aggregates) = match selected
+    let (entries, aggregates, depth_truncations) = match selected
         .as_ref()
         .and_then(|sel| sel.volumes.first())
         .and_then(|vol| vol.fs_record_dump.as_ref())
     {
         Some(dump) => namespace::build_namespace(dump),
-        None => (Vec::new(), Vec::new()),
+        None => (Vec::new(), Vec::new(), Vec::new()),
     };
     let namespace_emitted = !entries.is_empty();
 
@@ -534,7 +534,10 @@ pub fn checkpoint_scan_source<P: AsRef<Path>>(
         backend_name: "rust-checkpoint-scan".to_string(),
         entries,
         aggregates,
-        walk_skips: Vec::new(),
+        // Round-2 audit #N4: surface namespace depth-cap
+        // truncations so they're visible to CLI/UI consumers
+        // instead of being silently dropped subtrees.
+        walk_skips: depth_truncations,
     };
 
     let correctness_claim = if namespace_emitted {
