@@ -1,38 +1,57 @@
 import Foundation
+import Security
+import Darwin
+
+/// Function-pointer signature for `AuthorizationExecuteWithPrivileges`
+/// looked up via `dlsym` so we avoid the Swift deprecation warning
+/// at the call site. The API itself is still loaded into every
+/// macOS process via the Security framework — the deprecation is
+/// purely an SDK-level annotation, not an unlinker. `dlsym` with
+/// `RTLD_DEFAULT` returns the live address; the cast turns it
+/// into a callable Swift function.
+private typealias AuthorizationExecuteWithPrivilegesType = @convention(c) (
+    AuthorizationRef,
+    UnsafePointer<CChar>,
+    AuthorizationFlags,
+    UnsafePointer<UnsafeMutablePointer<CChar>?>,
+    UnsafeMutablePointer<UnsafeMutablePointer<FILE>?>?
+) -> OSStatus
 
 /// Long-lived privileged scan helper.
 ///
-/// `osascript ... with administrator privileges` is the only
-/// unprivileged-app affordance for spawning a root subprocess on
-/// stock macOS without code signing / SMAppService. Every osascript
-/// invocation pops its own auth dialog — there is no cache across
-/// `osascript` runs. To make subsequent scans painless we spawn
-/// **one** osascript that runs the bundled CLI in `--server` mode
-/// and reuse its stdin/stdout for every subsequent scan request.
-/// The auth dialog pops once at session start; from then on,
-/// scans are direct stdin writes to a process that is already root.
+/// The pattern is "spawn root once, reuse forever" so subsequent
+/// scans don't re-prompt for auth. The previous attempt used
+/// `osascript ... do shell script ... with administrator
+/// privileges` but that path could not pipe stdin to the inner
+/// command — `do shell script` connects the child's stdin to
+/// `/dev/null`, so the helper would send its handshake and then
+/// EOF on stdin before any scan command could be delivered.
 ///
-/// Protocol matches `apfs-fastindex-scan --server` (see
-/// `crates/apfs-fastindex/src/main.rs::run_server_mode`):
+/// This version uses Apple's `AuthorizationServices`:
+///
+/// 1. `AuthorizationCreate` opens a session.
+/// 2. `AuthorizationCopyRights` with `kAuthorizationRightExecute`
+///    pops the auth dialog (the only prompt for the whole app
+///    lifetime).
+/// 3. `AuthorizationExecuteWithPrivileges` spawns the bundled
+///    CLI with `--server`, returning a bidirectional FILE* whose
+///    socketpair half is dup'd onto the child's stdin and stdout.
+/// 4. Wrap the FILE* in a `FileHandle` and reuse it for every
+///    scan request.
+///
+/// `AuthorizationExecuteWithPrivileges` is marked deprecated since
+/// 10.7. The compiler warns; the API still works on every shipping
+/// macOS and is the practical path for an unsigned helper. Apps
+/// that ship under Developer ID can graduate to SMAppService.
+///
+/// Protocol matches `apfs-fastindex-scan --server`:
 ///
 /// ```text
-/// stdout: ready\t1\n                      (once, after auth)
-/// stdin:  scan\t<path>\t<out>\t<prog>\n   (per scan request)
-/// stdout: ok\t<exit_code>\n               (per scan)
-/// stdin:  quit\n                          (graceful shutdown)
+/// pipe-out (child stdout):  ready\t1\n                  (once, after auth)
+/// pipe-in  (child stdin):   scan\t<path>\t<out>\t<prog>\n
+/// pipe-out (child stdout):  ok\t<exit_code>\n
+/// pipe-in  (child stdin):   quit\n
 /// ```
-///
-/// `AdminSession.shared` is the singleton entry point. Lifecycle:
-///
-/// - `requestScan(path:onSessionReady:onProgress:)` spawns the
-///   helper if not already running, waits for the `ready`
-///   handshake (calls `onSessionReady`), writes the `scan` command,
-///   polls the progress file, awaits the `ok` reply, rehydrates
-///   the msgpack via `Scan.fromPrivilegedMsgpack`, returns the
-///   outcome.
-/// - `shutdown()` writes `quit`, waits for the helper to exit
-///   (best-effort, capped at 1 s). Called from the app's
-///   `applicationWillTerminate` hook.
 final class AdminSession {
     static let shared = AdminSession()
 
@@ -44,10 +63,13 @@ final class AdminSession {
     }
 
     private let stateLock = NSLock()
-    private var process: Process?
-    private var stdinHandle: FileHandle?
-    private var stdoutHandle: FileHandle?
-    private var stderrHandle: FileHandle?
+    private var authRef: AuthorizationRef?
+    /// Bidirectional FILE* from AuthorizationExecuteWithPrivileges,
+    /// wrapped via `fileno()` + `FileHandle(fileDescriptor:)`.
+    /// Reads come from the child's stdout, writes go to the
+    /// child's stdin.
+    private var pipeHandle: FileHandle?
+    private var pipeFilePtr: UnsafeMutablePointer<FILE>?
     /// Serialises scan requests on the helper's stdin. Two
     /// concurrent requests would interleave commands on the wire.
     private let requestQueue = DispatchQueue(label: "apfsfastindex.adminsession.requests")
@@ -165,7 +187,7 @@ final class AdminSession {
         // turns. Each `requestScan` call gets one full round-trip
         // before the next can proceed.
         let result = requestQueue.sync(execute: { () -> Outcome in
-            guard let stdin = stdinHandle, let stdout = stdoutHandle else {
+            guard let pipe = pipeHandle else {
                 return .failed(
                     message: "Administrator session not active.",
                     stderr: ""
@@ -176,7 +198,7 @@ final class AdminSession {
                 return .failed(message: "Path is not valid UTF-8.", stderr: "")
             }
             do {
-                try stdin.write(contentsOf: bytes)
+                try pipe.write(contentsOf: bytes)
             } catch {
                 self.invalidate()
                 return .failed(
@@ -189,7 +211,7 @@ final class AdminSession {
             // Read one line of response. The protocol guarantees
             // exactly one line per scan; read until the first
             // newline.
-            let line = AdminSession.readLine(from: stdout)
+            let line = AdminSession.readLine(from: pipe)
             return AdminSession.consumeOk(
                 line: line,
                 outPath: outPath
@@ -206,23 +228,18 @@ final class AdminSession {
     func shutdown() {
         stateLock.lock()
         defer { stateLock.unlock() }
-        guard let stdin = stdinHandle, let process = process else {
+        guard let pipe = pipeHandle else {
             return
         }
+        // Send `quit\n`; the helper writes `ok\t0\n` and exits.
+        // We don't read the reply — by the time shutdown is
+        // called we don't care about the response value, and a
+        // hung helper shouldn't block app termination. fclose
+        // below flushes our side and tears down the socket; the
+        // helper EOFs on read and exits within milliseconds.
         let quit = "quit\n".data(using: .utf8)!
-        try? stdin.write(contentsOf: quit)
-        try? stdin.close()
-        // Cap waitUntilExit at ~1 s so a hung helper doesn't
-        // freeze the app's terminate path. Termination on
-        // timeout is fine — the helper is just a subprocess.
-        let deadline = Date().addingTimeInterval(1.0)
-        while process.isRunning && Date() < deadline {
-            usleep(20_000)
-        }
-        if process.isRunning {
-            process.terminate()
-        }
-        invalidate()
+        try? pipe.write(contentsOf: quit)
+        invalidateLocked()
     }
 
     // ---- internal -------------------------------------------------- //
@@ -234,21 +251,21 @@ final class AdminSession {
         case failedToStart(String)
     }
 
-    /// Ensure the helper process is up and has emitted the
-    /// `ready\t1` handshake. Single-flighted via `stateLock`.
+    /// Ensure the privileged helper is up and the bidirectional
+    /// pipe is open. Single-flighted via `stateLock`.
+    ///
+    /// On the first call: opens an Authorization session, prompts
+    /// the user once via `AuthorizationCopyRights`, then runs the
+    /// CLI as root via `AuthorizationExecuteWithPrivileges`. The
+    /// returned FILE* is the helper's bidirectional pipe — reads
+    /// from it pull the helper's stdout, writes push to its stdin.
     private func ensure() -> EnsureResult {
         stateLock.lock()
         defer { stateLock.unlock() }
-        if let p = process, p.isRunning, stdinHandle != nil, stdoutHandle != nil {
+        if pipeHandle != nil {
             return .alreadyReady
         }
-        // Clear any stale handles from a previous helper that
-        // died or was shut down.
-        process = nil
-        stdinHandle = nil
-        stdoutHandle = nil
-        stderrHandle = nil
-        DispatchQueue.main.async { self.active = false }
+        invalidateLocked()
 
         guard let cliURL = PrivilegedScan.bundledCliURL else {
             return .failedToStart(
@@ -258,76 +275,144 @@ final class AdminSession {
         }
         let cliPath = cliURL.path
 
-        // The shell command osascript executes under
-        // administrator privileges. `exec` replaces the inner sh
-        // with the CLI so we don't carry an idle parent process.
-        // Single-quoting handles spaces in the CLI path.
-        let shellCommand = "exec " + PrivilegedScan.shellQuote(cliPath) + " --server"
-        let appleScriptCommand =
-            "do shell script "
-            + PrivilegedScan.appleScriptQuote(shellCommand)
-            + " with administrator privileges"
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", appleScriptCommand]
-        let stdinPipe = Pipe()
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-        process.standardInput = stdinPipe
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-        do {
-            try process.run()
-        } catch {
+        // 1. Open the authorization session.
+        var authRef: AuthorizationRef?
+        let createStatus = AuthorizationCreate(nil, nil, [], &authRef)
+        guard createStatus == errAuthorizationSuccess, let auth = authRef else {
             return .failedToStart(
-                "Could not start osascript: \(error.localizedDescription)"
+                "AuthorizationCreate failed (status \(createStatus))."
             )
         }
 
-        // Block on the `ready\t1` handshake. The osascript shows
-        // its auth dialog synchronously; if the user cancels,
-        // osascript exits non-zero and stdout closes — readLine
-        // returns an empty string.
-        let firstLine = AdminSession.readLine(from: stdoutPipe.fileHandleForReading)
-        if firstLine.isEmpty {
-            // Helper failed to start. Was it a user-cancel?
-            process.waitUntilExit()
-            let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-            let stderrString = String(data: stderrData, encoding: .utf8) ?? ""
-            if stderrString.contains("User canceled") || stderrString.contains("(-128)") {
-                return .userCancelled
+        // 2. Request the execute-with-privileges right. This pops
+        //    the auth dialog. The result captures whether the
+        //    user authenticated, cancelled, or otherwise denied.
+        let rightName = (kAuthorizationRightExecute as NSString).utf8String!
+        var item = AuthorizationItem(
+            name: rightName,
+            valueLength: 0,
+            value: nil,
+            flags: 0
+        )
+        let copyStatus: OSStatus = withUnsafeMutablePointer(to: &item) { itemPtr in
+            var rights = AuthorizationRights(count: 1, items: itemPtr)
+            let flags: AuthorizationFlags = [
+                .interactionAllowed,
+                .preAuthorize,
+                .extendRights,
+            ]
+            return AuthorizationCopyRights(auth, &rights, nil, flags, nil)
+        }
+        if copyStatus == errAuthorizationCanceled {
+            AuthorizationFree(auth, [])
+            return .userCancelled
+        }
+        guard copyStatus == errAuthorizationSuccess else {
+            AuthorizationFree(auth, [])
+            return .failedToStart(
+                "AuthorizationCopyRights failed (status \(copyStatus))."
+            )
+        }
+
+        // 3. Spawn the CLI with --server as root. The
+        //    communicationsPipe is dup'd onto the child's stdin
+        //    and stdout — bidirectional. The arg array is C
+        //    NULL-terminated; argv[0] is implicit (the path).
+        let argv: [UnsafeMutablePointer<CChar>?] = [
+            strdup("--server"),
+            nil,
+        ]
+        defer {
+            for arg in argv where arg != nil {
+                free(arg)
             }
-            let trimmed = stderrString.trimmingCharacters(in: .whitespacesAndNewlines)
-            let message = trimmed.isEmpty
-                ? "Privileged helper exited before the ready handshake."
-                : "Privileged helper failed: \(trimmed)"
-            return .failedToStart(message)
+        }
+        // Look up AuthorizationExecuteWithPrivileges dynamically
+        // to suppress the macOS-10.7-deprecation warning that
+        // would otherwise fire at the static call site. The
+        // modern replacement (SMAppService) requires Developer
+        // ID signing which the open-source build does not have;
+        // AuthorizationExecuteWithPrivileges is still loaded
+        // into every macOS process via the Security framework.
+        let rtldDefault = UnsafeMutableRawPointer(bitPattern: -2)
+        guard let symbol = dlsym(rtldDefault, "AuthorizationExecuteWithPrivileges") else {
+            AuthorizationFree(auth, [])
+            return .failedToStart(
+                "AuthorizationExecuteWithPrivileges is not available on this macOS. "
+                    + "The 'Scan as Administrator…' path requires it."
+            )
+        }
+        let executeWithPrivileges = unsafeBitCast(
+            symbol,
+            to: AuthorizationExecuteWithPrivilegesType.self
+        )
+        var pipePtr: UnsafeMutablePointer<FILE>?
+        let execStatus = argv.withUnsafeBufferPointer { buf -> OSStatus in
+            cliPath.withCString { cPath -> OSStatus in
+                executeWithPrivileges(auth, cPath, [], buf.baseAddress!, &pipePtr)
+            }
+        }
+        guard execStatus == errAuthorizationSuccess, let pipe = pipePtr else {
+            AuthorizationFree(auth, [])
+            return .failedToStart(
+                "AuthorizationExecuteWithPrivileges failed (status \(execStatus))."
+            )
+        }
+
+        // 4. Wrap the FILE* in a FileHandle for the existing
+        //    read/write code paths. closeOnDealloc=false because
+        //    we own the FILE* and need to fclose it ourselves to
+        //    flush + release the underlying socket.
+        let fd = fileno(pipe)
+        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: false)
+
+        self.authRef = auth
+        self.pipeFilePtr = pipe
+        self.pipeHandle = handle
+
+        // 5. Wait for the helper's `ready\t1` handshake. The
+        //    helper writes this and flushes immediately on
+        //    startup. If we see EOF instead (empty line), the
+        //    child crashed before the handshake.
+        let firstLine = AdminSession.readLine(from: handle)
+        if firstLine.isEmpty {
+            invalidateLocked()
+            return .failedToStart(
+                "Privileged helper exited before the ready handshake."
+            )
         }
         if !firstLine.hasPrefix("ready") {
-            process.terminate()
+            invalidateLocked()
             return .failedToStart(
                 "Privileged helper sent unexpected handshake: \(firstLine)"
             )
         }
 
-        self.process = process
-        self.stdinHandle = stdinPipe.fileHandleForWriting
-        self.stdoutHandle = stdoutPipe.fileHandleForReading
-        self.stderrHandle = stderrPipe.fileHandleForReading
         return .freshlySpawned
     }
 
     /// Forget the current helper process and close handles. Lock
     /// must be held by caller.
     private func invalidate() {
-        try? stdinHandle?.close()
-        try? stdoutHandle?.close()
-        try? stderrHandle?.close()
-        process = nil
-        stdinHandle = nil
-        stdoutHandle = nil
-        stderrHandle = nil
+        invalidateLocked()
+    }
+
+    private func invalidateLocked() {
+        if let pipe = pipeFilePtr {
+            fclose(pipe)
+        }
+        if let auth = authRef {
+            // .destroyRights tears down the cached auth so the
+            // next ensure() prompts again. Pass [] if you want
+            // the session to remain valid for the OS auth
+            // cache's natural ~5 min lifetime. For our purposes
+            // we want explicit re-prompt on session loss, so
+            // destroy.
+            AuthorizationFree(auth, [.destroyRights])
+        }
+        authRef = nil
+        pipeFilePtr = nil
+        pipeHandle = nil
         DispatchQueue.main.async { self.active = false }
     }
 
