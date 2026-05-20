@@ -46,20 +46,19 @@ The native app is the primary surface.
 
 ```sh
 # 1. Build the Rust crate + Swift executable + .app bundle.
-sh build-native.sh
-cd app && ./make-app.sh
+./make-release.sh
 
 # 2. Launch.
-open ApfsFastindex.app
+open app/ApfsFastindex.app
 ```
 
-`build-native.sh` produces `libapfs_fastindex.a` and the
-cbindgen-generated C header and stages both for SwiftPM;
-`make-app.sh` runs `swift build -c release`, copies the
-executable + resource bundle into `ApfsFastindex.app`, and
-writes the `Info.plist`. The Rust crate links statically into
-the app binary — no subprocess, no WebKit, no JSON file on
-disk.
+`make-release.sh` builds the Rust crate, stages the static lib
++ cbindgen header into the SwiftPM `CApfsFastindex` shim, runs
+`swift build -c release`, and assembles the
+`app/ApfsFastindex.app` bundle. The Rust crate links statically
+into the app binary — no subprocess, no WebKit, no JSON file on
+disk. See [`app/README.md`](app/README.md) for `PROFILE=debug`
+and `--no-bundle` options.
 
 Inside the app: pick a folder, watch the determinate progress
 island (phase label, scanned / skipped counts, bytes against
@@ -194,5 +193,4 @@ cargo run --release -p apfs-fastindex --example sizes_probe
 
 The cbindgen header regenerates on every change to
 `crates/apfs-fastindex/src/ffi.rs`. After Rust changes,
-re-run `sh build-native.sh && cd app && ./make-app.sh` to pick
-them up in the app bundle.
+re-run `./make-release.sh` to pick them up in the app bundle.

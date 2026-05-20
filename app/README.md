@@ -48,24 +48,23 @@ fill in on a follow-up tick.
 ## Build & run
 
 ```sh
-# From the repo root: build the Rust crate, stage the static
-# library + cbindgen-generated header for SwiftPM.
-sh build-native.sh
-
-# From app/: build the .app bundle and launch.
-cd app
-./make-app.sh
-open ApfsFastindex.app
+# From the repo root: one script does the whole pipeline —
+# Rust crate, SwiftPM systemLibrary staging, Swift build, .app
+# bundle assembly.
+./make-release.sh
+open app/ApfsFastindex.app
 ```
 
-`build-native.sh` runs `cargo build --release -p apfs-fastindex`
-and copies `libapfs_fastindex.a` + `apfs_fastindex.h` into
-`Sources/CApfsFastindex/`, where the SwiftPM `systemLibrary`
-shim picks them up. `make-app.sh` runs `swift build -c release`,
-copies the executable and the SwiftPM resource bundle into
-`ApfsFastindex.app/Contents/`, and writes a minimal `Info.plist`.
-First launch takes ~30 s while SwiftPM compiles; subsequent
-rebuilds are near-instant.
+`make-release.sh` runs `cargo build --release -p apfs-fastindex`
+(producing `libapfs_fastindex.a` + the cbindgen header), copies
+both into `app/Sources/CApfsFastindex/` where the SwiftPM
+`systemLibrary` shim picks them up, runs `swift build -c release`
+inside `app/`, then assembles `app/ApfsFastindex.app` with a
+minimal `Info.plist`. First launch takes ~30 s while SwiftPM
+compiles; subsequent rebuilds are near-instant. Use
+`PROFILE=debug ./make-release.sh` for a debug build, or
+`./make-release.sh --no-bundle` to stop after `swift build`
+without assembling the `.app`.
 
 ### `swift run` for iteration
 
@@ -76,24 +75,21 @@ macOS treats them as CLI tools by default. The app forces
 `applicationWillFinishLaunching`, which is usually enough — if
 the window doesn't focus, click the dock icon or run
 `osascript -e 'tell app "apfs-fastindex" to activate'`. For
-anything beyond fast iteration, prefer `make-app.sh`.
+anything beyond fast iteration, prefer `make-release.sh`.
 
-After Rust changes, re-run `sh build-native.sh` before `swift
-build` / `make-app.sh` so the SwiftPM target sees the fresh
-static lib and header.
+After Rust changes, re-run `./make-release.sh` so the SwiftPM
+target sees the fresh static lib and header.
 
 ## Layout
 
 ```
 app/
   Package.swift                          # SwiftPM, macOS 13+
-  build-native.sh (in repo root)         # Rust build + stage
-  make-app.sh                            # SwiftPM build + bundle
   Sources/
     CApfsFastindex/                      # SwiftPM systemLibrary shim
       module.modulemap                   # link "apfs_fastindex"
       apfs_fastindex.h                   # cbindgen-generated
-      libapfs_fastindex.a                # staged by build-native.sh
+      libapfs_fastindex.a                # staged by make-release.sh
     ApfsFastindex/
       ApfsFastindexApp.swift             # @main, App scene, Settings
       NativeContentView.swift            # SwiftUI shell + state
@@ -101,6 +97,8 @@ app/
       NativeBridge.swift                 # Swift wrapper over C ABI
       SettingsView.swift                 # ⌘, scene (@AppStorage)
       VizPalette.swift                   # extension → colour family
+
+make-release.sh (in repo root)           # end-to-end build script
 ```
 
 ## The FFI boundary
