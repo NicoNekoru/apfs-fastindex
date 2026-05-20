@@ -61,11 +61,91 @@ enum PrivilegedScan {
         case failed(message: String, stderr: String)
     }
 
-    /// The bundled CLI's filesystem path. Returns `nil` if the
-    /// build pipeline didn't ship it — in which case "Scan as
-    /// Administrator…" should be disabled or hidden in the UI.
+    /// The CLI's filesystem path. Tries a series of lookups so
+    /// the menu works in:
+    ///
+    /// 1. A production `.app` bundle (from `make-release.sh`) —
+    ///    the CLI lives at `Contents/MacOS/apfs-fastindex-scan`.
+    /// 2. A dev SwiftPM run (`swift run` from `app/`) — the
+    ///    binary is at `.build/<triple>/debug/ApfsFastindex` and
+    ///    there is no bundle; we walk up to the repo root and
+    ///    use `target/<profile>/apfs-fastindex-scan`.
+    /// 3. Anything on the user's `PATH` (last-resort —
+    ///    `cargo install`-style setups).
+    ///
+    /// Every candidate is `fileExists`-verified so we never hand
+    /// a phantom path to osascript.
     static var bundledCliURL: URL? {
-        Bundle.main.url(forAuxiliaryExecutable: "apfs-fastindex-scan")
+        let fm = FileManager.default
+
+        // 1. Bundle's auxiliary-executable lookup (production
+        //    `.app`). Foundation looks in Contents/MacOS/.
+        if let url = Bundle.main.url(forAuxiliaryExecutable: "apfs-fastindex-scan"),
+           fm.fileExists(atPath: url.path) {
+            return url
+        }
+
+        // 1a. Explicit Contents/MacOS/ fallback in case the
+        //     auxiliary lookup misses despite the file existing.
+        let bundleSibling = Bundle.main.bundleURL
+            .appendingPathComponent("Contents/MacOS/apfs-fastindex-scan")
+        if fm.fileExists(atPath: bundleSibling.path) {
+            return bundleSibling
+        }
+
+        // 2. Dev-mode walk: the SwiftPM binary lives at
+        //    `<repo>/app/.build/<triple>/debug/ApfsFastindex`.
+        //    Walk up until we find a Cargo.toml, then try
+        //    `target/release/apfs-fastindex-scan` and
+        //    `target/debug/apfs-fastindex-scan` (release first
+        //    because that's what `cargo build --release`
+        //    produces and matches the bundled binary).
+        if let exec = Bundle.main.executableURL {
+            var dir: URL? = exec.deletingLastPathComponent()
+            for _ in 0..<8 {
+                guard let here = dir else { break }
+                let cargo = here.appendingPathComponent("Cargo.toml")
+                if fm.fileExists(atPath: cargo.path) {
+                    for profile in ["release", "debug"] {
+                        let candidate = here
+                            .appendingPathComponent("target")
+                            .appendingPathComponent(profile)
+                            .appendingPathComponent("apfs-fastindex-scan")
+                        if fm.fileExists(atPath: candidate.path) {
+                            return candidate
+                        }
+                    }
+                    break
+                }
+                let parent = here.deletingLastPathComponent()
+                if parent.path == here.path { break }
+                dir = parent
+            }
+        }
+
+        // 3. Anything on PATH. Costs one `which` subprocess; only
+        //    runs once at app start (cached by SwiftUI in the
+        //    menu's `.disabled` predicate evaluation).
+        let which = Process()
+        which.executableURL = URL(fileURLWithPath: "/usr/bin/which")
+        which.arguments = ["apfs-fastindex-scan"]
+        let pipe = Pipe()
+        which.standardOutput = pipe
+        which.standardError = Pipe()
+        if (try? which.run()) != nil {
+            which.waitUntilExit()
+            if which.terminationStatus == 0 {
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                if let s = String(data: data, encoding: .utf8) {
+                    let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty && fm.fileExists(atPath: trimmed) {
+                        return URL(fileURLWithPath: trimmed)
+                    }
+                }
+            }
+        }
+
+        return nil
     }
 
     /// True iff the GUI process is already running with EUID 0.

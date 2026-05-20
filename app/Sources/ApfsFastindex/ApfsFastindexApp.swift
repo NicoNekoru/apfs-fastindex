@@ -33,14 +33,22 @@ struct ApfsFastindexApp: App {
         .commands {
             // File menu: "Scan as Administrator…" (⌘⇧A). Posts a
             // notification picked up by the active
-            // `NativeContentView`, which spawns the bundled CLI
-            // under osascript-with-admin-privileges. Disabled if
-            // the build pipeline didn't ship the CLI helper
-            // (Bundle.main.url(forAuxiliaryExecutable:) returns
-            // nil) — the user can still use regular Scan in that
-            // case. EX-28 follow-up: macOS pops the auth dialog;
-            // the privileged scan uses the fallback walker (not
-            // raw mode, which EX-28 closed as kernel-blocked).
+            // `NativeContentView`, which (per
+            // `PrivilegedScan.run`) either spawns the bundled CLI
+            // under osascript-with-admin-privileges or — when the
+            // process is already running as root — calls the
+            // in-process fallback walker directly.
+            //
+            // The menu is always enabled: silently disabling it
+            // when the CLI helper is missing was confusing in
+            // dev-mode swift-run launches. `PrivilegedScan.run`
+            // surfaces a clear error popup in the status bar if
+            // the helper cannot be located, which is friendlier
+            // than a mysteriously grey menu item.
+            //
+            // EX-28 follow-up: the privileged scan uses the
+            // fallback walker (not raw mode, which EX-28 closed
+            // as kernel-blocked under SIP).
             CommandGroup(after: .newItem) {
                 Button("Scan as Administrator…") {
                     NotificationCenter.default.post(
@@ -49,7 +57,6 @@ struct ApfsFastindexApp: App {
                     )
                 }
                 .keyboardShortcut("A", modifiers: [.command, .shift])
-                .disabled(PrivilegedScan.bundledCliURL == nil)
             }
             // Help-menu entry → opens the Rust panic-hook log
             // file in the user's default editor. The file lives
