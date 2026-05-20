@@ -397,13 +397,31 @@ Long-range product roadmap:
   only fail-closed branch left in SR-019 is the "anything else"
   catch-all (FIFOs, sockets, block devices).
 - `EX-27` clone-dedup via extent-reference tree (R5 phase 2;
-  planned skeleton). Introduces an `oxr_t` walker to extract
-  per-extent refcounts; computes the volume's deduplicated
-  allocated bytes as `Σ extent.length / refcount`; validates
-  against `du -A` on a fixture with three new clone families.
-  If validated, lands a third "Real Bytes" metric column
-  alongside Logical and Allocated in the native renderer.
-  Documented in `experiments/EX-27-clone-dedup-extent-refs/README.md`.
+  **Python-direct probe closed**, verdict `validated_clone_dedup`;
+  Rust port pending as the next engineering phase). The fixture
+  ships three clone families: 5-way (64 KiB shared), 3-way (1 MiB
+  shared), and a partial-share rewrite case (1 MiB src + clone
+  with 256 KiB COW'd in the middle). The probe walks the
+  extent-reference tree and fs-tree directly off a detached
+  `.dmg`, joins `file_extent` records (keyed by `dstream_id`,
+  not inode obj_id — clones share a dstream) with `phys_ext`
+  refcnts (one record per shared physical extent), and computes
+  per-inode `real_size = dstream_dedup ÷ dstream.refcnt`.
+  Productive discovery: `du -A` on macOS reports apparent
+  (logical) size and is **not** clone-aware — there is no public
+  per-path macOS oracle for clone-deduplicated bytes. The
+  authoritative oracle is the extent-reference tree itself:
+  `Σ phys_ext.length` is the ground truth. On the EX-27 fixture:
+  `Σ dstream dedup = Σ phys_ext bytes = 2,441,216` exactly;
+  `Σ per-inode share = 2,441,214` (2-byte rounding residue across
+  2 clone-shared dstreams, exactly as bounded by integer division).
+  Rust port plan (next session): file_extent + phys_ext body
+  decoders, extent-reference-tree walker (storage class
+  `OBJECT_TYPE_PHYSICAL` on hdiutil-created `.dmg`s; live volumes
+  may use virtual), dstream-aware dedup in `namespace.rs`, new
+  `real_size` field on `NamespaceEntry`, metric picker option
+  "Real" in the native renderer. Documented in
+  `experiments/EX-27-clone-dedup-extent-refs/README.md`.
 - `EX-28` root mode + raw parser on live system volume (R5
   phase 3; planned skeleton). Validates the existing raw parser
   against `/dev/diskNsM` of the live boot volume under root

@@ -1,0 +1,85 @@
+{
+  "count": 10,
+  "extents": [
+    {
+      "crypto_id": 0,
+      "dstream_id": 16,
+      "flags": 0,
+      "length_bytes": 4096,
+      "logical_addr": 0,
+      "phys_block_num": 826
+    },
+    {
+      "crypto_id": 0,
+      "dstream_id": 18,
+      "flags": 0,
+      "length_bytes": 4096,
+      "logical_addr": 0,
+      "phys_block_num": 834
+    },
+    {
+      "crypto_id": 0,
+      "dstream_id": 23,
+      "flags": 0,
+      "length_bytes": 65536,
+      "logical_addr": 0,
+      "phys_block_num": 848
+    },
+    {
+      "crypto_id": 0,
+      "dstream_id": 29,
+      "flags": 0,
+      "length_bytes": 1048576,
+      "logical_addr": 0,
+      "phys_block_num": 895
+    },
+    {
+      "crypto_id": 0,
+      "dstream_id": 33,
+      "flags": 0,
+      "length_bytes": 1048576,
+      "logical_addr": 0,
+      "phys_block_num": 1176
+    },
+    {
+      "crypto_id": 0,
+      "dstream_id": 35,
+      "flags": 0,
+      "length_bytes": 393216,
+      "logical_addr": 0,
+      "phys_block_num": 1176
+    },
+    {
+      "crypto_id": 0,
+      "dstream_id": 35,
+      "flags": 0,
+      "length_bytes": 262144,
+      "logical_addr": 393216,
+      "phys_block_num": 1449
+    },
+    {
+      "crypto_id": 0,
+      "dstream_id": 35,
+      "flags": 0,
+      "length_bytes": 393216,
+      "logical_addr": 655360,
+      "phys_block_num": 1336
+    },
+    {
+      "crypto_id": 0,
+      "dstream_id": 36,
+      "flags": 0,
+      "length_bytes": 4096,
+      "logical_addr": 0,
+      "phys_block_num": 1520
+    },
+    {
+      "crypto_id": 0,
+      "dstream_id": 37,
+      "flags": 0,
+      "length_bytes": 4096,
+      "logical_addr": 0,
+      "phys_block_num": 1522
+    }
+  ]
+}

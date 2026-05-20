@@ -232,6 +232,8 @@ pub struct VolumeReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub root_tree_lookup: Option<OmapValue>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub extentref_tree_lookup: Option<OmapValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub fs_record_dump: Option<FsRecordDump>,
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -653,6 +655,7 @@ fn attempt_native_dump<R: Read + Seek>(
                 summary: empty_volume_summary(*volume_oid),
                 volume_omap: None,
                 root_tree_lookup: None,
+                extentref_tree_lookup: None,
                 fs_record_dump: None,
                 status: "missing_in_container_omap".to_string(),
                 status_reason: Some(
@@ -678,6 +681,7 @@ fn attempt_native_dump<R: Read + Seek>(
                     summary: empty_volume_summary(*volume_oid),
                     volume_omap: None,
                     root_tree_lookup: None,
+                extentref_tree_lookup: None,
                     fs_record_dump: None,
                     status: "volume_decode_failed".to_string(),
                     status_reason: Some(err.to_string()),
@@ -698,6 +702,7 @@ fn attempt_native_dump<R: Read + Seek>(
                 summary,
                 volume_omap: None,
                 root_tree_lookup: None,
+                extentref_tree_lookup: None,
                 fs_record_dump: None,
                 status: "volume_unsupported".to_string(),
                 status_reason: Some(reason),
@@ -714,6 +719,18 @@ fn attempt_native_dump<R: Read + Seek>(
             reader,
             block_size_usize,
             summary.root_tree_virtual_oid,
+            container.xid,
+        )?;
+        // EX-27 (clone-dedup) needs the extent-reference tree's
+        // resolved physical address. Resolving it here keeps the
+        // OMAP walker out of the Python probe and costs one extra
+        // OMAP lookup. The field is `None` for any volume where
+        // the volume OMAP doesn't carry a mapping at the selected
+        // XID (fresh image, etc.).
+        let extentref_tree_lookup = volume_omap_resolver.lookup(
+            reader,
+            block_size_usize,
+            summary.extentref_tree_oid,
             container.xid,
         )?;
 
@@ -750,6 +767,7 @@ fn attempt_native_dump<R: Read + Seek>(
             summary,
             volume_omap: Some(volume_omap_summary),
             root_tree_lookup,
+            extentref_tree_lookup,
             fs_record_dump,
             status: "supported".to_string(),
             status_reason: None,
