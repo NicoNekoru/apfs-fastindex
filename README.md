@@ -1,7 +1,9 @@
 # APFS-FastIndex
 A WizTree-like disk visualiser for macOS / APFS. 
 
-<video src="https://github.com/NicoNekoru/apfs-fastindex/raw/refs/heads/main/assets/v0.1.0-demo.mp4" controls></video>
+
+https://github.com/user-attachments/assets/3ca0c987-0ea7-4c57-8902-1c3a0008f5f7
+
 
 APFS indexing backend in Rust, rendered in a Native SwiftUI app frontend using Rust-generated graphics drawn by Core Graphics. Rust backend can also be used as a standalone headless CLI.
 
