@@ -56,6 +56,20 @@ struct ApfsFastindexApp: App {
         AppDelegate.updater = updaterController.updater
     }
 
+    /// Last value the apply path actually wrote to Sparkle.
+    /// Setting Sparkle's properties triggers internal
+    /// UserDefaults writes that fire didChangeNotification —
+    /// which our AppDelegate observer responds to by calling
+    /// this method again. Without a de-dup the result is
+    /// unbounded recursion through Sparkle's notification
+    /// pipeline (observed as a stack-overflow crash with
+    /// thousands of identical frames).
+    ///
+    /// `nil` until the first apply so the initial App.init call
+    /// always runs. Accessed only from the main queue (App.init
+    /// + the .main-queued UserDefaults observer).
+    private static var lastAppliedHours: Int?
+
     /// Configure Sparkle's automatic-check cadence from the
     /// user's `apfs.updateCheckIntervalHours` preference.
     ///
@@ -67,6 +81,16 @@ struct ApfsFastindexApp: App {
     ///   also gates first-launch behaviour Sparkle needs.
     /// - `N > 0` → schedule a check every N hours.
     static func applyUpdateInterval(to updater: SPUUpdater, hours: Int) {
+        // Reentrancy break: the property writes below trigger
+        // Sparkle's internal UserDefaults writes, which fire
+        // didChangeNotification, which calls us again. If the
+        // requested interval is unchanged, this round-trip is
+        // a no-op — return before re-applying so we never feed
+        // the notification loop.
+        if lastAppliedHours == hours {
+            return
+        }
+        lastAppliedHours = hours
         updater.automaticallyChecksForUpdates = true
         if hours <= 0 {
             // Effectively never; we manually drive the
