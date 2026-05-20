@@ -486,53 +486,54 @@ impl Tree {
     /// parent chain. Returns `""` for the root (idx 0) and for
     /// out-of-range indices.
     ///
-    /// O(depth) in tree depth + path bytes. Typical paths on a
-    /// macOS volume are < 50 bytes and depth < 12, so each call
-    /// is a few hundred cycles. The FFI wraps this with a cache
-    /// keyed on `idx` so repeated queries (hover, click,
-    /// breadcrumb) don't repeat the walk.
+    /// O(depth) in tree depth + path bytes. Implemented iteratively
+    /// (previously called itself recursively in the second pass,
+    /// which the audit flagged as a stack-overflow vector for
+    /// pathologically deep trees — audit #3). The two passes
+    /// collect the ancestor chain into a `Vec<u32>`, sum the byte
+    /// length, then walk the chain in reverse to write the path
+    /// front-to-back into a pre-sized `String`. The FFI wraps this
+    /// with a cache keyed on `idx` so repeated queries (hover,
+    /// click, breadcrumb) don't repeat the walk.
     pub fn compute_path(&self, idx: u32) -> Box<str> {
         if (idx as usize) >= self.nodes.len() || idx == 0 {
             return Box::from("");
         }
-        // First pass: walk to root, summing byte length.
+        // First pass: collect the chain from `idx` up to (but not
+        // including) the synthetic root. Pre-size to a generous-
+        // but-bounded guess so re-allocs are rare on typical
+        // tree depths. No depth cap is applied here — the walk
+        // is iterative, so a million-deep tree consumes O(depth)
+        // heap, not O(depth) stack.
+        let mut chain: Vec<u32> = Vec::with_capacity(16);
         let mut total: usize = 0;
         let mut cur = idx;
         loop {
             let node = &self.nodes[cur as usize];
+            chain.push(cur);
             total += node.name.len();
             match node.parent {
                 // Add a separator for every step *between* names.
                 // Skip the leading slash for direct root children
                 // (parent == 0): the root's path is "", not "/".
-                Some(p) if p != 0 => total += 1,
+                Some(p) if p != 0 => {
+                    total += 1;
+                    cur = p;
+                }
                 _ => break,
             }
-            cur = node.parent.unwrap();
         }
-        // Second pass: build front-to-back into a sized String.
+        // Second pass: write the chain in reverse so the root-most
+        // segment lands first. Names are separated by '/'.
         let mut s = String::with_capacity(total);
-        write_path_into(&self.nodes, idx, &mut s);
+        for &i in chain.iter().rev() {
+            if !s.is_empty() {
+                s.push('/');
+            }
+            s.push_str(&self.nodes[i as usize].name);
+        }
         s.into_boxed_str()
     }
-}
-
-/// Recursively appends `nodes[idx]`'s ancestor path (excluding
-/// the synthetic root at index 0) into `out`. Recursion depth
-/// is bounded by the filesystem path depth (< 32 on real
-/// volumes), so stack use is fine.
-fn write_path_into(nodes: &[TreeNode], idx: u32, out: &mut String) {
-    if idx == 0 {
-        return;
-    }
-    let node = &nodes[idx as usize];
-    if let Some(p) = node.parent {
-        if p != 0 {
-            write_path_into(nodes, p, out);
-            out.push('/');
-        }
-    }
-    out.push_str(&node.name);
 }
 
 #[cfg(test)]
@@ -594,5 +595,45 @@ mod tests {
         assert_eq!(tree.node_index_for_path("/"), 0);
         assert_ne!(tree.node_index_for_path("file.txt"), NODE_INVALID);
         assert_eq!(tree.node_index_for_path("nonexistent"), NODE_INVALID);
+    }
+
+    /// Regression test for the audit #3 stack-overflow vector.
+    /// Pre-fix, `Tree::compute_path` called `write_path_into`
+    /// recursively, which would blow the stack on a tree whose
+    /// depth approached `RUST_MIN_STACK / sizeof(frame)`. Now
+    /// the implementation is iterative; this test exercises a
+    /// 2 000-deep chain to confirm we don't overflow and that
+    /// the materialised path round-trips correctly.
+    #[test]
+    fn compute_path_handles_very_deep_tree() {
+        // Build a chain of 2000 nested single-child directories
+        // plus one leaf at the bottom. 2000 well exceeds
+        // `MAX_TREE_DEPTH` so any future depth-cap on the path
+        // computer would trip this — that would be a behaviour
+        // change worth flagging.
+        const DEPTH: usize = 2000;
+        let mut entries: Vec<NamespaceEntry> = Vec::with_capacity(DEPTH + 1);
+        let mut path = String::new();
+        for i in 0..DEPTH {
+            if i > 0 {
+                path.push('/');
+            }
+            path.push_str(&format!("d{i}"));
+            entries.push(entry(&path, EntryKind::Dir, 0, Some(0)));
+        }
+        path.push_str("/leaf.txt");
+        entries.push(entry(&path, EntryKind::File, 42, Some(64)));
+
+        let tree = Tree::build(&entries);
+        // Leaf node is the last one pushed; compute its path.
+        let leaf_idx = tree.nodes.len() as u32 - 1;
+        let computed = tree.compute_path(leaf_idx);
+        // Spot-check shape, not full equality (a 2000-component
+        // path is long): starts with "d0/d1/...", ends with
+        // "leaf.txt", contains the expected number of '/'.
+        assert!(computed.starts_with("d0/"));
+        assert!(computed.ends_with("/leaf.txt"));
+        // DEPTH dir segments + 1 leaf = DEPTH separators.
+        assert_eq!(computed.matches('/').count(), DEPTH);
     }
 }

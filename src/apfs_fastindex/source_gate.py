@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import plistlib
+import re
 import subprocess
 from contextlib import contextmanager
 from pathlib import Path
@@ -42,12 +43,26 @@ def _detach(device: str) -> None:
     )
 
 
+# Round-2 audit (Python #1): the previous implementation used
+# `.startswith("/dev/disk")` + string splice, which would have
+# accepted `/dev/disk2/../../etc/passwd` and similar malformed
+# inputs. APFS raw devices on macOS match exactly
+# `/dev/r?disk\d+(s\d+)?` (e.g. `/dev/disk2`, `/dev/disk2s1`,
+# `/dev/rdisk0`), so an anchored regex is the right shape. The
+# caller is internal but the gate is on the security surface,
+# so an explicit grammar beats string surgery either way.
+_RAW_DEVICE_RE = re.compile(r"/dev/r?disk\d+(s\d+)?\Z")
+
+
 def _normalize_raw_device(device: str) -> str:
+    match = _RAW_DEVICE_RE.fullmatch(device)
+    if match is None:
+        raise SourceGateError(f"unsupported raw device path: {device}")
     if device.startswith("/dev/rdisk"):
         return device
-    if device.startswith("/dev/disk"):
-        return "/dev/r" + device.split("/dev/", 1)[1]
-    raise SourceGateError(f"unsupported raw device path: {device}")
+    # `/dev/disk2` → `/dev/rdisk2` (raw device alias). The
+    # regex above already validated the suffix shape.
+    return "/dev/r" + device[len("/dev/"):]
 
 
 @contextmanager

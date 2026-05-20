@@ -639,4 +639,36 @@ final class Scan {
         }
         return ExtSummary(handle: h)
     }
+
+    // MARK: - Walk skips (audit r3 #F1)
+
+    /// One walker skip event — a subtree the parser couldn't or
+    /// wouldn't descend into. Reasons include
+    /// `permission_denied`, `mount_boundary`, `non_utf8_name`,
+    /// `depth_cap_reached(N)`, and `drec_cycle(file_id=X)`.
+    struct WalkSkip: Identifiable {
+        let id: Int
+        let path: String
+        let reason: String
+    }
+
+    /// All walk-skip rows from this scan. Empty when the scan
+    /// completed cleanly. Materialised once into `[WalkSkip]`
+    /// rather than borrowed pointers — the typical scan has at
+    /// most a few hundred skip rows, and SwiftUI consumes
+    /// `Identifiable` collections more naturally than buffer
+    /// pointers.
+    func walkSkips() -> [WalkSkip] {
+        let count = Int(apfs_scan_walk_skip_count(handle))
+        guard count > 0 else { return [] }
+        var out: [WalkSkip] = []
+        out.reserveCapacity(count)
+        for i in 0..<count {
+            let row = apfs_scan_walk_skip_row(handle, UInt32(i))
+            let path = Self.stringFrom(row.path) ?? ""
+            let reason = Self.stringFrom(row.reason) ?? ""
+            out.append(WalkSkip(id: i, path: path, reason: reason))
+        }
+        return out
+    }
 }

@@ -36,25 +36,22 @@ fn main() {
 
     let config = cbindgen::Config::from_file(PathBuf::from(&crate_dir).join("cbindgen.toml"))
         .expect("cbindgen.toml should parse");
-    match cbindgen::Builder::new()
+    // Fail closed on cbindgen errors. The previous behaviour
+    // logged a `cargo:warning=` and continued — silent ABI
+    // drift between the Rust `#[no_mangle]` surface and the
+    // header Swift consumes was the audit's #7 concern. Now any
+    // cbindgen failure (parse error, unsupported type, broken
+    // config) panics the build script and stops cargo cold.
+    let bindings = cbindgen::Builder::new()
         .with_crate(&crate_dir)
         .with_config(config)
         .generate()
-    {
-        Ok(bindings) => {
-            bindings.write_to_file(&header_path);
-            println!(
-                "cargo:warning=apfs-fastindex: header written to {}",
-                header_path.display()
-            );
-        }
-        Err(err) => {
-            // Don't fail the build over header generation —
-            // `cargo test` for the in-tree binary doesn't need
-            // the C header. Print a warning so the SwiftPM
-            // build catches the breakage when it goes to copy
-            // the header.
-            println!("cargo:warning=apfs-fastindex: cbindgen skipped ({err})");
-        }
-    }
+        .unwrap_or_else(|err| {
+            panic!("apfs-fastindex: cbindgen failed: {err}");
+        });
+    bindings.write_to_file(&header_path);
+    println!(
+        "cargo:warning=apfs-fastindex: header written to {}",
+        header_path.display()
+    );
 }

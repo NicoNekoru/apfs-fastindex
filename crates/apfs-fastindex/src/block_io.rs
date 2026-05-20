@@ -140,3 +140,82 @@ pub(crate) fn resign_block(block: &mut [u8]) {
     let checksum = apfs_fletcher64(block);
     put_u64(block, 0, checksum);
 }
+
+#[cfg(test)]
+mod tests {
+    //! Adversarial-input coverage for the `block_size` cap
+    //! landed in commit fcdb597 (security: block_size-DoS class).
+    //! Pre-fix, `read_block` did `vec![0u8; block_size]` with
+    //! `block_size` taken straight from the on-disk NXSB — a
+    //! crafted image supplying a 1 GiB block_size would OOM the
+    //! scanner. The new sanity gate rejects anything outside the
+    //! APFS spec range `[APFS_MIN_BLOCK_SIZE, APFS_MAX_BLOCK_SIZE]`
+    //! with `InvalidObject` before any allocation.
+
+    use super::*;
+    use std::io::Cursor;
+
+    /// Build a `Cursor<Vec<u8>>` big enough to serve a well-formed
+    /// read of `block_size` bytes from offset 0 — avoids short-
+    /// read failures that would mask the cap-test we actually
+    /// care about.
+    fn cursor_for_block_size(block_size: usize) -> Cursor<Vec<u8>> {
+        Cursor::new(vec![0u8; block_size.saturating_mul(2).max(8)])
+    }
+
+    #[test]
+    fn read_block_rejects_zero_block_size() {
+        let mut reader = cursor_for_block_size(4096);
+        let err = read_block(&mut reader, 0, 0).expect_err("block_size=0 must fail-closed");
+        assert!(matches!(err, ScanError::InvalidObject(_)));
+    }
+
+    #[test]
+    fn read_block_rejects_below_min() {
+        // 4095 = one byte below the APFS minimum.
+        let mut reader = cursor_for_block_size(4096);
+        let err = read_block(&mut reader, 0, APFS_MIN_BLOCK_SIZE - 1)
+            .expect_err("block_size below spec minimum must fail-closed");
+        assert!(matches!(err, ScanError::InvalidObject(_)));
+    }
+
+    #[test]
+    fn read_block_rejects_above_max() {
+        // 65537 = one byte above the APFS maximum. Reader has a
+        // big enough buffer so we know the failure is the cap,
+        // not a short-read.
+        let mut reader = cursor_for_block_size(APFS_MAX_BLOCK_SIZE + 2);
+        let err = read_block(&mut reader, 0, APFS_MAX_BLOCK_SIZE + 1)
+            .expect_err("block_size above spec maximum must fail-closed");
+        assert!(matches!(err, ScanError::InvalidObject(_)));
+    }
+
+    #[test]
+    fn read_block_rejects_gigabyte_block_size() {
+        // The DoS vector the audit flagged: a 1 GiB block_size
+        // would have allocated 1 GiB before the cap. The cap
+        // fires *before* the `vec![0u8; ...]` line so the test
+        // runs in microseconds and never allocates the hostile
+        // buffer.
+        let mut reader = cursor_for_block_size(4096);
+        let err = read_block(&mut reader, 0, 1 << 30)
+            .expect_err("1 GiB block_size must fail-closed");
+        assert!(matches!(err, ScanError::InvalidObject(_)));
+    }
+
+    #[test]
+    fn read_block_accepts_min_block_size() {
+        let mut reader = cursor_for_block_size(APFS_MIN_BLOCK_SIZE);
+        let block = read_block(&mut reader, 0, APFS_MIN_BLOCK_SIZE)
+            .expect("4 KiB read should succeed");
+        assert_eq!(block.len(), APFS_MIN_BLOCK_SIZE);
+    }
+
+    #[test]
+    fn read_block_accepts_max_block_size() {
+        let mut reader = cursor_for_block_size(APFS_MAX_BLOCK_SIZE);
+        let block = read_block(&mut reader, 0, APFS_MAX_BLOCK_SIZE)
+            .expect("64 KiB read should succeed");
+        assert_eq!(block.len(), APFS_MAX_BLOCK_SIZE);
+    }
+}

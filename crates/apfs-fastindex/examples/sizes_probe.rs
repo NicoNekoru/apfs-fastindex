@@ -1,4 +1,4 @@
-use apfs_fastindex::tree::{Tree, TreeNode};
+use apfs_fastindex::tree::TreeNode;
 use apfs_fastindex::{EntryKind, NamespaceEntry};
 
 fn main() {

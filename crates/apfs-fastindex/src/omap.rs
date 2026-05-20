@@ -6,7 +6,7 @@
 //! traversal that lets later stages report what the OMAP carries without
 //! claiming any specific mapping is correct.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::io::{Read, Seek};
 
 use serde::Serialize;
@@ -159,9 +159,30 @@ impl OmapResolver {
         oid: u64,
         max_xid: u64,
     ) -> Result<Option<OmapValue>, ScanError> {
+        // Cycle / depth guard. A crafted OMAP B-tree could have
+        // an internal node whose child paddr points back at an
+        // ancestor — without `visited`, this loop would spin
+        // forever; without the depth cap, even a non-cyclic
+        // pathological tree could chew arbitrary memory. Both
+        // bounds defended by `crate::MAX_TREE_DEPTH` (audit #3).
+        let mut visited: HashSet<u64> = HashSet::with_capacity(8);
         let mut current_paddr = self.tree_root_paddr;
         let mut is_root = true;
+        let mut depth: usize = 0;
         loop {
+            if depth >= crate::MAX_TREE_DEPTH {
+                return Err(ScanError::InvalidObject(format!(
+                    "OMAP lookup depth exceeded {} (possible cycle or pathological tree)",
+                    crate::MAX_TREE_DEPTH
+                )));
+            }
+            if !visited.insert(current_paddr) {
+                return Err(ScanError::InvalidObject(format!(
+                    "OMAP B-tree cycle detected at paddr {current_paddr}"
+                )));
+            }
+            depth += 1;
+
             let (block, _header) = read_btree_node(
                 reader,
                 block_size,
@@ -216,7 +237,15 @@ impl OmapResolver {
             flagged_values: BTreeMap::new(),
             samples: Vec::new(),
         };
-        walk_node(&mut state, reader, self.tree_root_paddr, true)?;
+        let mut visited: HashSet<u64> = HashSet::new();
+        walk_node(
+            &mut state,
+            reader,
+            self.tree_root_paddr,
+            true,
+            0,
+            &mut visited,
+        )?;
         Ok(OmapSummary {
             phys: self.phys.clone(),
             leaf_node_count: state.leaf_node_count,
@@ -250,7 +279,23 @@ fn walk_node<R: Read + Seek>(
     reader: &mut R,
     paddr: u64,
     is_root: bool,
+    depth: usize,
+    visited: &mut HashSet<u64>,
 ) -> Result<(), ScanError> {
+    // Defence against cyclic / pathologically-deep OMAP trees
+    // (audit #3). Cap at `MAX_TREE_DEPTH`; refuse to revisit any
+    // paddr we've already seen on this walk.
+    if depth >= crate::MAX_TREE_DEPTH {
+        return Err(ScanError::InvalidObject(format!(
+            "OMAP summarize depth exceeded {} at paddr {paddr}",
+            crate::MAX_TREE_DEPTH
+        )));
+    }
+    if !visited.insert(paddr) {
+        return Err(ScanError::InvalidObject(format!(
+            "OMAP B-tree cycle detected at paddr {paddr}"
+        )));
+    }
     let (block, _header) = read_btree_node(
         reader,
         state.block_size,
@@ -302,7 +347,7 @@ fn walk_node<R: Read + Seek>(
         let entry = node.entry(index)?;
         let value = node.value_bytes(&entry, OMAP_INTERNAL_VAL_SIZE)?;
         let child_paddr = u64::from_le_bytes(value.try_into().expect("internal paddr u64"));
-        walk_node(state, reader, child_paddr, false)?;
+        walk_node(state, reader, child_paddr, false, depth + 1, visited)?;
     }
     Ok(())
 }
