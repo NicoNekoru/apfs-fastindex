@@ -8,12 +8,13 @@ size --- and shows the cases for which each is the correct rule.
 
 The two metrics are independent. They have separate sources, separate
 oracles, and separate fail-closed boundaries. The chapter develops
-them in that order: logical first (the v1 anchor), allocated second
-(R2-A, landed at the cost of one fail-closed case for sparse files).
+them in that order: logical first (the primary anchor; covers every
+case), allocated second (covers five of seven case classes; sparse
+and decmpfs fail closed).
 
 \section{Logical Size}
 
-The v1 size metric is \emph{logical size}: the user-visible byte
+The primary size metric is \emph{logical size}: the user-visible byte
 length, the number POSIX \texttt{st\_size} reports, the number the
 shell shows in \texttt{ls -l}. It is not the bytes on disk; it is
 not the bytes the file would occupy after decompression on a
@@ -21,15 +22,15 @@ different filesystem; it is not the bytes uniquely owned by this
 inode. Each of those is a separate metric, and at most one is
 treated here (allocated size, in the next section).
 
-The choice of logical size as the v1 anchor is deliberate. It has a
-stable oracle (\texttt{st\_size}), applies uniformly to ordinary,
-sparse, cloned, hard-linked, symlink, and compressed files, and is
-the size every user-facing tool already agrees on.
+The choice of logical size as the primary anchor is deliberate. It
+has a stable oracle (\texttt{st\_size}), applies uniformly to
+ordinary, sparse, cloned, hard-linked, symlink, and compressed
+files, and is the size every user-facing tool already agrees on.
 
 \subsection{The Precedence Rule}
 
 \textbf{Observation.} Five steps, applied per inode, produce
-\texttt{st\_size} for every case the v1 corpus covers:
+\texttt{st\_size} for every case the validated corpus covers:
 
 \begin{enumerate}
   \item If the inode's \texttt{internal\_flags} carry
@@ -190,17 +191,16 @@ appear as a separate row because the rule is per inode and
 
 \section{Allocated Size}
 
-The R2-A metric. Per inode, the number of bytes APFS has allocated
-on disk for the file's content stream.
+Per inode, the number of bytes APFS has allocated on disk for the
+file's content stream.
 
 \textbf{Observation.} For ordinary, cloned, hard-linked, and symlink
-cases the parser emits \texttt{j\_dstream\_t.alloced\_size} (or
-zero for symlinks) and the result matches macOS's
-\texttt{st\_blocks * 512} oracle. Two cases must fail closed in v1:
-sparse files (where \texttt{alloced\_size} overstates the actual
-allocation by the sparse-bytes hint) and decmpfs-compressed files
-(where no on-disk field has been validated against the macOS
-oracle).
+cases the parser emits \texttt{j\_dstream\_t.alloced\_size} (or zero
+for symlinks) and the result matches macOS's \texttt{st\_blocks *
+512} oracle. Two cases must fail closed: sparse files (where
+\texttt{alloced\_size} overstates the actual allocation by the
+sparse-bytes hint) and decmpfs-compressed files (where no on-disk
+field has been validated against the macOS oracle).
 
 \subsection{The Precedence Rule}
 
@@ -275,8 +275,8 @@ right oracle is the external public number
 exactly $1{,}056{,}768 - 24{,}576 = 1{,}032{,}192$ bytes --- the
 sparse-bytes hint. APFS on macOS follows the
 \texttt{linux-apfs-rw} kernel rule rather than the
-\texttt{apfsck} sum-of-extents rule. The v1 emission rule
-must therefore split the dstream case by presence of the
+\texttt{apfsck} sum-of-extents rule. The emission rule must
+therefore split the dstream case by presence of the
 \texttt{SPARSE\_BYTES} xfield.
 
 A worth-following-up hypothesis records that
@@ -301,10 +301,10 @@ blocks the kernel allocated for the decmpfs xattr (typically one
 block) plus the resource-fork bytes when present.
 
 No reader has been oracle-validated against macOS for the
-resource-fork-backed decmpfs path. v1 therefore refuses to emit a
-value for compressed files. The \texttt{--summary} register lists
-the column as \texttt{not\_claimed} for compressed rows and the
-visualisation greys the metric toggle out for those rows.
+resource-fork-backed decmpfs path. The parser therefore refuses to
+emit a value for compressed files. The \texttt{--summary} register
+lists the column as \texttt{not\_claimed} for compressed rows and
+the visualisation greys the metric toggle out for those rows.
 
 The decmpfs row's \texttt{st\_blocks * 512} on the EX-22 fixture is
 4096 (one xattr block), which is a real number the kernel reports
@@ -336,7 +336,7 @@ and contributes through the same per-inode rule.
 
 \section{Directory Aggregates}
 
-\textbf{The v1 directory total is the \emph{unique-inode logical sum
+\textbf{A directory's total is the \emph{unique-inode logical sum
 within the aggregate root}.}
 
 A regular file's logical size contributes to a directory total once,
@@ -372,11 +372,11 @@ extra step that any contributing inode whose
 \texttt{allocated\_size} is \texttt{None} (sparse or decmpfs)
 propagates \texttt{None} up to the directory total.
 
-\section{What V1 Still Does Not Promise}
+\section{What This Chapter Does Not Promise}
 
-Three metrics remain outside the v1 contract. Each has its own probe
-plan and its own oracle; the open-questions chapter tracks their
-status.
+Three metrics remain outside the scope this chapter defends. Each
+has its own oracle and its own corpus of edge cases; chapter~13
+records them as open questions for future work.
 
 \begin{description}
   \item[Exclusive size.] Bytes owned only by this inode, after

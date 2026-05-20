@@ -167,14 +167,15 @@ structural assertion holds without exception.
 
 \section{The Required Xfield Types}
 
-The xfield universe is large; v1 needs four types and tolerates
-others.
+The xfield universe is large; an indexer needs four types and
+tolerates others.
 
 \begin{description}
   \item[\texttt{INO\_EXT\_TYPE\_NAME}.] The inode name. The name is
-    also reachable through DIR\_REC keys, and v1 prefers DIR\_REC
-    names for namespace construction (they carry the directory
-    placement). The inode-name xfield is a consistency check.
+    also reachable through DIR\_REC keys, and the indexer prefers
+    DIR\_REC names for namespace construction (they carry the
+    directory placement). The inode-name xfield is a consistency
+    check.
   \item[\texttt{INO\_EXT\_TYPE\_DSTREAM}.] A \texttt{j\_dstream\_t}
     embedded in the inode, carrying logical size, allocated size,
     default crypto id, and a default-extent reference.
@@ -188,7 +189,8 @@ others.
 
 Other types (\texttt{INO\_EXT\_TYPE\_FS\_UUID},
 \texttt{INO\_EXT\_TYPE\_PURGEABLE\_FLAGS}, and so on) appear in the
-wild but are not consumed by v1 product rows. The cursor rule still
+wild but are not consumed by the indexer's emission rows. The cursor
+rule still
 reads past them correctly because the rule treats every value as
 opaque bytes of length \texttt{x\_size} padded to a multiple of
 eight; only the values the parser actually inspects need a known

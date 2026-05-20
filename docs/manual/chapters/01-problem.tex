@@ -73,27 +73,29 @@ blocks. Choose the wrong checkpoint (chapter~3) and you read an
 incoherent transaction. Mis-decode an xfield blob (chapter~6) and you
 silently emit wrong sizes.
 
-\section{The Narrow v1 Contract}
+\section{A Narrow Supported Core}
 
-The project's first product contract is deliberately narrow:
+The manual's scope is deliberately narrow:
 
 \begin{itemize}
   \item one APFS volume,
   \item at one pinned transaction state,
   \item correct namespace,
-  \item per-file logical size,
+  \item per-file logical size, with per-file allocated size where an
+    on-disk field has been oracle-validated,
   \item fail closed outside the tested allowlist.
 \end{itemize}
 
-The contract is narrow because the cost of being approximately right is
+The scope is narrow because the cost of being approximately right is
 unbounded: aggregates derived from silently wrong rows propagate into
-treemaps, into "where did my disk space go" decisions, and into
+treemaps, into ``where did my disk space go'' decisions, and into
 filesystem operations the user takes based on the result. The cost of
 being narrowly right and failing closed everywhere else is bounded: the
 fallback path produces a correct answer through supported APIs, more
 slowly.
 
-This is not a hedge. It is the way to ship a fast indexer at all.
+This is not a hedge. It is the way to read APFS metadata at all without
+silently corrupting downstream totals.
 
 \section{Why Live Latest Cannot Be The Default}
 
@@ -108,35 +110,36 @@ reader's eyes. Reading "latest" twice may return two different
 transactions; mixing objects across them produces an incoherent
 namespace. The result has no oracle to compare against because no
 oracle ever saw the mix. The probe that demonstrated this
-(\texttt{EX-05}) is the load-bearing counterexample for the v1 design.
+(\texttt{EX-05}) is the load-bearing counterexample for the design.
 
-Live latest is not a v1 model. The supported v1 raw mode requires a
-state that can be pinned and held: a detached image, an explicitly
-stable APFS source, or a tightly controlled lab volume. Outside that
-allowlist the indexer falls back to a supported API.
+Live latest is therefore not a supportable mode. The supported raw mode
+requires a state that can be pinned and held: a detached image, an
+explicitly stable APFS source, or a tightly controlled lab volume.
+Outside that allowlist the indexer falls back to a supported
+operating-system API.
 
 \section{What This Manual Does Not Promise}
 
-Three product properties are partially or wholly out of v1 scope, not
-because they are unimportant but because the project has not yet
-validated them end to end. They appear later, in the open-questions
-chapter, as named research lanes:
+Several APFS surfaces are partially or wholly outside the manual's
+scope, not because they are unimportant but because they have not yet
+been validated end to end. They appear later, in chapter~13, as open
+questions:
 
 \begin{itemize}
-  \item per-file allocated bytes for the five case classes that v1 can
-    defend, and the two cases (sparse, decmpfs) that fail closed ---
-    R2-A, the lane that landed under chapter~13;
+  \item per-file allocated bytes for sparse files and decmpfs-
+    compressed files (chapter~8 covers the five case classes that do
+    have on-disk oracle support; the other two fail closed);
   \item exclusive and shared bytes per inode, snapshot-retained bytes,
     and any size column that requires the extent-reference tree to be
-    joined with per-inode extents --- still open;
+    joined with per-inode extents;
   \item persistent incremental caches that reuse prior subtree
-    summaries --- still open;
-  \item the Finder-visible "/" namespace assembled from system and
+    summaries (chapter~10 develops the identity rules that any such
+    cache would need);
+  \item the Finder-visible ``/'' namespace assembled from system and
     data volumes, firmlinks, and snapshots on a modern macOS startup
-    disk --- still open, except for the conservative firmlink-overlay
-    dedup the fallback walker performs to avoid double-counting paths
-    that exist under both \texttt{/Users} and
-    \texttt{/System/Volumes/Data/Users}.
+    disk (chapter~11 documents the conservative firmlink-overlay
+    dedup the fallback walker performs; the merged Finder semantics
+    proper remain unclaimed).
 \end{itemize}
 
 A claim from this manual extends only to the things the manual

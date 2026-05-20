@@ -49,7 +49,7 @@ class is not supported even though one validation passed.
 
 \section{The Current Allowlist}
 
-The R1 raw-mode allowlist is intentionally short.
+The raw-mode allowlist is intentionally short.
 
 \begin{itemize}
   \item Detached, unencrypted, image-backed APFS containers. The
@@ -284,14 +284,15 @@ caller, through the \texttt{correctness\_claim} and
 \section{Why The Boundary Is Permanent}
 
 The boundary between raw and fallback is not provisional. As the
-project broadens R1 into R2 (chapter~13), each new source class
-gets a separate allowlist row, a separate oracle, and a separate
-probe. The boundary moves only when there is evidence to move it.
+allowlist grows (chapter~13 tracks the open candidates), each new
+source class gets its own line in the support matrix: its own
+allowlist row, its own oracle, its own probe. The boundary moves
+only when there is evidence to move it.
 
 This means the manual will keep growing chapters of this shape:
-"\emph{here is the source class, here is the oracle, here is the
-probe, here is the result, here is the support claim}." The work
-finishes only when every source class the product is willing to
+``\emph{here is the source class, here is the oracle, here is the
+probe, here is the result, here is the support claim}.'' The work
+finishes only when every source class an APFS reader is willing to
 claim has its own line in the matrix.
 
 The unsexy form of the work is the price of having a fast indexer

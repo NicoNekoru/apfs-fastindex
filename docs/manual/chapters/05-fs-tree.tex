@@ -3,9 +3,9 @@
 
 The chapter contains the single most consequential reverse-engineering
 finding in the project so far. The finding is small; its absence cost
-a fixture and almost cost the v1 contract; its presence makes the
-parser correct on every FS tree dense enough to grow past one leaf
-node.
+a fixture and almost cost the project's first defended scope; its
+presence makes the parser correct on every FS tree dense enough to
+grow past one leaf node.
 
 \section{The Finding, Stated Once}
 
@@ -164,8 +164,9 @@ rejected.
 
 \section{Required Record Families}
 
-Narrow v1 needs five families of FS-tree records and one xfield
-family.
+An indexer that reproduces POSIX namespace plus logical and
+allocated size needs five families of FS-tree records and one
+xfield family.
 
 \begin{description}
   \item[\texttt{DIR\_REC}.] Directory entries. Key carries the parent
@@ -175,10 +176,11 @@ family.
   \item[\texttt{INODE}.] File, directory, symlink, and other entry
     metadata. Carries the parent ID, link count, mode, internal
     flags, and an xfield tail.
-  \item[\texttt{XATTR}.] Extended attributes. v1 cares about three
-    specifically: \texttt{com.apple.fs.symlink} (the symlink target),
-    \texttt{com.apple.decmpfs} (the compression metadata header), and
-    \texttt{com.apple.ResourceFork} (out of v1 scope but tracked).
+  \item[\texttt{XATTR}.] Extended attributes. The indexer cares about
+    three specifically: \texttt{com.apple.fs.symlink} (the symlink
+    target), \texttt{com.apple.decmpfs} (the compression metadata
+    header), and \texttt{com.apple.ResourceFork} (out of the
+    defended scope but tracked for the decmpfs fail-closed gap).
   \item[\texttt{SIBLING\_LINK}, \texttt{SIBLING\_MAP}.] Hard-link
     unification. A directory entry that participates in a hard-link
     group carries a sibling ID xfield; SIBLING\_MAP closes the
@@ -188,13 +190,13 @@ family.
     dedicated \texttt{j\_dstream\_id\_val\_t} record.
 \end{description}
 
-Other families are decoded but not used for v1 product rows:
-\texttt{file\_extent} (R2-A territory, chapter~13),
-\texttt{snapshot\_metadata} and \texttt{snapshot\_name} (deferred), and
-an "unsupported" bucket for record types the parser does not
-recognise. A record falling into the unsupported bucket on a volume
-that is otherwise in the allowlist triggers a typed validation gap
-that the caller must consume.
+Other families are decoded but not used for the indexer's emission
+rows: \texttt{file\_extent} (chapter~13's extent-reference
+territory), \texttt{snapshot\_metadata} and \texttt{snapshot\_name}
+(deferred), and an ``unsupported'' bucket for record types the
+parser does not recognise. A record falling into the unsupported
+bucket on a volume that is otherwise in the allowlist triggers a
+typed validation gap that the caller must consume.
 
 \section{Topology Summary}
 
@@ -203,7 +205,7 @@ To enumerate one volume, the walker performs:
 \begin{enumerate}
   \item Container OMAP lookup at scan XID for the volume's superblock
     OID, returning the volume superblock paddr.
-  \item Volume superblock decode: the v1 feature allowlist is
+  \item Volume superblock decode: the feature allowlist is
     enforced; unknown incompatible bits, encryption, sealed-volume
     bits, and normalization-insensitive bits force
     \texttt{Unsupported(reason)}.

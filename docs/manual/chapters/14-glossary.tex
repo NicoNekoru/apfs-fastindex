@@ -9,15 +9,15 @@ identifier as well as the prose definition.
   \item[Allocated size.] Bytes the filesystem has assigned to a
     file's content. Distinct from logical size (the user-visible
     byte length) and from exclusive size (bytes only this inode
-    owns). R2-A: landed for ordinary, clone, hard-link, symlink,
-    and directory case classes; fail-closed for sparse files and
-    decmpfs-compressed files. Emitted as
+    owns). Validated for ordinary, clone, hard-link, symlink, and
+    directory case classes; fail-closed for sparse files and
+    decmpfs-compressed files (chapter~8). Emitted as
     \texttt{allocated\_size: Option<u64>}; \texttt{None} indicates
     a deliberately-not-claimed row.
   \item[\texttt{alloced\_size}.] The
-    \texttt{j\_dstream\_t.alloced\_size} on-disk field. The
-    source for the R2-A allocated-size column on the case classes
-    that emit a value. On macOS-produced volumes the field equals
+    \texttt{j\_dstream\_t.alloced\_size} on-disk field. The source
+    for the allocated-size column on the case classes that emit a
+    value. On macOS-produced volumes the field equals
     \texttt{round\_up(ds\_size, blocksize)}; on sparse files this
     overstates the actual allocation by the sparse-bytes hint.
   \item[APSB.] APFS volume superblock
@@ -77,11 +77,11 @@ identifier as well as the prose definition.
   \item[decmpfs.] The Apple compression xattr family. Small
     compressed files store their data inline in
     \texttt{com.apple.decmpfs} with no \texttt{j\_dstream\_t};
-    larger files use \texttt{com.apple.ResourceFork}. v1
+    larger files use \texttt{com.apple.ResourceFork}. The parser
     fails closed on the allocated-size column for any inode whose
-    only size source is decmpfs, because no public reader has
-    been oracle-validated against the macOS
-    \texttt{st\_blocks * 512} for the resource-fork path.
+    only size source is decmpfs, because no public reader has been
+    oracle-validated against the macOS \texttt{st\_blocks * 512}
+    for the resource-fork path.
   \item[Directory aggregate.] A per-directory total expressed
     under the unique-inode logical-sum policy: each inode
     contributes its logical size at most once per aggregate root,
@@ -111,7 +111,7 @@ identifier as well as the prose definition.
   \item[Firmlink.] A macOS presentation mechanism that joins
     selected paths from a System volume to corresponding paths on
     a Data volume to produce the user-visible startup namespace.
-    Out of v1 scope for raw mode. The fallback walker reads
+    Out of scope for raw mode. The fallback walker reads
     \texttt{/usr/share/firmlinks} at scan-start and skips the
     \texttt{/System/Volumes/Data/<source>} overlay paths so the
     canonical path is the one that contributes to namespace and
@@ -162,11 +162,11 @@ identifier as well as the prose definition.
   \item[\texttt{INODE}.] Inode record. The FS-tree leaf that
     carries file/dir/symlink identity, mode, parent ID, link
     count, internal flags, and an xfield tail.
-  \item[Logical size.] User-visible byte length. The v1 size
-    metric, equal to POSIX \texttt{st\_size} for regular files
-    and to the symlink target byte length for symlinks. Distinct
-    from allocated, exclusive, shared, and snapshot-retained
-    sizes.
+  \item[Logical size.] User-visible byte length. The primary
+    size metric, equal to POSIX \texttt{st\_size} for regular
+    files and to the symlink target byte length for symlinks.
+    Distinct from allocated, exclusive, shared, and
+    snapshot-retained sizes.
   \item[Max XID.] The XID argument to an OMAP lookup. Returns the
     entry with the highest stored XID less than or equal to the
     requested value. The whole point of pinning the scan XID.
@@ -229,11 +229,10 @@ identifier as well as the prose definition.
     sibling ID to inode.
   \item[Snapshot, APFS.] A read-only view of a volume at a
     point in time, named in the volume's snapshot meta tree.
-    Sealed-system snapshots (\texttt{com.apple.os.update-*})
-    are out of v1 scope. R2-B's
-    \texttt{-{}-snapshot <mountpoint>} flag accepts an
-    already-mounted snapshot directory; the mount step itself is
-    privileged.
+    Sealed-system snapshots (\texttt{com.apple.os.update-*}) are
+    out of scope. The \texttt{-{}-snapshot <mountpoint>} flag
+    accepts an already-mounted snapshot directory; the mount step
+    itself is privileged (chapter~13).
   \item[Squarify.] The treemap-layout algorithm of Bruls,
     Huijzen, and van Wijk (2000), in the variant
     \texttt{d3-hierarchy}'s \texttt{treemapSquarify} implements.

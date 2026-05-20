@@ -101,15 +101,14 @@ summary, and reusing one for the other is safe.
 
 It is not yet a production cache theorem. The probe ran on one
 corpus, on detached images, with mutations limited to a small set.
-Three things still have to land before a cache is part of the
-product:
+Three things still have to land before a cache is safe to ship:
 
 \begin{enumerate}
   \item Re-run EX-07's mutation grid against the native Rust full
-    parse (now possible, since R1 is complete and the parallel
-    fallback of chapter~11 has landed) to confirm the finding
-    holds when the parser is the project's own production code
-    rather than a third-party reference.
+    parse (now possible, since the parser and the parallel
+    fallback of chapter~11 are both production code) to confirm
+    the finding holds when the parser is this project's own
+    production code rather than a third-party reference.
   \item Build a cache storage design with crash-safe writes; a
     cache that can corrupt during a kill produces stale-and-wrong
     rather than absent-and-correct, which is the failure mode the
@@ -119,9 +118,9 @@ product:
     missing volume continuity, source identity mismatch,
     unsupported feature drift, checkpoint rollback, snapshot
     switch, unknown record-body type, or any new metric the cache
-    did not record (R2-A's allocated-size column is the most
-    recent example of a column a pre-existing cache would not
-    have recorded).
+    did not record (the allocated-size column is the most recent
+    example of a column a pre-existing cache would not have
+    recorded).
 \end{enumerate}
 
 Until those gates pass, the safe default is full reparse, validated
@@ -170,5 +169,5 @@ agree on every field, scan XID included.
 The chapter does not foreclose the cache idea itself. Subtree reuse
 is a real opportunity --- the EX-07 result is encouraging --- but
 the cost of getting it wrong is high enough that the project will
-land it only after the gates above are met. Until then, the v1
-product fully reparses, and the manual records why.
+land it only after the gates above are met. Until then, every scan
+fully reparses, and the manual records why.

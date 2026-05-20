@@ -6,12 +6,13 @@ compared against it; never report a number whose source class is
 ambiguous.
 
 This chapter contains the reproducible measurements
-\texttt{apfs-fastindex-scan} has produced since R1 was complete.
-There are three passes: the standing baseline (chapter~11's
-fallback first cut), a user-space micro-optimisation pass on the
-fallback walker, and a parallel-walker pass that follows from the
-performance-lever map. Each pass changes one thing at a time and
-records the before/after numbers.
+\texttt{apfs-fastindex-scan} has produced. There are four passes:
+the standing baseline (chapter~11's fallback first cut), a
+user-space micro-optimisation pass on the fallback walker, a
+parallel-walker pass that follows from the performance-lever map,
+and a structural-density pass against the post-FFI workload. Each
+pass changes one thing at a time and records the before/after
+numbers.
 
 \section{The Standing Baseline}
 

@@ -1,30 +1,31 @@
 \chapter{Open Questions}
 
-The narrow v1 contract --- one volume, one pinned state, namespace
-plus logical size, fallback for everything else --- has been the
-project's anchor through R1. R2 opened three named lanes against it.
-This chapter is what each lane has resolved and what each has not,
-written so a reader can see what the project knows and what it has
-deliberately left unclaimed.
+The previous chapters develop the manual's defended scope: one
+volume, one pinned state, namespace plus logical size plus the
+allocated-size column where it has an oracle, fallback for
+everything else. This chapter is everything that sits on the
+boundary --- the work that has been done since the foundation
+settled, and the work that has been scoped but not yet validated.
+A reader who wants to understand the surface of unknowns around an
+APFS reader, rather than the well-explored interior, reads this
+chapter.
 
-The chapter is organised by lane rather than by topic. A lane is a
-unit of work whose entire scope --- source class, semantic mode,
-oracle, support claim --- can be specified before the work starts.
-Lanes are isolated from each other; finishing one does not entail
-finishing any other.
+Each section below names one open question, what is known about
+it, what is not, and the smallest probe that would close it.
 
-\section{R2-A: Allocated Size --- Landed With Two Fail-Closed Cases}
+\section{Allocated Size}
 
-The most visible WizTree feature R1 did not yet provide.
+The most visible WizTree-equivalent metric, and the one whose
+on-disk story is least settled.
 
 \textbf{The question.} For each inode, what number of bytes does
 APFS allocate to its content on disk?
 
 \textbf{The result.} Five of six case classes emit a per-inode
 \texttt{allocated\_size} that matches macOS's
-\texttt{st\_blocks * 512} oracle exactly. Two cases fail closed in
-v1: sparse files (where \texttt{j\_dstream\_t.alloced\_size}
-overstates the actual allocation by the sparse-bytes hint) and
+\texttt{st\_blocks * 512} oracle exactly. Two cases fail closed:
+sparse files (where \texttt{j\_dstream\_t.alloced\_size} overstates
+the actual allocation by the sparse-bytes hint) and
 decmpfs-compressed files (where no on-disk field has been
 oracle-validated against the macOS number). Chapter~8 gives the
 precedence rule, the case-class table, and the per-row evidence;
@@ -37,28 +38,29 @@ sparse hypothesis (\texttt{alloced\_size} $-$ \texttt{sparse\_bytes}
 $=$ \texttt{st\_blocks * 512}) holds on the one fixture that
 exercises it, but is one data point and needs a broader sparse
 corpus before it can be promoted from Hypothesis to Observation.
-The decmpfs gap is genuine: no public reader has been validated
-for the resource-fork-backed decmpfs path on macOS, and v1 will
-not emit a number it cannot defend.
+The decmpfs gap is genuine: no public reader has been validated for
+the resource-fork-backed decmpfs path on macOS, and a parser that
+fails closed should not emit a number it cannot defend.
 
-\textbf{What did not land.} Exclusive bytes (bytes only this inode
+\textbf{What is still open.} Exclusive bytes (bytes only this inode
 owns, after accounting for clones and snapshots) and shared bytes
 (bytes shared across inodes or snapshots) require the
 extent-reference tree to be opened and joined against per-inode
-extents. Neither is part of R2-A; both are separate lanes with
-their own oracles.
+extents. Neither has been validated end to end against a public
+oracle; both are separate questions with their own corpora.
 
-\textbf{Future direction.} An EX-22b sparse-corpus probe (leading
-hole, trailing hole, multi-hole, hole-larger-than-file, zero-hole
-boundary) would close the sparse fail-closed case. The
-\texttt{alloced\_size - sparse\_bytes} identity is the candidate;
-the EX-22b oracle is the same \texttt{st\_blocks * 512} that R2-A
-used.
+\textbf{The smallest probe that would close it.} A sparse-corpus
+probe (leading hole, trailing hole, multi-hole, hole-larger-than-
+file, zero-hole boundary) would settle the sparse case. The
+\texttt{alloced\_size - sparse\_bytes} identity is the candidate
+rule; the oracle remains \texttt{st\_blocks * 512}.
 
-\section{R2-B: Snapshot-Assisted Scanning --- Entitlement-Blocked}
+\section{Snapshot-Assisted Scanning}
 
 The mechanism by which a fast indexer can scan a live machine
-honestly.
+honestly. Entitlement-blocked rather than technically blocked: the
+walker is wired, but the validation oracle requires privileges the
+project's reproducer host does not have.
 
 \textbf{The question.} If the indexer takes a local APFS snapshot
 of a live volume, mounts it read-only, and walks it through the
@@ -78,7 +80,7 @@ volumes included in the Time Machine backup set.
 \texttt{diskutil} and \texttt{tmutil list} subcommands are free.
 
 The scanner therefore cannot stage its own snapshot inside an
-unprivileged test process. The R2-B Rust integration --- a
+unprivileged test process. The Rust integration --- a
 \texttt{--snapshot <mountpoint>} flag that consumes an
 already-mounted snapshot directory and runs the existing fallback
 against it --- is operationally useful immediately. The
@@ -90,7 +92,7 @@ skipped), and emitted a \texttt{blocked\_no\_snapshots\_at\_all}
 verdict with the exact \texttt{sudo mount\_apfs -s} reproducer
 command saved in the probe artefacts.
 
-\textbf{What did not land.} The shape-parity oracle itself.
+\textbf{What is still open.} The shape-parity oracle itself.
 Until a privileged rerun produces a positive verdict, the
 \texttt{--snapshot} flag tags the source as a snapshot in
 \texttt{correctness\_claim} and \texttt{not\_claimed} but does
@@ -99,8 +101,8 @@ host. The \texttt{not\_claimed} register names the missing
 oracle explicitly so a consumer cannot accidentally treat a
 snapshot scan as equivalent to a live scan.
 
-\textbf{Future direction.} A privileged rerun. The reproducer
-is:
+\textbf{The smallest probe that would close it.} A privileged
+rerun. The reproducer is:
 
 \begin{minted}{bash}
 tmutil localsnapshot /
@@ -115,16 +117,21 @@ A positive verdict would unlock moving the snapshot-mount cell of
 the support matrix from \texttt{not\_claimed} to
 \texttt{fallback\_supported}.
 
-\section{R2-C: Scanner Ergonomics --- Two Levers Investigated, One Shipped}
+\section{Scanner Ergonomics and Performance}
 
-The lane that does not change semantics, only the surface.
+The questions in this section do not change what the parser
+claims about APFS, only how the claim is delivered. They are
+worth recording because the answers --- which performance levers
+matter on macOS-on-Apple-silicon and which are folklore --- are
+themselves contributions to the literature on reading APFS at
+speed.
 
 \textbf{The questions.} Which parts of the scanner's
 user-facing surface --- backend selection, progress reporting,
 embeddability in a native UI, attribute fetch cost, parallelism
 --- can be improved without moving the emission contract?
 
-\textbf{The performance-lever map.} Source review SR-021
+\textbf{The performance-lever map.} A source review (SR-021)
 synthesised four parallel research threads (xnu source, the
 Spotlight alternative, an OSS-tool survey, and the
 \texttt{jwalk}/\texttt{rayon} prior art) into one map.
@@ -158,10 +165,10 @@ than 64~KiB (the per-syscall floor is sub-0.1\% of the budget).
 \texttt{getdirentriesattr(2)} (deprecated since macOS 10.10,
 routes through the same VFS path on APFS).
 
-\paragraph{Other slices shipped.} A firmlink-overlay dedup that
-cut whole-machine \texttt{/} scans from 5.25M to 3.06M entries by
-refusing the \texttt{/System/Volumes/Data/*} duplicate paths
-(chapter~11); a progress-cadence change from one second to
+\paragraph{Other improvements that landed.} A firmlink-overlay
+dedup that cut whole-machine \texttt{/} scans from 5.25M to 3.06M
+entries by refusing the \texttt{/System/Volumes/Data/*} duplicate
+paths (chapter~11); a progress-cadence change from one second to
 250~ms so the stopwatch on a fast CLI scan does not freeze; and
 the native shell developed in the next subsection, which moved
 the visualisation from a WebKit-embedded JS treemap to an
@@ -372,18 +379,18 @@ time, but it is the visual surface of the fail-closed
 discipline: the user sees, on the picture, exactly the cells
 the parser refused to claim a number for.
 
-\section{Beyond R2}
+\section{Deliberately Deferred}
 
-Four areas remain deliberately deferred past R2. Each is large
-enough to warrant its own gate and its own oracle work; each is
-unsafe to open opportunistically.
+Four APFS surfaces remain deliberately outside the manual's
+defended scope. Each is large enough to warrant its own oracle
+work; each is unsafe to open opportunistically.
 
 \paragraph{Encryption.} FileVault-encrypted volumes and
 hardware-backed encryption have separate threat models, separate
 privilege requirements, and separate validation problems. The
 parser currently fails closed on encryption flags; opening
 encryption support requires deciding which classes of key access
-the product is willing to use and which it is not.
+an APFS reader is willing to use and which it is not.
 
 \paragraph{Live boot disk.} The startup disk on modern macOS is
 a sealed system volume joined to a data volume by firmlinks,
@@ -398,37 +405,38 @@ means building each of those subsystems' oracle.
 \texttt{/} on a modern Mac is not any single APFS volume's
 namespace. It is the System volume's content joined to the
 Data volume's content through firmlinks, plus the current
-snapshot overlay. The product mode for this is distinct from
+snapshot overlay. The reader mode for this is distinct from
 raw-single-volume; it cannot share the same oracle, and its
 support claims must be stated separately. The firmlink-dedup
-slice in chapter~11 is the closest the project has come to
-this: it suppresses the on-disk duplication at the fallback
-layer without claiming Finder semantics.
+slice in chapter~11 is the closest this work has come to it:
+the on-disk duplication is suppressed at the fallback layer,
+without any claim on Finder semantics proper.
 
 \paragraph{Persistent incremental cache.} The work of
-chapter~10 turns into product only after the full set of
+chapter~10 turns into a product only after the full set of
 cache-invalidation conditions has been enumerated, a
 crash-safe cache storage design exists, and an incremental scan
-has been validated against a fresh full reparse. The R2 lanes
-deliberately precede this work; a cache built on top of
+has been validated against a fresh full reparse. The questions
+above deliberately precede this work; a cache built on top of
 incomplete metrics or unstable support matrices would propagate
 its instability.
 
 \section{The Manual's Own Future}
 
-The chapter ends where the manual ends. Each lane above will,
-when it lands, become its own chapter: a thesis, the evidence,
-the precedence rule or the oracle pairing, the per-case table,
-the limits of what was checked. The chapter list will lengthen;
-the voice should not change.
+The chapter ends where the manual ends. Each question above
+will, when its oracle work lands, become its own chapter: a
+thesis, the evidence, the precedence rule or the oracle pairing,
+the per-case table, the limits of what was checked. The chapter
+list will lengthen; the voice should not change.
 
-The discipline that produced R1 produced something narrow but
-defensible. The discipline that produced R2 produced something
-broader, with the same defensibility intact: a metric that
-landed, a lane that was correctly entitlement-gated, a lane
-whose perf claim is empirically calibrated against a contention
-regime the project did not invent and does not pretend does not
-exist. Anything written here that survives the next year of
-work survives because it was written carefully. Anything that
-does not survive was an error worth recording so the next
-attempt does not repeat it.
+The supported interior of the manual is narrow but defensible.
+The open surface around it is genuinely open: a metric whose
+fail-closed cases are honest, a snapshot path correctly
+entitlement-gated, a perf envelope empirically calibrated
+against a contention regime the project did not invent and does
+not pretend does not exist, a native renderer whose correctness
+is now a Rust-side question rather than a JavaScript-side one.
+Anything written here that survives the next year of work
+survives because it was written carefully. Anything that does
+not survive was an error worth recording so the next attempt
+does not repeat it.

@@ -25,8 +25,8 @@ The pieces of block zero a reader needs:
     length of the descriptor area in blocks.
   \item \texttt{nx\_xp\_desc\_base} at offset \texttt{0x70}: the first
     block of the descriptor area. The high bit signals a
-    \emph{non-contiguous} layout, which v1 does not support and which
-    triggers a typed hard stop. A non-contiguous descriptor area
+    \emph{non-contiguous} layout, which this work does not support
+    and which triggers a typed hard stop. A non-contiguous descriptor area
     would require a separate checkpoint-mapping-tree implementation.
 \end{itemize}
 
@@ -120,8 +120,8 @@ The candidates are not chronologically ordered in the descriptor area;
 they are written into a ring. The XID is the only monotonic identity
 for transaction order. The highest checksum-valid XID is the most
 recent transaction the writer completed. A higher XID with an invalid
-checksum is a transaction the writer started but did not finish; v1
-treats those as failed and ignores them, with the result that
+checksum is a transaction the writer started but did not finish; the
+parser treats those as failed and ignores them, with the result that
 selection is always self-consistent.
 
 The rule has a corollary: a parser that picks a lower XID when the
@@ -136,7 +136,7 @@ of "latest" may return two different transactions. Mixing objects
 from different transactions produces an incoherent namespace.
 EX-01's churn probe demonstrated this on a mounted lab image.
 
-The v1 fix is structural rather than algorithmic: raw mode only runs
+The fix is structural rather than algorithmic: raw mode only runs
 on sources where state can be pinned. Detaching an image fixes the
 visible state. So does an explicit caller commitment that a device's
 checkpoint will not advance. Live mounted volumes are
@@ -165,7 +165,7 @@ The walk rule:
 \end{enumerate}
 
 A chain that runs out of length before the last flag is malformed.
-v1 fails closed.
+The parser fails closed.
 
 \textbf{Empirical correction.} The Apple reference describes
 ephemeral objects in a way that reads naturally as "the checkpoint
@@ -179,14 +179,15 @@ malformed-checkpoint-map regression test.
 
 \section{Roots Reachable From The Selected Checkpoint}
 
-The selected NXSB names five things the v1 reader needs:
+The selected NXSB names five things the reader needs:
 
 \begin{enumerate}
   \item \texttt{nx\_omap\_oid}: the OID of the container OMAP.
   \item \texttt{nx\_fs\_oid[]}: an array of volume superblock OIDs.
   \item Feature, incompatible-feature, and read-only-compatible
     feature masks.
-  \item Reaper and space-manager OIDs (not used by v1; their presence
+  \item Reaper and space-manager OIDs (not used by an indexer;
+    their presence
     is required, their content is not).
   \item Container UUID (used for source identity in caches and
     diagnostics).
