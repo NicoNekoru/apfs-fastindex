@@ -236,7 +236,8 @@ final class TreemapView: NSView {
             let minW: Float = isDir ? Float(TreemapView.minDirLabelW) : Float(TreemapView.minLeafLabelW)
             let minH: Float = isDir ? Float(TreemapView.minDirLabelH) : Float(TreemapView.minLeafLabelH)
             if w < minW || h < minH { continue }
-            guard let name = scan.name(of: c.node_index), !name.isEmpty else { continue }
+            guard let rawName = scan.name(of: c.node_index), !rawName.isEmpty else { continue }
+            let name = DisplaySanitizer.sanitiseDisplay(rawName)
             let label: String
             if isDir {
                 let value = metric == .allocated
@@ -311,8 +312,14 @@ final class TreemapView: NSView {
         guard let absPath = absolutePath(forNode: cell.node_index, scan: scan) else {
             return nil
         }
-        let isDir = cell.flags & TreemapView.flagDir != 0
-        let displayName = scan.name(of: cell.node_index) ?? absPath
+        // Sanitise the display name before it hits any menu
+        // chrome. Parser bytes can carry C0/C1 controls and
+        // RTL overrides that misrender the title to spoof the
+        // action target (audit #App-2). `displayName` is *only*
+        // used for human-facing strings — `representedObject`
+        // keeps the canonical `absPath` for the actual action.
+        let rawName = scan.name(of: cell.node_index) ?? absPath
+        let displayName = DisplaySanitizer.sanitiseDisplay(rawName)
 
         let menu = NSMenu()
 
@@ -325,14 +332,13 @@ final class TreemapView: NSView {
         reveal.representedObject = absPath
         menu.addItem(reveal)
 
-        let open = NSMenuItem(
-            title: isDir ? "Open" : "Open with Default App",
-            action: #selector(contextOpenItem(_:)),
-            keyEquivalent: ""
-        )
-        open.target = self
-        open.representedObject = absPath
-        menu.addItem(open)
+        // Audit #App-4: `NSWorkspace.open` on a parser-controlled
+        // .app/.command/.scpt would run with user privileges.
+        // We drop the Open action entirely — users who really
+        // want to launch can Reveal → double-click in Finder
+        // (Finder enforces its own confirmation chain for
+        // executables, including Gatekeeper). This trades a
+        // small UX hit for a closed footgun.
 
         menu.addItem(.separator())
 
@@ -342,6 +348,12 @@ final class TreemapView: NSView {
             keyEquivalent: ""
         )
         copy.target = self
+        // The pasteboard writes the *real* absPath bytes —
+        // sanitising it would silently corrupt the string when
+        // the user expects it to round-trip through a shell.
+        // `absPath` is already containment-checked (no `..`
+        // escape) and was joined from raw parser path bytes,
+        // so it matches what the user sees in Finder.
         copy.representedObject = absPath
         menu.addItem(copy)
 
@@ -392,11 +404,14 @@ final class TreemapView: NSView {
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
-    @objc private func contextOpenItem(_ sender: NSMenuItem) {
-        guard let path = sender.representedObject as? String else { return }
-        let url = URL(fileURLWithPath: path)
-        NSWorkspace.shared.open(url)
-    }
+    // Audit #App-4: the previous `contextOpenItem` handler called
+    // `NSWorkspace.open` on the resolved absolute path, which
+    // would launch parser-controlled .app/.command/.scpt entries
+    // with the user's full privileges. The Open menu item has
+    // been removed; users who actually want to launch something
+    // can Reveal → double-click in Finder (which routes through
+    // Gatekeeper). Keeping this comment as a load-bearing reminder
+    // not to re-introduce the Open action by reflex.
 
     @objc private func contextCopyPath(_ sender: NSMenuItem) {
         guard let path = sender.representedObject as? String else { return }
@@ -473,8 +488,16 @@ final class TreemapView: NSView {
     /// doesn't sit under the cursor; flips to the other side of
     /// the cursor when it would clip the right/bottom edge.
     private func drawTooltip(ctx: CGContext, cell: ApfsCell, scan: Scan) {
-        let name = (cell.node_index == 0 ? "/" : (scan.name(of: cell.node_index) ?? "?"))
-        let path = (cell.node_index == 0 ? "/" : (scan.path(of: cell.node_index) ?? ""))
+        // Sanitise both name and path before drawing — parser
+        // bytes drawn directly into the tooltip would let a
+        // crafted volume splice RTL overrides or NULs into
+        // visible text (audit #App-2 spoofing class). The
+        // sanitiser replaces offenders with U+FFFD so the user
+        // sees that the name carried something unprintable.
+        let rawName = (cell.node_index == 0 ? "/" : (scan.name(of: cell.node_index) ?? "?"))
+        let rawPath = (cell.node_index == 0 ? "/" : (scan.path(of: cell.node_index) ?? ""))
+        let name = DisplaySanitizer.sanitiseDisplay(rawName)
+        let path = DisplaySanitizer.sanitiseDisplay(rawPath)
         let byteFormatter = ByteCountFormatter()
         byteFormatter.countStyle = .binary
         byteFormatter.allowedUnits = [.useGB, .useMB, .useKB, .useBytes]
