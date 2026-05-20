@@ -1,0 +1,39 @@
+name: release
+
+# Fires on annotated tag pushes that look like a release version
+# (`v0.1.0`, `v1.2.3-rc1`, …). The workflow builds the .app bundle
+# the same way local `make-release.sh` does and publishes it as a
+# GitHub release asset; the publish step is delegated to the
+# script so local and CI publishing stay in lockstep.
+on:
+  push:
+    tags:
+      - 'v*'
+
+# `gh release create` needs `contents: write`. Everything else
+# stays at the read-only default.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: build + publish release
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Cache cargo
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+      - name: Build + publish release
+        # `make-release.sh --publish` reads $GITHUB_REF_NAME for the
+        # tag, zips app/ApfsFastindex.app with `ditto` (preserves the
+        # ad-hoc codesignature), and uploads it via `gh`. The
+        # GITHUB_TOKEN below is what authorizes that upload.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./make-release.sh --publish

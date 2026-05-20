@@ -12,9 +12,20 @@
 # and bundle-assembly steps for no clear reason.
 #
 # Usage:
-#   ./make-release.sh                # release build (default)
-#   PROFILE=debug ./make-release.sh  # debug build
-#   ./make-release.sh --no-bundle    # stop after `swift build`; skip .app
+#   ./make-release.sh                       # release build (default)
+#   PROFILE=debug ./make-release.sh         # debug build
+#   ./make-release.sh --no-bundle           # stop after `swift build`; skip .app
+#   ./make-release.sh --publish             # build, then publish a GitHub release
+#   ./make-release.sh --publish --tag vX.Y.Z
+#
+# `--publish` zips app/ApfsFastindex.app and uploads it to a GitHub
+# release via the `gh` CLI. Tag resolution order:
+#   1. --tag <vX.Y.Z> on the command line
+#   2. $GITHUB_REF_NAME (set by GitHub Actions on tag-push events)
+#   3. v<crate version> from crates/apfs-fastindex/Cargo.toml
+# The release is created if it doesn't exist; if it does, the asset
+# is uploaded with --clobber so re-running the script after a fix
+# overwrites the previous bundle.
 #
 # After a successful run the app lives at:
 #   app/ApfsFastindex.app
@@ -33,16 +44,38 @@ case "$PROFILE" in
 esac
 
 BUNDLE_APP=1
-for arg in "$@"; do
-    case "$arg" in
+PUBLISH=0
+RELEASE_TAG=""
+while [ $# -gt 0 ]; do
+    case "$1" in
         --no-bundle) BUNDLE_APP=0 ;;
+        --publish) PUBLISH=1 ;;
+        --tag)
+            shift
+            if [ $# -eq 0 ]; then
+                echo "make-release.sh: --tag requires a value (e.g. v0.1.0)" >&2
+                exit 2
+            fi
+            RELEASE_TAG="$1"
+            ;;
+        --tag=*) RELEASE_TAG="${1#--tag=}" ;;
         -h|--help)
             sed -n '1,/^set -euo/p' "$0" | sed 's/^# \?//;$d'
             exit 0
             ;;
-        *) echo "make-release.sh: unknown argument '$arg'" >&2; exit 2 ;;
+        *) echo "make-release.sh: unknown argument '$1'" >&2; exit 2 ;;
     esac
+    shift
 done
+
+if [ "$PUBLISH" = "1" ] && [ "$BUNDLE_APP" = "0" ]; then
+    echo "make-release.sh: --publish requires the .app bundle; remove --no-bundle" >&2
+    exit 2
+fi
+if [ "$PUBLISH" = "1" ] && [ "$PROFILE" != "release" ]; then
+    echo "make-release.sh: --publish requires PROFILE=release (got $PROFILE)" >&2
+    exit 2
+fi
 
 # ---------------------------------------------------------------
 # Step 1 — Rust crate.
@@ -221,3 +254,64 @@ fi
 echo
 echo "Done. App: $BUNDLE"
 echo "Run with: open $BUNDLE"
+
+if [ "$PUBLISH" != "1" ]; then
+    exit 0
+fi
+
+# ---------------------------------------------------------------
+# Step 6 — Publish a GitHub release with the .app bundle.
+#
+# Resolve the tag, then zip the bundle (a tar archive would strip
+# extended attributes and the ad-hoc codesignature, so zip is the
+# only macOS-friendly choice). `gh release create` is idempotent
+# the way we use it: if the release already exists we fall through
+# to `gh release upload --clobber` so a re-run replaces the asset.
+# ---------------------------------------------------------------
+if [ -z "$RELEASE_TAG" ]; then
+    if [ -n "${GITHUB_REF_NAME:-}" ] && [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+        RELEASE_TAG="$GITHUB_REF_NAME"
+    else
+        # Fall back to the crate version. `cargo pkgid` would be more
+        # robust, but it requires a clean lockfile and network access
+        # in some configurations; a grep keeps the publish path free
+        # of cargo-side preconditions.
+        CRATE_VERSION="$(awk -F'"' '/^version[[:space:]]*=/ { print $2; exit }' \
+            "$REPO_ROOT/crates/apfs-fastindex/Cargo.toml")"
+        if [ -z "$CRATE_VERSION" ]; then
+            echo "make-release.sh: could not determine release tag." >&2
+            echo "  pass --tag vX.Y.Z or set GITHUB_REF_NAME." >&2
+            exit 1
+        fi
+        RELEASE_TAG="v$CRATE_VERSION"
+    fi
+fi
+
+if ! command -v gh >/dev/null 2>&1; then
+    echo "make-release.sh: gh CLI not found; install from https://cli.github.com/" >&2
+    exit 1
+fi
+
+echo "==> [6/6] publish GitHub release $RELEASE_TAG"
+ARCH="$(uname -m)"
+ASSET_NAME="ApfsFastindex-$RELEASE_TAG-macos-$ARCH.zip"
+ASSET_PATH="$REPO_ROOT/app/$ASSET_NAME"
+
+rm -f "$ASSET_PATH"
+# `ditto -c -k --sequesterRsrc --keepParent` is Apple's recommended
+# way to zip a .app: it preserves resource forks, symlinks, and the
+# codesignature; plain `zip -r` mangles all three.
+ditto -c -k --sequesterRsrc --keepParent "$BUNDLE" "$ASSET_PATH"
+
+if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+    echo "    release $RELEASE_TAG exists; uploading asset with --clobber"
+    gh release upload "$RELEASE_TAG" "$ASSET_PATH" --clobber
+else
+    echo "    creating release $RELEASE_TAG"
+    gh release create "$RELEASE_TAG" "$ASSET_PATH" \
+        --title "$RELEASE_TAG" \
+        --generate-notes
+fi
+
+echo
+echo "Published $ASSET_NAME to release $RELEASE_TAG."
