@@ -84,7 +84,12 @@ pub fn render_cells(
     if (root_idx as usize) >= tree.nodes.len() {
         return cells;
     }
-    let rect = Rect { x0: 0.0, y0: 0.0, x1: width, y1: height };
+    let rect = Rect {
+        x0: 0.0,
+        y0: 0.0,
+        x1: width,
+        y1: height,
+    };
     layout_subtree(tree, root_idx, rect, 0, max_depth, metric, &mut cells);
     cells
 }
@@ -158,9 +163,15 @@ fn layout_subtree(
     // its label).
     if depth > 0 {
         let mut flags: u32 = 0;
-        if is_dir { flags |= CELL_FLAG_DIR; }
-        if is_symlink { flags |= CELL_FLAG_SYMLINK; }
-        if label_reserved { flags |= CELL_FLAG_PADDING_TOP; }
+        if is_dir {
+            flags |= CELL_FLAG_DIR;
+        }
+        if is_symlink {
+            flags |= CELL_FLAG_SYMLINK;
+        }
+        if label_reserved {
+            flags |= CELL_FLAG_PADDING_TOP;
+        }
         cells.push(ApfsCell {
             x0: rect.x0 as f32,
             y0: rect.y0 as f32,
@@ -193,7 +204,11 @@ fn layout_subtree(
         .iter()
         .filter_map(|&ci| {
             let v = metric_value(&tree.nodes[ci as usize], metric);
-            if v == 0 { None } else { Some((ci, v as f64)) }
+            if v == 0 {
+                None
+            } else {
+                Some((ci, v as f64))
+            }
         })
         .collect();
     if items.is_empty() {
@@ -207,7 +222,15 @@ fn layout_subtree(
     }
 
     // Run squarify, recurse into each child's allocated rect.
-    let mut child_rects = vec![Rect { x0: 0.0, y0: 0.0, x1: 0.0, y1: 0.0 }; items.len()];
+    let mut child_rects = vec![
+        Rect {
+            x0: 0.0,
+            y0: 0.0,
+            x1: 0.0,
+            y1: 0.0
+        };
+        items.len()
+    ];
     squarify(child_rect, &items, total, SQUARIFY_RATIO, &mut child_rects);
     for (i, &(child_idx, _)) in items.iter().enumerate() {
         layout_subtree(
@@ -231,13 +254,7 @@ fn layout_subtree(
 /// Ported from d3-hierarchy's `treemapSquarify`; same names and
 /// the same `alpha = max(dy/dx, dx/dy) / (value * ratio)` /
 /// `beta = sumValue² * alpha` aspect-ratio math.
-fn squarify(
-    initial_rect: Rect,
-    items: &[(u32, f64)],
-    total: f64,
-    ratio: f64,
-    out: &mut [Rect],
-) {
+fn squarify(initial_rect: Rect, items: &[(u32, f64)], total: f64, ratio: f64, out: &mut [Rect]) {
     let mut rect = initial_rect;
     let mut value = total;
     let n = items.len();
@@ -272,8 +289,12 @@ fn squarify(
                 break;
             }
             sum_value += v;
-            if v < min_value { min_value = v; }
-            if v > max_value { max_value = v; }
+            if v < min_value {
+                min_value = v;
+            }
+            if v > max_value {
+                max_value = v;
+            }
             beta = sum_value * sum_value * alpha;
             let new_ratio = (max_value / beta).max(beta / min_value);
             if new_ratio > min_ratio {
@@ -301,7 +322,12 @@ fn squarify(
             for j in i0..row_end {
                 let v = items[j].1;
                 let next_x = if v > 0.0 { x + v * k } else { x };
-                out[j] = Rect { x0: x, y0: rect.y0, x1: next_x, y1: row_y1 };
+                out[j] = Rect {
+                    x0: x,
+                    y0: rect.y0,
+                    x1: next_x,
+                    y1: row_y1,
+                };
                 x = next_x;
             }
             rect.y0 = row_y1;
@@ -316,7 +342,12 @@ fn squarify(
             for j in i0..row_end {
                 let v = items[j].1;
                 let next_y = if v > 0.0 { y + v * k } else { y };
-                out[j] = Rect { x0: rect.x0, y0: y, x1: row_x1, y1: next_y };
+                out[j] = Rect {
+                    x0: rect.x0,
+                    y0: y,
+                    x1: row_x1,
+                    y1: next_y,
+                };
                 y = next_y;
             }
             rect.x0 = row_x1;
@@ -438,9 +469,8 @@ impl HitGrid {
     pub fn build(cells: &[ApfsCell], width: f32, height: f32) -> Self {
         let cell_w = (width / HIT_GRID_N as f32).max(f32::EPSILON);
         let cell_h = (height / HIT_GRID_N as f32).max(f32::EPSILON);
-        let mut buckets: Vec<Vec<u32>> = (0..(HIT_GRID_N * HIT_GRID_N))
-            .map(|_| Vec::new())
-            .collect();
+        let mut buckets: Vec<Vec<u32>> =
+            (0..(HIT_GRID_N * HIT_GRID_N)).map(|_| Vec::new()).collect();
         for (idx, c) in cells.iter().enumerate() {
             let gx0 = ((c.x0 / cell_w) as i32).max(0).min((HIT_GRID_N - 1) as i32);
             let gy0 = ((c.y0 / cell_h) as i32).max(0).min((HIT_GRID_N - 1) as i32);
@@ -461,11 +491,13 @@ impl HitGrid {
             }
         }
         for bucket in &mut buckets {
-            bucket.sort_by(|&a, &b| {
-                cells[b as usize].depth.cmp(&cells[a as usize].depth)
-            });
+            bucket.sort_by(|&a, &b| cells[b as usize].depth.cmp(&cells[a as usize].depth));
         }
-        HitGrid { buckets, cell_w, cell_h }
+        HitGrid {
+            buckets,
+            cell_w,
+            cell_h,
+        }
     }
 
     /// Find the deepest cell containing `(x, y)`. Returns
