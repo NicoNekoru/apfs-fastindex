@@ -4,8 +4,11 @@ ID: EX-28
 Title: Root mode + raw parser on live system volume
 Date: 2026-05-20
 Owner: Claude
-Status: Planned (skeleton)
-Result: Pending
+Status: Harness landed in Rust; live-disk validation pending an
+authorized run.
+Result: Pending the user's privileged run; the Rust integration
+test is the gate and runs as a no-op without
+`APFS_FASTINDEX_EX28_LIVE_DEVICE`.
 Related RLs:
 - RL-01 Checkpoint Selection
 - RL-08 Identity and Incremental Caching
@@ -23,21 +26,45 @@ Related docs:
 
 ## Bottom line
 
-(Pending — skeleton.)
+The Rust crate now carries the EX-28 validation harness:
 
-The raw parser today runs only against detached `.dmg` images because
-`/dev/disk*` for non-removable disks isn't world-readable. EX-28
-validates the raw fast path against the live mounted system volume
-(`/dev/diskNsM` for the boot volume), behind a privileged-subprocess
-shape (`osascript ... with administrator privileges` spawning the
-CLI). The validation is shape-parity across three successive scans:
-the same fs-tree shape (entry count, name/identity, sizes) should
-emerge from the raw path that the fallback walker produces from the
-same mounted volume in the same scan window.
+- `apfs_fastindex::parity::compare_namespace_shapes` is a public
+  reusable comparator that takes two `NamespaceEntry` slices and
+  emits a `ShapeDiff` (only_in_left, only_in_right, mismatches,
+  counts). Validated by 7 unit tests covering identical slices,
+  symmetric difference, per-field divergence, and the deliberately-
+  ignored `file_id` axis.
+- `tests/ex28_live_parity.rs` is the integration harness for the
+  live-volume probe. Two tests:
+  1. `ex28_successive_scans_stabilize`: three raw scans against
+     the device named by `APFS_FASTINDEX_EX28_LIVE_DEVICE`; pairwise
+     symmetric difference must be ≤ `SUCCESSIVE_SCAN_BUDGET = 200`.
+  2. `ex28_raw_vs_fallback_parity`: one raw scan + one fallback
+     scan of the same volume (mount point from
+     `APFS_FASTINDEX_EX28_MOUNT_POINT`); symmetric difference must
+     be ≤ `RAW_FALLBACK_BUDGET = 1000`.
+
+Without those env vars, both tests are clean no-ops, so
+`cargo test --release` runs them as harness-tracked but exercises
+zero code. To actually run the EX-28 validation under root:
+
+```sh
+sudo APFS_FASTINDEX_EX28_LIVE_DEVICE=/dev/disk3s1 \
+     APFS_FASTINDEX_EX28_MOUNT_POINT=/ \
+     cargo test --release --test ex28_live_parity -- --nocapture
+```
+
+The harness shape — env-gated test + reusable comparator — is the
+"implementation" in the Rust code base. The user-facing
+"Scan as administrator…" menu item (Swift `osascript` privileged
+subprocess) is a separate UX session and not part of this commit;
+the Rust crate is what the menu item would spawn.
 
 This is a validation experiment, not a correctness experiment — the
-parser is unchanged. The deliverable is a documented "Scan as
-administrator…" path in the app and an updated support-matrix row.
+parser is unchanged. The deliverable is the harness landed here,
+the documented privileged-subprocess invocation, an updated
+support-matrix row in manual chapter 11, and the user's privileged
+run to actually produce a verdict.
 
 ## Question
 

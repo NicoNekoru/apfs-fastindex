@@ -423,12 +423,20 @@ Long-range product roadmap:
   "Real" in the native renderer. Documented in
   `experiments/EX-27-clone-dedup-extent-refs/README.md`.
 - `EX-28` root mode + raw parser on live system volume (R5
-  phase 3; planned skeleton). Validates the existing raw parser
-  against `/dev/diskNsM` of the live boot volume under root
-  privilege, via three-successive-scans shape parity against
-  the fallback walker. Not a correctness experiment — gates the
-  "Scan as administrator…" app surface and the
-  privileged-subprocess shape. Documented in
+  phase 3; **validation harness landed in Rust**, live-disk
+  verdict pending a privileged run). The Rust crate now carries
+  the public `parity::compare_namespace_shapes` comparator that
+  emits a `ShapeDiff` (only_in_left, only_in_right, per-field
+  mismatches, counts), validated by 7 unit tests. The
+  `tests/ex28_live_parity.rs` integration harness gates on
+  `APFS_FASTINDEX_EX28_LIVE_DEVICE` + `..._MOUNT_POINT` env vars:
+  three-successive-scans stability ≤ 200-path symmetric
+  difference, raw-vs-fallback parity ≤ 1000-path budget. Without
+  the env vars the tests run as clean no-ops, so
+  `cargo test --release` keeps passing; with them set under
+  root, the harness exercises the EX-28 methodology against the
+  user's actual device. Manual chapter 11 documents the new
+  validation cell. Documented in
   `experiments/EX-28-root-mode-raw-on-live/README.md`.
 - `EX-29` local-snapshot extent-set contribution (R5 phase 4;
   planned skeleton). Reuses EX-27's extent-set machinery and

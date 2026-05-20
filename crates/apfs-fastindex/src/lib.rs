@@ -32,6 +32,12 @@ mod extent_ref;
 mod fs_record_body;
 mod fs_records;
 mod namespace;
+/// EX-28 live-volume shape parity: compare two `NamespaceEntry`
+/// slices for raw-vs-fallback equivalence (or successive-scan
+/// stability on a live volume). The actual EX-28 validation runs
+/// as a gated integration test; this module is the reusable
+/// comparator.
+pub mod parity;
 mod object;
 mod omap;
 /// Treemap layout + cell flattening. Produces the

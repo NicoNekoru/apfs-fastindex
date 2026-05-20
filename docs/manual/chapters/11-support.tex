@@ -71,6 +71,62 @@ flight.
 The allowlist will grow only after a paired oracle and a new probe
 clear the corresponding entry in the support matrix.
 
+\section{EX-28 Live-Volume Raw Mode (Validation Harness Landed)}
+\label{sec:ex28-live-raw}
+
+A live mounted volume's \texttt{/dev/diskNsM} device node is not on
+the allowlist above. It cannot be: a live mounted volume is
+exactly the case the source-gate refuses, because the volume
+metadata advances during the scan window and SR-014 checkpoint
+selection has no way to pin the visible state.
+
+EX-28 does not try to add live boot disks to the allowlist. It
+adds a validation harness that asks a narrower question: \emph{if
+a user with root privileges hands the existing raw parser a
+\texttt{/dev/diskNsM} of a live volume, does the parser produce a
+self-consistent shape, and does that shape agree with what the
+fallback walker emits from the same mount point in the same scan
+window?}
+
+The harness lands as a Rust integration test in
+\texttt{crates/apfs-fastindex/tests/ex28\_live\_parity.rs},
+gated on the environment variables
+\texttt{APFS\_FASTINDEX\_EX28\_LIVE\_DEVICE} and
+\texttt{APFS\_FASTINDEX\_EX28\_MOUNT\_POINT}. Without those, the
+test is a clean no-op and \texttt{cargo test --release} skips it.
+With them set and the test run as root:
+
+\begin{enumerate}
+  \item Three successive raw scans of the device are taken; each
+    must publish a \texttt{selected\_checkpoint} (no SR-014
+    fail-closure under live concurrent writes), and the pairwise
+    symmetric difference of their \texttt{NamespaceEntry} sets
+    must be $\leq 200$ paths.
+  \item One additional fallback-walker scan of the mount point is
+    compared against the raw scan; the symmetric difference must
+    be $\leq 1000$ paths to absorb the
+    raw-can-read-paths-the-fallback-cannot asymmetry (TCC, sealed
+    system volume reads).
+\end{enumerate}
+
+The comparator behind both checks is
+\texttt{apfs\_fastindex::parity::compare\_namespace\_shapes},
+which returns a structured \texttt{ShapeDiff} with
+\texttt{only\_in\_left}, \texttt{only\_in\_right}, and per-field
+\texttt{mismatches}. It is exposed as a public crate surface so
+any future tooling can use it.
+
+The intended user-facing dispatch is a privileged subprocess:
+\texttt{osascript -e 'do shell script ... with administrator
+privileges'} spawning the existing
+\texttt{apfs-fastindex-scan} binary with the device path. The app
+will surface this as a "Scan as administrator…" menu item; the
+Rust crate's contribution is that the binary already accepts the
+device path verbatim and the harness already exists to validate
+the result. Until the user runs the gated test, the live-disk
+support cell stays at \emph{validation-harness-landed,
+verdict-pending}.
+
 \section{Fail-Closed Triggers}
 
 A source that does not satisfy the allowlist must fail closed before
