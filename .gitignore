@@ -75,9 +75,14 @@ build/
 
 # App artifacts
 scan.json
-.build
+.build/
 
-# Native bridge: artifacts copied by build-native.sh from
+# `make-release.sh` assembles the .app bundle here. It's a pure
+# build output — the script regenerates the binary, the
+# Info.plist, and the SwiftPM resource bundle on every run.
+app/ApfsFastindex.app/
+
+# Native bridge: artifacts copied by `make-release.sh` from
 # `target/release/` into the SwiftPM systemLibrary shim. Always
 # generated; never edit by hand.
 app/Sources/CApfsFastindex/libapfs_fastindex.a
