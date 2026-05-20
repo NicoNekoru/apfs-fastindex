@@ -11,33 +11,33 @@ use serde::Serialize;
 mod block_io;
 mod btree;
 mod container;
-pub mod fallback;
-mod fallback_bulk;
-mod fs_record_body;
-mod fs_records;
-mod namespace;
-mod object;
-mod omap;
-mod volume;
-/// Indexed tree built from a flat `Vec<NamespaceEntry>`. Drives
-/// the native renderer's navigation, breadcrumb, tree-list,
-/// layout, and hit-test paths. Used internally by `ffi::ApfsScan`.
-pub mod tree;
-/// Treemap layout + cell flattening. Produces the
-/// `Vec<ApfsCell>` Swift's NSView reads via
-/// `UnsafeBufferPointer<ApfsCell>`. Squarify algorithm ported
-/// from d3-hierarchy.
-pub mod render;
 /// Per-extension aggregate for the ext-list side panel. Walks
 /// a subtree, groups leaves by extension, sorts by the active
 /// metric.
 pub mod ext_summary;
+pub mod fallback;
+mod fallback_bulk;
 /// C ABI surface for the native (Swift) renderer. See
 /// `docs/implementation/viz-perf-study.md` for the architecture
 /// sketch. The `#[no_mangle] extern "C"` symbols defined here are
 /// always exported by the cdylib regardless of whether the rlib
 /// path is used; cost is zero when no caller references them.
 pub mod ffi;
+mod fs_record_body;
+mod fs_records;
+mod namespace;
+mod object;
+mod omap;
+/// Treemap layout + cell flattening. Produces the
+/// `Vec<ApfsCell>` Swift's NSView reads via
+/// `UnsafeBufferPointer<ApfsCell>`. Squarify algorithm ported
+/// from d3-hierarchy.
+pub mod render;
+/// Indexed tree built from a flat `Vec<NamespaceEntry>`. Drives
+/// the native renderer's navigation, breadcrumb, tree-list,
+/// layout, and hit-test paths. Used internally by `ffi::ApfsScan`.
+pub mod tree;
+mod volume;
 
 use block_io::{checksum_matches, le_u32, le_u64, open_block_source, read_block};
 use object::{

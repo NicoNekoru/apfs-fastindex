@@ -71,10 +71,7 @@ fn main() {
         eprintln!("usage: perf_probe <path> [threads]");
         std::process::exit(2);
     });
-    let threads: usize = args
-        .next()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(4);
+    let threads: usize = args.next().and_then(|s| s.parse().ok()).unwrap_or(4);
 
     let opts = FallbackOptions {
         cross_mounts: false,
@@ -103,10 +100,8 @@ fn main() {
     let tree_allocs = delta(pre_tree, post_tree);
     let node_count = tree.nodes.len();
 
-    let entry_struct_bytes =
-        entry_count as u64 * std::mem::size_of::<NamespaceEntry>() as u64;
-    let node_struct_bytes =
-        node_count as u64 * std::mem::size_of::<TreeNode>() as u64;
+    let entry_struct_bytes = entry_count as u64 * std::mem::size_of::<NamespaceEntry>() as u64;
+    let node_struct_bytes = node_count as u64 * std::mem::size_of::<TreeNode>() as u64;
     let rss_bytes = peak_rss_bytes();
 
     println!("path                = {}", path);

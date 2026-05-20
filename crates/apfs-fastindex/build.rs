@@ -18,8 +18,8 @@ fn main() {
     println!("cargo:rerun-if-changed=src/ffi.rs");
     println!("cargo:rerun-if-changed=cbindgen.toml");
 
-    let crate_dir = env::var("CARGO_MANIFEST_DIR")
-        .expect("CARGO_MANIFEST_DIR must be set by cargo");
+    let crate_dir =
+        env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR must be set by cargo");
     // Workspace `target/` is two levels up from this crate's
     // manifest; the SwiftPM build script knows the same path
     // shape and reads the header from there.
@@ -43,7 +43,10 @@ fn main() {
     {
         Ok(bindings) => {
             bindings.write_to_file(&header_path);
-            println!("cargo:warning=apfs-fastindex: header written to {}", header_path.display());
+            println!(
+                "cargo:warning=apfs-fastindex: header written to {}",
+                header_path.display()
+            );
         }
         Err(err) => {
             // Don't fail the build over header generation —

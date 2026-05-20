@@ -252,10 +252,7 @@ impl Tree {
                                 children_count: 0,
                                 logical_size: entry.logical_size,
                                 allocated_size: entry.allocated_size,
-                                symlink_target: entry
-                                    .symlink_target
-                                    .as_deref()
-                                    .map(Box::from),
+                                symlink_target: entry.symlink_target.as_deref().map(Box::from),
                                 value_logical: entry.logical_size,
                                 value_allocated: entry.allocated_size,
                                 item_count: 1,
@@ -395,9 +392,16 @@ impl Tree {
             // zero — only leaves carry real `logical_size` etc.;
             // dirs' own `allocated_size` is `Some(0)` in the
             // fallback walker by SR-019 contract.
-            let mut sum_logical: u64 = if is_dir { 0 } else { self.nodes[ni].logical_size };
-            let mut sum_allocated: Option<u64> =
-                if is_dir { Some(0) } else { self.nodes[ni].allocated_size };
+            let mut sum_logical: u64 = if is_dir {
+                0
+            } else {
+                self.nodes[ni].logical_size
+            };
+            let mut sum_allocated: Option<u64> = if is_dir {
+                Some(0)
+            } else {
+                self.nodes[ni].allocated_size
+            };
             let mut sum_items: u64 = if is_dir { 0 } else { 1 };
 
             // Sum children. Walk the arena slice directly —
