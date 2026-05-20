@@ -41,6 +41,41 @@ struct ApfsFastindexApp: App {
             updaterDelegate: nil,
             userDriverDelegate: nil
         )
+        // Apply the user's saved check-interval preference on
+        // launch. Re-applied on every UserDefaults change via
+        // the AppDelegate's notification observer so Settings
+        // edits take effect without a relaunch.
+        ApfsFastindexApp.applyUpdateInterval(
+            to: updaterController.updater,
+            hours: UserDefaults.standard.object(forKey: AppPrefs.updateCheckIntervalHoursKey)
+                .flatMap { ($0 as? Int) } ?? 24
+        )
+        // Publish for the AppDelegate's UserDefaults observer
+        // so Settings-stepper changes get re-applied without a
+        // relaunch.
+        AppDelegate.updater = updaterController.updater
+    }
+
+    /// Configure Sparkle's automatic-check cadence from the
+    /// user's `apfs.updateCheckIntervalHours` preference.
+    ///
+    /// - `0` → "check on every launch": fire one
+    ///   `checkForUpdatesInBackground()` now and don't schedule
+    ///   any further background checks. We set the interval to
+    ///   a very large value (10 years) instead of disabling
+    ///   `automaticallyChecksForUpdates`, because the latter
+    ///   also gates first-launch behaviour Sparkle needs.
+    /// - `N > 0` → schedule a check every N hours.
+    static func applyUpdateInterval(to updater: SPUUpdater, hours: Int) {
+        updater.automaticallyChecksForUpdates = true
+        if hours <= 0 {
+            // Effectively never; we manually drive the
+            // every-launch check below.
+            updater.updateCheckInterval = 60 * 60 * 24 * 365 * 10
+            updater.checkForUpdatesInBackground()
+        } else {
+            updater.updateCheckInterval = TimeInterval(hours * 3600)
+        }
     }
 
     var body: some Scene {
@@ -114,8 +149,29 @@ struct ApfsFastindexApp: App {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Set by `ApfsFastindexApp.init()` so the delegate's
+    /// UserDefaults observer can re-apply the interval to the
+    /// live updater when the Settings stepper changes mid-
+    /// session.
+    static weak var updater: SPUUpdater?
+
     func applicationWillFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+        // Re-apply Sparkle's check interval whenever the user
+        // changes the Settings stepper. UserDefaults fires this
+        // notification for any defaults write, so we filter on
+        // our specific key inside the observer.
+        NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: UserDefaults.standard,
+            queue: .main
+        ) { _ in
+            guard let updater = AppDelegate.updater else { return }
+            let hours = UserDefaults.standard
+                .object(forKey: AppPrefs.updateCheckIntervalHoursKey)
+                .flatMap { $0 as? Int } ?? 24
+            ApfsFastindexApp.applyUpdateInterval(to: updater, hours: hours)
+        }
     }
 
     // We intentionally do *not* iterate `NSApp.windows` and call
