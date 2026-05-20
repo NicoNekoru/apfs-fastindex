@@ -1039,6 +1039,86 @@ pub extern "C" fn apfs_scan_source_requested_path(scan: *const ApfsScan) -> *con
     })
 }
 
+// ─────────────────────────────────────────────────────────────
+// Walk-skip enumeration (audit r3 #F1)
+//
+// `parser_output.walk_skips` carries per-subtree skip notes
+// (permission_denied, mount_boundary, non_utf8_name,
+// depth_cap_reached, drec_cycle). The CLI's JSONL output
+// already emits them, but the SwiftUI app saw nothing — a
+// crafted image with a 1000-deep directory chain truncated
+// silently in the treemap. These two accessors expose the
+// list to Swift so the status bar can show a "N subtrees
+// elided" banner.
+//
+// Mirrors `apfs_scan_ext_summary_*` shape: `_count` returns the
+// row count and `_row(idx)` returns a borrowed (path, reason)
+// pair. Strings are valid for the lifetime of the `ApfsScan`
+// handle.
+// ─────────────────────────────────────────────────────────────
+
+/// Borrowed (path, reason) pair for one walk skip. Both strings
+/// are `ApfsPathRef`-shaped: pointer + length, no NUL terminator,
+/// owned by `ApfsScan`. UTF-8.
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct ApfsWalkSkipRow {
+    pub path: ApfsPathRef,
+    pub reason: ApfsPathRef,
+}
+
+/// Number of `walk_skip` rows recorded during the scan. 0 when
+/// the scan completed cleanly.
+#[no_mangle]
+pub extern "C" fn apfs_scan_walk_skip_count(scan: *const ApfsScan) -> u32 {
+    ffi_guard(0, move || {
+        let Some(s) = (unsafe { scan.as_ref() }) else {
+            return 0;
+        };
+        s.output.parser_output.walk_skips.len() as u32
+    })
+}
+
+/// Fetch walk-skip row `n`. Returns an all-NULL row for out-of-
+/// range indices or a NULL handle.
+#[no_mangle]
+pub extern "C" fn apfs_scan_walk_skip_row(
+    scan: *const ApfsScan,
+    n: u32,
+) -> ApfsWalkSkipRow {
+    let zero = ApfsWalkSkipRow {
+        path: ApfsPathRef {
+            bytes: ptr::null(),
+            len: 0,
+        },
+        reason: ApfsPathRef {
+            bytes: ptr::null(),
+            len: 0,
+        },
+    };
+    ffi_guard(zero, move || {
+        let Some(s) = (unsafe { scan.as_ref() }) else {
+            return zero;
+        };
+        let idx = n as usize;
+        let rows = &s.output.parser_output.walk_skips;
+        if idx >= rows.len() {
+            return zero;
+        }
+        let row = &rows[idx];
+        ApfsWalkSkipRow {
+            path: ApfsPathRef {
+                bytes: row.path.as_ptr(),
+                len: row.path.len() as u64,
+            },
+            reason: ApfsPathRef {
+                bytes: row.reason.as_ptr(),
+                len: row.reason.len() as u64,
+            },
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     //! Adversarial-input coverage for the FFI panic safety

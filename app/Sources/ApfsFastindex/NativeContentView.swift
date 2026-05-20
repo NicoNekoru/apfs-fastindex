@@ -41,6 +41,12 @@ struct NativeContentView: View {
     /// typical /Applications-class scan that's well under
     /// 10 ms so we don't bother caching across navigations.
     @State private var extSummary: Scan.ExtSummary?
+    /// Walker-side skips reported by the FFI (audit r3 #F1):
+    /// permission-denied subtrees, depth-cap truncations,
+    /// DREC cycles, etc. Snapshotted once at scan finalize so
+    /// the status-bar banner doesn't re-walk the FFI on every
+    /// redraw.
+    @State private var walkSkips: [Scan.WalkSkip] = []
 
     // Live scan progress. While `scanning` is true the centered
     // overlay shows `scanPhaseLabel` + the counters below. Phase
@@ -762,6 +768,16 @@ struct NativeContentView: View {
                 Text(totalsText(for: scan))
                     .font(AppFont.ui(12)).monospacedDigit()
                     .foregroundStyle(VizPalette.muted)
+                // Walk-skip banner (audit r3 #F1). Shown when
+                // the walker recorded any skip — permission
+                // denied, mount boundary, depth-cap truncation,
+                // DREC cycle. Tooltip lists the first few
+                // entries so the user can investigate without
+                // a separate UI surface.
+                if !walkSkips.isEmpty {
+                    statusPill("\(walkSkips.count) elided", tint: VizPalette.warning)
+                        .help(walkSkipTooltip)
+                }
                 if !lastClickedPath.isEmpty {
                     Spacer()
                     Text(lastClickedPath)
@@ -781,6 +797,27 @@ struct NativeContentView: View {
                 Spacer()
             }
         }
+    }
+
+    /// Multi-line tooltip text for the walk-skip pill. Sums
+    /// reasons by category + lists the first few paths so the
+    /// user has enough to investigate without a popover.
+    /// Sanitised so a crafted skip-path can't spoof the tooltip
+    /// (audit #App-2 applies here too).
+    private var walkSkipTooltip: String {
+        var counts: [String: Int] = [:]
+        for s in walkSkips {
+            counts[s.reason, default: 0] += 1
+        }
+        let summary = counts
+            .sorted { $0.key < $1.key }
+            .map { "\($1) × \($0)" }
+            .joined(separator: ", ")
+        let sample = walkSkips.prefix(5)
+            .map { "  \(DisplaySanitizer.sanitiseDisplay($0.path)) — \($0.reason)" }
+            .joined(separator: "\n")
+        let more = walkSkips.count > 5 ? "\n  … and \(walkSkips.count - 5) more" : ""
+        return "Walker elided \(walkSkips.count) subtree(s): \(summary)\n\(sample)\(more)"
     }
 
     @ViewBuilder
@@ -1125,6 +1162,10 @@ struct NativeContentView: View {
                     currentNode = 0
                     lastClickedPath = ""
                     expandedNodes = [0]
+                    // Snapshot walk-skips (audit r3 #F1) so the
+                    // status-bar banner can show how many
+                    // subtrees the walker refused to descend.
+                    walkSkips = result.walkSkips()
                     if !result.allocatedAvailable && metric == .allocated {
                         metric = .logical
                     }
@@ -1136,6 +1177,7 @@ struct NativeContentView: View {
                     layout = nil
                     treeRows = []
                     extSummary = nil
+                    walkSkips = []
                     // Pull the Rust-side last-error if there is
                     // one — this is what makes panics and
                     // recoverable scan failures user-visible

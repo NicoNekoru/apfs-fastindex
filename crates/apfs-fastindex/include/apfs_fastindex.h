@@ -179,6 +179,16 @@ typedef struct ApfsExtRow {
   uint32_t _pad;
 } ApfsExtRow;
 
+/**
+ * Borrowed (path, reason) pair for one walk skip. Both strings
+ * are `ApfsPathRef`-shaped: pointer + length, no NUL terminator,
+ * owned by `ApfsScan`. UTF-8.
+ */
+typedef struct ApfsWalkSkipRow {
+  struct ApfsPathRef path;
+  struct ApfsPathRef reason;
+} ApfsWalkSkipRow;
+
 #ifdef __cplusplus
 extern "C" {
 #endif // __cplusplus
@@ -459,6 +469,18 @@ const char *apfs_scan_source_kind(const struct ApfsScan *scan);
  * asked us to scan. UTF-8, NUL-terminated; owned by `scan`.
  */
 const char *apfs_scan_source_requested_path(const struct ApfsScan *scan);
+
+/**
+ * Number of `walk_skip` rows recorded during the scan. 0 when
+ * the scan completed cleanly.
+ */
+uint32_t apfs_scan_walk_skip_count(const struct ApfsScan *scan);
+
+/**
+ * Fetch walk-skip row `n`. Returns an all-NULL row for out-of-
+ * range indices or a NULL handle.
+ */
+struct ApfsWalkSkipRow apfs_scan_walk_skip_row(const struct ApfsScan *scan, uint32_t n);
 
 #ifdef __cplusplus
 }  // extern "C"
