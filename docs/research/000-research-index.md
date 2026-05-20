@@ -374,6 +374,44 @@ Long-range product roadmap:
   200k → 313k ent/s = +56% over the r2c-fallback-perf tip
   (+82% cumulative since the pre-perf baseline; 1.82× total).
   Test count 69 → 70 (parallel_walker_matches_serial_shape).
+- `EX-26` SR-019 sparse + decmpfs allocated-size precedence
+  (R5 phase 1; planned, methodology populated). Formalises
+  EX-22's observed `alloced_size - sparse_bytes ≈ st_blocks * 512`
+  as Hypothesis A; adds per-`compression_type` hypotheses
+  (fork-stored / xattr-stored) for the decmpfs branch of SR-019.
+  Uses the EX-19/EX-22 fixture plus three new sparse and three
+  new decmpfs variants. If validated, lifts the sparse case from
+  fail-closed `None` to `Some(alloced_size - sparse_bytes)` in
+  `crates/apfs-fastindex/src/namespace.rs::allocated_size` and
+  populates the Allocated metric for the system frameworks,
+  Xcode, and decmpfs trees that currently report as
+  `not_claimed`. Documented in
+  `experiments/EX-26-sparse-decmpfs-allocated/README.md`.
+- `EX-27` clone-dedup via extent-reference tree (R5 phase 2;
+  planned skeleton). Introduces an `oxr_t` walker to extract
+  per-extent refcounts; computes the volume's deduplicated
+  allocated bytes as `Σ extent.length / refcount`; validates
+  against `du -A` on a fixture with three new clone families.
+  If validated, lands a third "Real Bytes" metric column
+  alongside Logical and Allocated in the native renderer.
+  Documented in `experiments/EX-27-clone-dedup-extent-refs/README.md`.
+- `EX-28` root mode + raw parser on live system volume (R5
+  phase 3; planned skeleton). Validates the existing raw parser
+  against `/dev/diskNsM` of the live boot volume under root
+  privilege, via three-successive-scans shape parity against
+  the fallback walker. Not a correctness experiment — gates the
+  "Scan as administrator…" app surface and the
+  privileged-subprocess shape. Documented in
+  `experiments/EX-28-root-mode-raw-on-live/README.md`.
+- `EX-29` local-snapshot extent-set contribution (R5 phase 4;
+  planned skeleton). Reuses EX-27's extent-set machinery and
+  EX-28's root path to mount each local snapshot via
+  `mount_apfs -s`, walk its fs-tree, extract its extent set, and
+  difference against the live volume to compute per-snapshot
+  unique contribution. Validated against `tmutil
+  thinlocalsnapshots`. If validated, lands a status-bar row
+  reporting reclaimable snapshot bytes. Documented in
+  `experiments/EX-29-snapshot-contribution/README.md`.
 - `EX-21` fallback path skeleton; landed a POSIX-traversal-backed
   fallback in `src/apfs_fastindex/fallback_traversal.py` that emits the
   same `NamespaceEntry` + `DirectoryAggregate` shape as the Rust raw
