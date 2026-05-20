@@ -658,11 +658,7 @@ fn slim_entries(entries: &[apfs_fastindex::NamespaceEntry]) -> Vec<serde_json::V
         .collect()
 }
 
-fn emit_output<T: serde::Serialize>(
-    value: &T,
-    pretty: bool,
-    format: OutputFormat,
-) -> ExitCode {
+fn emit_output<T: serde::Serialize>(value: &T, pretty: bool, format: OutputFormat) -> ExitCode {
     match format {
         OutputFormat::Json => emit_json(value, pretty),
         OutputFormat::Msgpack => emit_msgpack(value),

@@ -1,5 +1,17 @@
 import Foundation
 import CApfsFastindex
+import os.log
+
+/// Unified-logging handle used by the bridge. Tag everything that
+/// crosses the Rust FFI with this subsystem so users can tail the
+/// app's diagnostic output with:
+///
+///   log stream --predicate 'subsystem == "com.apfsfastindex.app"'
+///
+/// macOS's bundled-app stderr redirect makes `NSLog` invisible
+/// outside Xcode debug runs; `os.Logger` writes into the unified
+/// log where Console.app and the `log(1)` CLI can both find it.
+let appLogger = Logger(subsystem: "com.apfsfastindex.app", category: "ffi")
 
 /// Swift wrapper around the apfs-fastindex Rust crate's C ABI.
 ///
@@ -28,6 +40,28 @@ enum NativeBridge {
     static var version: String {
         guard let cstr = apfs_version() else { return "(unknown)" }
         return String(cString: cstr)
+    }
+
+    /// Filesystem path the Rust panic hook appends to on every
+    /// caught panic. Lives under `~/Library/Logs/` so the user
+    /// can find it via Finder → ⌘⇧G. Pointer is process-static;
+    /// the panic hook installs itself on the first FFI call.
+    static var logPath: String? {
+        guard let cstr = apfs_log_path() else { return nil }
+        let s = String(cString: cstr)
+        return s.isEmpty ? nil : s
+    }
+
+    /// Pop the most-recent error message recorded by the Rust
+    /// side on the current thread. Reading clears the slot, so a
+    /// caller that wants the message should grab it immediately
+    /// after a failed FFI call (NULL return / sentinel value).
+    /// Covers both recoverable errors (bad UTF-8 path, scan-side
+    /// failures) and caught panics in debug builds.
+    static func lastError() -> String? {
+        guard let cstr = apfs_last_error() else { return nil }
+        let s = String(cString: cstr)
+        return s.isEmpty ? nil : s
     }
 
     /// Verifies the FFI bridge is loaded + reachable. Called at

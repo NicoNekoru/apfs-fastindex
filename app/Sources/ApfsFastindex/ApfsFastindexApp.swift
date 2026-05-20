@@ -30,6 +30,20 @@ struct ApfsFastindexApp: App {
                 .font(AppFont.ui(12))
         }
         .windowResizability(.contentSize)
+        .commands {
+            // Help-menu entry → opens the Rust panic-hook log
+            // file in the user's default editor. The file lives
+            // under `~/Library/Logs/apfs-fastindex.log`; this
+            // shortcut means users don't have to know that.
+            CommandGroup(after: .help) {
+                Button("View Log…") {
+                    if let path = NativeBridge.logPath {
+                        NSWorkspace.shared.open(URL(fileURLWithPath: path))
+                    }
+                }
+                .disabled(NativeBridge.logPath == nil)
+            }
+        }
 
         // ⌘, gets a real SwiftUI Settings scene. The scene
         // discovery hook ("Preferences…" / "Settings…" in the

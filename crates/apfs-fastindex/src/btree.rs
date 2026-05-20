@@ -165,15 +165,59 @@ impl<'a> BtreeNode<'a> {
         })
     }
 
-    pub fn key_bytes(&self, entry: &BtreeEntry, fixed_key_size: usize) -> &'a [u8] {
+    /// Borrow a key's byte slice from the underlying block.
+    ///
+    /// Bounds-checked: the on-disk TOC's `k_len` is attacker-
+    /// controlled (a crafted APFS image can supply any 16-bit
+    /// value), so we verify `key_offset + len <= block.len()`
+    /// before slicing. The previous implementation indexed
+    /// directly, which panicked on out-of-range lengths —
+    /// reachable thousands of times per scan on a malformed
+    /// image. Now returns `ScanError::InvalidObject` and the
+    /// fail-closed contract takes over.
+    pub fn key_bytes(
+        &self,
+        entry: &BtreeEntry,
+        fixed_key_size: usize,
+    ) -> Result<&'a [u8], ScanError> {
         let len = entry.key_len.unwrap_or(fixed_key_size);
-        &self.block[entry.key_offset..entry.key_offset + len]
+        let end = entry.key_offset.checked_add(len).ok_or_else(|| {
+            ScanError::InvalidObject("btree key end overflow".to_string())
+        })?;
+        if end > self.block.len() {
+            return Err(ScanError::InvalidObject(format!(
+                "btree key bytes [{}..{}] exceed block length {}",
+                entry.key_offset,
+                end,
+                self.block.len()
+            )));
+        }
+        Ok(&self.block[entry.key_offset..end])
     }
 
-    pub fn value_bytes(&self, entry: &BtreeEntry, fixed_value_size: usize) -> &'a [u8] {
+    /// Borrow a value's byte slice from the underlying block.
+    ///
+    /// Same bounds-check contract as `key_bytes`. The old version
+    /// did `.expect("btree value end")` on `checked_add` and
+    /// indexed unchecked — both panic on hostile input.
+    pub fn value_bytes(
+        &self,
+        entry: &BtreeEntry,
+        fixed_value_size: usize,
+    ) -> Result<&'a [u8], ScanError> {
         let len = entry.value_len.unwrap_or(fixed_value_size);
-        let end = entry.value_start.checked_add(len).expect("btree value end");
-        &self.block[entry.value_start..end]
+        let end = entry.value_start.checked_add(len).ok_or_else(|| {
+            ScanError::InvalidObject("btree value end overflow".to_string())
+        })?;
+        if end > self.block.len() {
+            return Err(ScanError::InvalidObject(format!(
+                "btree value bytes [{}..{}] exceed block length {}",
+                entry.value_start,
+                end,
+                self.block.len()
+            )));
+        }
+        Ok(&self.block[entry.value_start..end])
     }
 }
 

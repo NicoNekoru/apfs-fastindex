@@ -1122,7 +1122,16 @@ struct NativeContentView: View {
                     layout = nil
                     treeRows = []
                     extSummary = nil
-                    scanError = "scan failed for \(path)"
+                    // Pull the Rust-side last-error if there is
+                    // one — this is what makes panics and
+                    // recoverable scan failures user-visible
+                    // instead of surfacing the generic "scan
+                    // failed" toast for every cause.
+                    if let detail = NativeBridge.lastError() {
+                        scanError = "\(path): \(detail)"
+                    } else {
+                        scanError = "scan failed for \(path)"
+                    }
                 }
                 scanning = false
             }

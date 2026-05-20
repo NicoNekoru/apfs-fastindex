@@ -159,8 +159,8 @@ fn walk_fs_node<R: Read + Seek>(
         state.leaf_node_count += 1;
         for index in 0..node.nkeys {
             let entry = node.entry(index)?;
-            let key = node.key_bytes(&entry, 0);
-            let value = node.value_bytes(&entry, 0);
+            let key = node.key_bytes(&entry, 0)?;
+            let value = node.value_bytes(&entry, 0)?;
             if key.len() < 8 {
                 return Err(ScanError::InvalidObject(format!(
                     "FS-tree leaf key at node {paddr} entry {index} shorter than j_key_t"
@@ -189,7 +189,7 @@ fn walk_fs_node<R: Read + Seek>(
     let mut children = Vec::with_capacity(node.nkeys as usize);
     for index in 0..node.nkeys {
         let entry = node.entry(index)?;
-        let value = node.value_bytes(&entry, FS_INTERNAL_VAL_SIZE);
+        let value = node.value_bytes(&entry, FS_INTERNAL_VAL_SIZE)?;
         if value.len() < FS_INTERNAL_VAL_SIZE {
             return Err(ScanError::InvalidObject(format!(
                 "FS-tree internal value at {paddr} entry {index} shorter than child oid"
