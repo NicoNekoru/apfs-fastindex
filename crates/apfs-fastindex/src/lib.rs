@@ -28,6 +28,7 @@ mod fallback_bulk;
 /// always exported by the cdylib regardless of whether the rlib
 /// path is used; cost is zero when no caller references them.
 pub mod ffi;
+mod extent_ref;
 mod fs_record_body;
 mod fs_records;
 mod namespace;
@@ -72,9 +73,10 @@ pub use fallback::{
     fallback_scan_path, fallback_scan_path_with_options, FallbackError, FallbackOptions,
     FallbackScanOutput, ProgressEvent,
 };
+pub use extent_ref::{ExtentRefDump, ExtentRefStorage, PhysExtRecord};
 pub use fs_record_body::{
-    DirRecBody, DstreamFields, FsRecordKey, FsRecordRow, FsRecordValue, InodeBody, SiblingLinkBody,
-    XattrBody, XfieldEntry, XfieldInterpreted,
+    DirRecBody, DstreamFields, FileExtentBody, FsRecordKey, FsRecordRow, FsRecordValue, InodeBody,
+    SiblingLinkBody, XattrBody, XfieldEntry, XfieldInterpreted,
 };
 pub use fs_records::{FamilyCount, FsRecordDump};
 pub use object::ObjectHeader;
@@ -130,22 +132,30 @@ pub struct NamespaceEntry {
     pub file_id: u64,
     pub logical_size: u64,
     pub symlink_target: Option<Box<str>>,
-    /// Per-inode allocated bytes under SR-019 + EX-22 precedence:
-    ///
-    /// - regular + dstream + no `INO_EXT_TYPE_SPARSE_BYTES` xfield →
-    ///   `Some(j_dstream_t.alloced_size)`
-    /// - symlink, directory → `Some(0)`
-    /// - regular + dstream + `INO_EXT_TYPE_SPARSE_BYTES` present →
-    ///   `None` (sparse divergence; see EX-22)
-    /// - regular + `com.apple.decmpfs` xattr → `None`
-    /// - any other case → `None`
-    ///
-    /// The fallback backend's truth is the kernel's stat output, so it
-    /// emits `Some(st_blocks * 512)` for regular files (the public
-    /// oracle directly) and `Some(0)` for symlinks and directories so
-    /// the shape parity with raw mode holds.
+    /// Per-inode allocated bytes under SR-019 + EX-22 + EX-26 precedence
+    /// (see `namespace.rs::compute_allocated_size` for the full rule).
+    /// Allocated counts each inode's full dstream — clones therefore
+    /// over-count vs. the volume's actual on-disk bytes; `real_size`
+    /// is the clone-deduplicated companion metric.
     #[serde(default)]
     pub allocated_size: Option<u64>,
+    /// Per-inode clone-deduplicated allocated bytes under EX-27.
+    /// For a clone, this is approximately `allocated_size /
+    /// dstream.refcnt`; for a partial-share rewrite, the shared
+    /// extents are counted at `1/phys_ext.refcnt` while exclusive
+    /// extents count in full. Summed across all inodes on a volume
+    /// (modulo integer-division rounding of ≤ refcnt-1 bytes per
+    /// clone-shared dstream), this equals
+    /// `Σ phys_ext.length × block_size` — the volume's actual on-disk
+    /// allocation. Validated by `EX-27`.
+    ///
+    /// `None` when the parser can't claim a number: fallback walker
+    /// (no refcount info from POSIX), or raw scan where the
+    /// extent-reference tree did not validate. The fallback walker
+    /// emits `real_size == allocated_size` for the common case (no
+    /// dedup info available → honest about coverage).
+    #[serde(default)]
+    pub real_size: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -158,6 +168,10 @@ pub struct DirectoryAggregate {
     /// total cannot be authoritative.
     #[serde(default)]
     pub unique_inode_allocated_total: Option<u64>,
+    /// Per-directory unique-inode clone-deduplicated bytes (EX-27).
+    /// Same None-collapse policy as `unique_inode_allocated_total`.
+    #[serde(default)]
+    pub unique_inode_real_total: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -235,6 +249,13 @@ pub struct VolumeReport {
     pub extentref_tree_lookup: Option<OmapValue>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fs_record_dump: Option<FsRecordDump>,
+    /// EX-27 clone-dedup: every leaf record from the volume's
+    /// extent-reference tree, providing per-physical-extent
+    /// `(paddr_first, length_blocks, refcnt, owning_obj_id)`. Joins
+    /// with `fs_record_dump.records` (specifically the `file_extent`
+    /// rows) to compute per-inode `real_size`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extent_ref_dump: Option<ExtentRefDump>,
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status_reason: Option<String>,
@@ -520,12 +541,18 @@ pub fn checkpoint_scan_source<P: AsRef<Path>>(
     // entry emission on `selected_checkpoint` + the volume's
     // `fs_record_dump` keeps the emission off when any earlier
     // fail-closed gate trips.
-    let (entries, aggregates, depth_truncations) = match selected
-        .as_ref()
-        .and_then(|sel| sel.volumes.first())
-        .and_then(|vol| vol.fs_record_dump.as_ref())
-    {
-        Some(dump) => namespace::build_namespace(dump),
+    let (entries, aggregates, depth_truncations) = match selected.as_ref() {
+        Some(sel) => match sel.volumes.first() {
+            Some(vol) => match vol.fs_record_dump.as_ref() {
+                Some(dump) => namespace::build_namespace(
+                    dump,
+                    vol.extent_ref_dump.as_ref(),
+                    sel.container.block_size,
+                ),
+                None => (Vec::new(), Vec::new(), Vec::new()),
+            },
+            None => (Vec::new(), Vec::new(), Vec::new()),
+        },
         None => (Vec::new(), Vec::new(), Vec::new()),
     };
     let namespace_emitted = !entries.is_empty();
@@ -656,6 +683,7 @@ fn attempt_native_dump<R: Read + Seek>(
                 volume_omap: None,
                 root_tree_lookup: None,
                 extentref_tree_lookup: None,
+                extent_ref_dump: None,
                 fs_record_dump: None,
                 status: "missing_in_container_omap".to_string(),
                 status_reason: Some(
@@ -682,6 +710,7 @@ fn attempt_native_dump<R: Read + Seek>(
                     volume_omap: None,
                     root_tree_lookup: None,
                 extentref_tree_lookup: None,
+                extent_ref_dump: None,
                     fs_record_dump: None,
                     status: "volume_decode_failed".to_string(),
                     status_reason: Some(err.to_string()),
@@ -703,6 +732,7 @@ fn attempt_native_dump<R: Read + Seek>(
                 volume_omap: None,
                 root_tree_lookup: None,
                 extentref_tree_lookup: None,
+                extent_ref_dump: None,
                 fs_record_dump: None,
                 status: "volume_unsupported".to_string(),
                 status_reason: Some(reason),
@@ -760,6 +790,59 @@ fn attempt_native_dump<R: Read + Seek>(
             fs_records_dumped += 1;
         }
 
+        // EX-27: walk the extent-reference tree. The tree's storage
+        // class is encoded in `extentref_tree_type_raw` (physical
+        // for hdiutil-created `.dmg`s, virtual for some live
+        // volumes). For physical trees, the OID is the root paddr
+        // directly; for virtual, the volume OMAP lookup above
+        // already produced the paddr.
+        let extent_ref_dump = match extent_ref::ExtentRefStorage::from_type_raw(
+            summary.extentref_tree_type_raw,
+        ) {
+            Ok(storage) => {
+                let root_paddr = match storage {
+                    extent_ref::ExtentRefStorage::Physical => Some(summary.extentref_tree_oid),
+                    extent_ref::ExtentRefStorage::Virtual => extentref_tree_lookup
+                        .as_ref()
+                        .map(|v| v.paddr),
+                };
+                match root_paddr {
+                    Some(paddr) => match extent_ref::dump_extent_refs(
+                        reader,
+                        block_size_usize,
+                        paddr,
+                        storage,
+                        container.xid,
+                        &volume_omap_resolver,
+                    ) {
+                        Ok(dump) => Some(dump),
+                        Err(err) => {
+                            validation_gaps.push(format!(
+                                "extent-reference tree for volume oid {volume_oid} did not \
+                                 validate: {err}"
+                            ));
+                            None
+                        }
+                    },
+                    None => {
+                        validation_gaps.push(format!(
+                            "extent-reference tree root for volume oid {volume_oid} could not \
+                             be resolved (virtual tree with no OMAP mapping at XID {})",
+                            container.xid
+                        ));
+                        None
+                    }
+                }
+            }
+            Err(err) => {
+                validation_gaps.push(format!(
+                    "extent-reference tree for volume oid {volume_oid} has unsupported storage \
+                     class: {err}"
+                ));
+                None
+            }
+        };
+
         volume_reports.push(VolumeReport {
             fs_oid_index: index as u32,
             volume_oid: *volume_oid,
@@ -769,6 +852,7 @@ fn attempt_native_dump<R: Read + Seek>(
             root_tree_lookup,
             extentref_tree_lookup,
             fs_record_dump,
+            extent_ref_dump,
             status: "supported".to_string(),
             status_reason: None,
         });

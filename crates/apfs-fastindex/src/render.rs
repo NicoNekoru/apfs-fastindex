@@ -578,6 +578,7 @@ mod tests {
             logical_size: logical,
             symlink_target: None,
             allocated_size: Some(logical),
+            real_size: Some(logical),
         }
     }
 
