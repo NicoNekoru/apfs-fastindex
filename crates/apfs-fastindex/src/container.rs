@@ -385,3 +385,103 @@ fn format_uuid(bytes: &[u8]) -> String {
         bytes[15],
     )
 }
+
+#[cfg(test)]
+mod tests {
+    //! Adversarial-input coverage for the audit r2 #Rust-10
+    //! checked_add at `xp_desc_base + position`.
+
+    use super::*;
+    use crate::object::ObjectHeader;
+    use std::io::Cursor;
+
+    /// Hand-rolled minimal `ContainerSummary` for tests that
+    /// only care about the descriptor-ring fields. Everything
+    /// else gets a zero / empty value — `walk_checkpoint_maps`
+    /// shouldn't read those before it errors out on the
+    /// arithmetic overflow we're testing.
+    fn stub_container(xp_desc_base: u64, xp_desc_blocks: u32, xp_desc_len: u32) -> ContainerSummary {
+        ContainerSummary {
+            block_address: 0,
+            xid: 0,
+            block_size: 4096,
+            block_count: 1,
+            features_raw: 0,
+            readonly_compatible_features_raw: 0,
+            incompatible_features_raw: 0,
+            features: Vec::new(),
+            incompatible_features: Vec::new(),
+            unsupported_incompatible_features: 0,
+            uuid_hex: String::new(),
+            next_oid: 0,
+            next_xid: 0,
+            xp_desc_blocks,
+            xp_desc_base,
+            xp_desc_index: 0,
+            xp_desc_len,
+            xp_data_blocks: 0,
+            xp_data_base: 0,
+            xp_data_index: 0,
+            xp_data_len: 0,
+            spaceman_oid: 0,
+            omap_oid: 0,
+            reaper_oid: 0,
+            max_file_systems: 0,
+            volume_oids: Vec::new(),
+            object_storage_summary: Vec::new(),
+            object_header: ObjectHeader {
+                block_address: 0,
+                checksum: 0,
+                oid: 0,
+                xid: 0,
+                object_type_raw: 0,
+                object_type: 0,
+                object_type_flags: 0,
+                object_subtype: 0,
+            },
+        }
+    }
+
+    /// Audit r2 #Rust-10 regression. `xp_desc_base` near
+    /// `u64::MAX` with a positive `position` previously wrapped
+    /// to a low paddr and directed `read_block` at attacker-
+    /// chosen low bytes. The `checked_add` now returns
+    /// `InvalidObject` instead.
+    #[test]
+    fn walk_checkpoint_maps_rejects_xp_desc_base_overflow() {
+        // xp_desc_base = u64::MAX → first iteration has
+        // position=0, which doesn't overflow. The audit asked
+        // specifically about `u64::MAX - 1` with xp_desc_len>1,
+        // since then position=1 overflows. Set
+        // xp_desc_blocks=2 so positions 0 and 1 are both visited.
+        let container = stub_container(u64::MAX, 2, 2);
+        let mut reader = Cursor::new(vec![0u8; 8192]);
+        let err = walk_checkpoint_maps(&mut reader, 4096, &container, 0)
+            .expect_err("u64::MAX xp_desc_base must fail-closed on overflow");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("overflow") || msg.contains("xp_desc"),
+            "error should reference the overflow / xp_desc field; got: {msg}"
+        );
+    }
+
+    /// Symmetric check: a legitimate xp_desc_base with no
+    /// overflow gets past the gate (and then fails on the
+    /// downstream `read_block` because the cursor is empty —
+    /// that's a different error type, which is the point).
+    #[test]
+    fn walk_checkpoint_maps_accepts_normal_xp_desc_base() {
+        let container = stub_container(1, 4, 4);
+        let mut reader = Cursor::new(vec![0u8; 8192]);
+        let result = walk_checkpoint_maps(&mut reader, 4096, &container, 0);
+        // We expect an error, but NOT the overflow one — the
+        // arithmetic guard let the call proceed, so the failure
+        // should come from the object-header validation step.
+        let err = result.expect_err("stub container should fail downstream");
+        let msg = format!("{err}");
+        assert!(
+            !msg.contains("overflow"),
+            "non-overflow path must not trip the overflow guard; got: {msg}"
+        );
+    }
+}
