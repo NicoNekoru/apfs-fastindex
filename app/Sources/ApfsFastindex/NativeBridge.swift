@@ -256,15 +256,21 @@ final class Scan {
     /// constant changes, the Swift mapping changes here too.
     static let allocatedTotalUnclaimed: UInt64 = UInt64.max
 
-    /// `true` when this Scan was produced by the
-    /// "Scan as Administrator…" privileged-subprocess path
-    /// (`Scan.fromPrivilegedMsgpack`), `false` for the in-process
-    /// fallback walker. Drives the status-bar admin chip and the
+    /// `true` when this Scan was produced under the
+    /// "Scan as Administrator…" flow (privileged subprocess, or
+    /// — when the GUI is already running as root — the in-process
+    /// fallback walker). Drives the status-bar admin chip and the
     /// window title suffix. The Rust crate's
     /// `apfs_scan_from_msgpack_file` cannot tell whether the
     /// msgpack came from a privileged scan; we set this field at
     /// the Swift-construction site that knows.
-    let isAdmin: Bool
+    ///
+    /// `var` rather than `let` so callers can flip the badge after
+    /// construction when the in-process fallback path happens to
+    /// inherit root privileges (e.g. the `alreadyRoot` short-
+    /// circuit in `PrivilegedScan.run`). The flag is advisory —
+    /// it doesn't change the Rust-side handle, only the UI.
+    var isAdmin: Bool
 
     /// Performs a fallback (POSIX-traversal) scan of `path`.
     /// `threads` of 0 picks the default. Returns `nil` if the

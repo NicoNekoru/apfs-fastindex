@@ -15,6 +15,14 @@ struct NativeContentView: View {
     @State private var layout: Scan.Layout?
     @State private var scanError: String?
     @State private var scanning: Bool = false
+    /// Sticky admin mode (per user request): once the user
+    /// successfully runs File > Scan as Administrator…, every
+    /// subsequent scan (including the regular Scan button) uses
+    /// the privileged flow. The flag stays true until the app
+    /// quits; there is no "exit admin mode" affordance today.
+    /// The Scan button's label updates to reflect this so the
+    /// user knows clicking will surface another auth prompt.
+    @State private var adminMode: Bool = false
     /// Treemap depth + worker count live in `Settings` (⌘,). The
     /// `@AppStorage` binding here keeps them reactive: editing
     /// the value in the settings panel re-fires the depth
@@ -670,13 +678,26 @@ struct NativeContentView: View {
             Button {
                 startScan()
             } label: {
-                Label("Scan", systemImage: "play.fill")
-                    .frame(minWidth: 72)
+                // In sticky admin mode (see `adminMode` state) the
+                // Scan button still drives the privileged flow, so
+                // surface a lock icon + "Admin" label so the user
+                // knows clicking will pop the auth prompt (or run
+                // privileged if already root).
+                if adminMode {
+                    Label("Scan", systemImage: "lock.fill")
+                        .frame(minWidth: 72)
+                } else {
+                    Label("Scan", systemImage: "play.fill")
+                        .frame(minWidth: 72)
+                }
             }
             .buttonStyle(.borderedProminent)
-            .tint(VizPalette.accent)
+            .tint(adminMode ? VizPalette.warning : VizPalette.accent)
             .keyboardShortcut(.return, modifiers: .command)
             .disabled(scanning || pathInput.trimmingCharacters(in: .whitespaces).isEmpty)
+            .help(adminMode
+                ? "Sticky admin mode is on — every Scan runs with administrator privileges."
+                : "Scan as the current user.")
         }
     }
 
@@ -1215,36 +1236,76 @@ struct NativeContentView: View {
     /// "Scan as Administrator…" flow (EX-28 follow-up). Spawns the
     /// bundled CLI under `osascript ... with administrator
     /// privileges`, which pops the macOS authentication prompt. The
-    /// CLI runs as root, bypasses TCC on user-data paths, writes its
-    /// `FallbackScanOutput` as msgpack to a temp file. On subprocess
-    /// exit we rehydrate via `apfs_scan_from_msgpack_file` and the
-    /// rest of the renderer is unchanged.
+    /// CLI runs as root, bypasses TCC on user-data paths, writes
+    /// its `FallbackScanOutput` as msgpack to a temp file and
+    /// progress JSON to a sibling stderr file at 250 ms cadence.
+    /// `PrivilegedScan.run` polls that progress file and forwards
+    /// events to `onProgress` here; the parent updates the same
+    /// state machine the regular Scan flow uses, so the overlay
+    /// shows live counter ticks (not a stuck 0 / 0).
     ///
-    /// Progress UI: the privileged subprocess has no streaming
-    /// progress hook today (it writes the full output at the end),
-    /// so we run with an indeterminate progress overlay. The label
-    /// reads "Scanning (administrator)…" so the user knows the
-    /// blocking-on-osascript shape is expected.
+    /// When the GUI is already running as root, `PrivilegedScan`
+    /// short-circuits to the in-process walker; the progress
+    /// callback is wired into `Scan.fallbackWithProgress` and the
+    /// UX is identical to the non-admin path.
+    ///
+    /// On success, sticky admin mode is engaged
+    /// (`adminMode = true`) — per the user requirement that
+    /// subsequent scans stay in administrator mode.
     private func startPrivilegedScan() {
         let path = pathInput.trimmingCharacters(in: .whitespaces)
         guard !path.isEmpty else { return }
         guard !scanning else { return }
         scanError = nil
         scanning = true
-        scanPhaseLabel = "Scanning (administrator)"
+        // "Authorizing" reads better than "Scanning" while the
+        // auth dialog is on screen and the subprocess hasn't
+        // started writing progress events yet. Flips to
+        // "Scanning (administrator)" on the first progress
+        // event.
+        scanPhaseLabel = "Authorizing"
         scanProgressScanned = 0
         scanProgressSkipped = 0
         scanProgressBytes = 0
         scanProgressElapsedMs = 0
-        // Indeterminate denominator (B): privileged scan currently
-        // has no streaming progress, so the bar stays at "no
-        // fraction" until the subprocess finishes. The terminal
-        // path below sets all the counters from the rehydrated
-        // result so the user sees the final numbers transition
-        // cleanly into the treemap.
-        scanProgressBytesTotal = 0
+        // Denominator: same as the regular path. Volume-root
+        // scans use the volume's `used` bytes; subpath scans
+        // stay indeterminate until the terminal event snaps to
+        // the actual total.
+        if isVolumeRoot(path: path) {
+            scanProgressBytesTotal = volumeStats(for: path)?.used ?? 0
+        } else {
+            scanProgressBytesTotal = 0
+        }
         DispatchQueue.global(qos: .userInitiated).async {
-            let outcome = PrivilegedScan.run(path: path)
+            let outcome = PrivilegedScan.run(
+                path: path,
+                onProgress: { snapshot in
+                    // Marshal from the poll thread onto the main
+                    // queue before touching SwiftUI state. Same
+                    // contract as Scan.fallbackWithProgress's
+                    // onProgress.
+                    DispatchQueue.main.async {
+                        if scanPhaseLabel == "Authorizing" {
+                            scanPhaseLabel = "Scanning (administrator)"
+                        }
+                        scanProgressScanned = snapshot.scanned
+                        scanProgressSkipped = snapshot.skipped
+                        scanProgressBytes = snapshot.bytes
+                        scanProgressElapsedMs = snapshot.elapsedMs
+                        if snapshot.terminal {
+                            scanPhaseLabel = "Indexing"
+                            // Terminal snap (B): subpath scans
+                            // that started indeterminate now know
+                            // the actual byte total — set the
+                            // denominator so the bar fills to 100%.
+                            if scanProgressBytesTotal == 0 {
+                                scanProgressBytesTotal = snapshot.bytes
+                            }
+                        }
+                    }
+                }
+            )
             DispatchQueue.main.async {
                 switch outcome {
                 case .ok(let result):
@@ -1254,22 +1315,27 @@ struct NativeContentView: View {
                     lastClickedPath = ""
                     expandedNodes = [0]
                     walkSkips = result.walkSkips()
-                    // Reflect the rehydrated totals in the
-                    // progress-overlay counters so the final
-                    // frame's numbers match the treemap.
                     scanProgressScanned = result.entryCount
                     scanProgressBytes = result.logicalTotal
-                    scanProgressBytesTotal = result.logicalTotal
+                    if scanProgressBytesTotal == 0 {
+                        scanProgressBytesTotal = result.logicalTotal
+                    }
                     if !result.allocatedAvailable && metric == .allocated {
                         metric = .logical
                     }
+                    // Engage sticky admin mode: every subsequent
+                    // Scan-button click now routes through the
+                    // privileged path (with the same auth prompt
+                    // each time unless macOS's auth cache is
+                    // active).
+                    adminMode = true
                     updateLayout()
                     rebuildTreeRows()
                     rebuildExtSummary()
                 case .cancelled:
                     // Quiet — user dismissed the auth dialog. No
-                    // error popup, no toast, just go back to where
-                    // we were.
+                    // error popup, no toast, just go back to
+                    // where we were.
                     break
                 case .failed(let message, _):
                     scan = nil
@@ -1285,6 +1351,15 @@ struct NativeContentView: View {
     }
 
     private func startScan() {
+        // Sticky admin mode: once elevated, every Scan-button
+        // click stays on the privileged path. Routes through
+        // startPrivilegedScan so the user gets the same progress
+        // UI + admin chip + title suffix as the menu-triggered
+        // flow.
+        if adminMode {
+            startPrivilegedScan()
+            return
+        }
         let path = pathInput.trimmingCharacters(in: .whitespaces)
         guard !path.isEmpty else { return }
         scanError = nil

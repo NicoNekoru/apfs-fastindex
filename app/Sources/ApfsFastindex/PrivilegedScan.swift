@@ -173,18 +173,42 @@ enum PrivilegedScan {
     /// `osascript ... with administrator privileges`, which pops
     /// the macOS auth dialog (modal). The calling thread blocks
     /// until the subprocess exits.
-    static func run(path: String) -> Outcome {
+    ///
+    /// `onProgress` is invoked on a background thread (NOT the
+    /// main queue) for each progress event the CLI emits via
+    /// `--progress`, including the terminal event. The callback
+    /// should marshal back to the main queue if it touches
+    /// SwiftUI state — same contract as
+    /// `Scan.fallbackWithProgress`.
+    static func run(
+        path: String,
+        onProgress: ((Scan.ProgressSnapshot) -> Void)? = nil
+    ) -> Outcome {
         // Already-root fast path: skip osascript entirely. The
         // in-process scan inherits EUID 0 and sees every path the
-        // privileged subprocess would.
+        // privileged subprocess would. Route through
+        // Scan.fallbackWithProgress when a callback is supplied
+        // so the UI still gets live progress; otherwise the
+        // simpler non-progress entry point.
         if alreadyRoot {
-            guard let scan = Scan.fallbackAsAdministrator(path: path) else {
+            let scan: Scan?
+            if let onProgress {
+                scan = Scan.fallbackWithProgress(path: path, onProgress: onProgress)
+            } else {
+                scan = Scan.fallbackAsAdministrator(path: path)
+            }
+            guard let scan else {
                 let cause = lastFfiError()
                 return .failed(
                     message: "Administrator scan failed: \(cause).",
                     stderr: ""
                 )
             }
+            // The fallbackWithProgress path returns an
+            // isAdmin=false Scan; flip it on regardless of which
+            // entry point produced it so the UI gets admin
+            // badging.
+            scan.isAdmin = true
             return .ok(scan)
         }
 
@@ -198,29 +222,35 @@ enum PrivilegedScan {
         let cliPath = cliURL.path
 
         let tempDir = NSTemporaryDirectory()
-        let tempName = "apfs-fastindex-admin-scan-\(ProcessInfo.processInfo.processIdentifier)-\(UInt64(Date().timeIntervalSince1970 * 1000)).msgpack"
-        let tempOut = (tempDir as NSString).appendingPathComponent(tempName)
+        let runId = "\(ProcessInfo.processInfo.processIdentifier)-\(UInt64(Date().timeIntervalSince1970 * 1000))"
+        let tempOut = (tempDir as NSString)
+            .appendingPathComponent("apfs-fastindex-admin-scan-\(runId).msgpack")
+        let progressFile = (tempDir as NSString)
+            .appendingPathComponent("apfs-fastindex-admin-progress-\(runId).log")
         defer {
-            // Best-effort cleanup. Leave the file in place if
-            // removal fails (no point surfacing IO errors here);
-            // the OS's temp-cleaner will catch it on next reboot.
+            // Best-effort cleanup. Leave files in place if removal
+            // fails (no point surfacing IO errors here); the OS's
+            // temp-cleaner will catch them on next reboot.
             try? FileManager.default.removeItem(atPath: tempOut)
+            try? FileManager.default.removeItem(atPath: progressFile)
         }
 
         // Build the shell command. Every path is single-quoted
         // with embedded single-quotes escaped via the standard
-        // sh `'\''` pattern. That handles spaces, $, backticks,
-        // doubles quotes, and the like uniformly.
+        // sh `'\''` pattern. stdout → msgpack temp file; stderr →
+        // progress temp file (one JSON line per ~250ms via the
+        // CLI's --progress flag). Splitting them means the
+        // parent's progress poller never has to parse a binary
+        // msgpack stream.
         let shellCommand =
             shellQuote(cliPath)
-            + " --format msgpack "
+            + " --format msgpack --progress "
             + shellQuote(path)
             + " > "
             + shellQuote(tempOut)
+            + " 2> "
+            + shellQuote(progressFile)
 
-        // Now wrap the shell command for AppleScript. AppleScript
-        // string literals use double-quotes; inside, " and \ are
-        // the only metacharacters we need to escape.
         let appleScriptCommand =
             "do shell script "
             + appleScriptQuote(shellCommand)
@@ -231,27 +261,47 @@ enum PrivilegedScan {
         process.arguments = ["-e", appleScriptCommand]
         let stderrPipe = Pipe()
         process.standardError = stderrPipe
-        // Discard osascript's stdout — it's just the (empty)
-        // result of the do-shell-script call when we redirect the
-        // CLI's stdout to a temp file.
         process.standardOutput = Pipe()
+
+        // Kick off a progress poller on a dedicated background
+        // queue. It reads new bytes from `progressFile` every
+        // 250ms, parses one JSON event per newline-terminated
+        // line, and forwards to `onProgress`. The semaphore
+        // gates termination: when osascript exits, we signal
+        // and the loop drains any remaining events before
+        // returning.
+        let progressStop = DispatchSemaphore(value: 0)
+        let progressQueue = DispatchQueue(
+            label: "apfsfastindex.privileged.progress.poll",
+            qos: .userInitiated
+        )
+        let pollGroup = DispatchGroup()
+        if let onProgress {
+            pollGroup.enter()
+            progressQueue.async {
+                defer { pollGroup.leave() }
+                pollProgress(file: progressFile, stop: progressStop, onProgress: onProgress)
+            }
+        }
 
         do {
             try process.run()
         } catch {
+            progressStop.signal()
+            pollGroup.wait()
             return .failed(
                 message: "Could not start osascript: \(error.localizedDescription)",
                 stderr: ""
             )
         }
         process.waitUntilExit()
+        progressStop.signal()
+        pollGroup.wait()
+
         let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
         let stderrString = String(data: stderrData, encoding: .utf8) ?? ""
 
         if process.terminationStatus != 0 {
-            // AppleScript returns -128 when the user cancels the
-            // authentication prompt. osascript surfaces that as a
-            // non-zero exit with a recognisable stderr message.
             if stderrString.contains("User canceled") || stderrString.contains("(-128)") {
                 return .cancelled
             }
@@ -262,8 +312,6 @@ enum PrivilegedScan {
             return .failed(message: message, stderr: stderrString)
         }
 
-        // The CLI exited 0 — temp file should be a valid msgpack
-        // blob. Hand it to Scan.fromPrivilegedMsgpack.
         guard let scan = Scan.fromPrivilegedMsgpack(path: tempOut) else {
             let cause = lastFfiError()
             let message = "Privileged scan finished but the result file "
@@ -271,6 +319,96 @@ enum PrivilegedScan {
             return .failed(message: message, stderr: stderrString)
         }
         return .ok(scan)
+    }
+
+    // ---- progress polling -------------------------------------- //
+
+    /// Poll `file` every 250ms, parsing newline-delimited JSON
+    /// events written by `apfs-fastindex-scan --progress`. Each
+    /// event has the shape
+    /// `{"scanned":N,"skipped":N,"bytes":N,"elapsed_ms":N,"terminal":true|false}`.
+    /// Returns when `stop` is signalled.
+    private static func pollProgress(
+        file: String,
+        stop: DispatchSemaphore,
+        onProgress: @escaping (Scan.ProgressSnapshot) -> Void
+    ) {
+        var offset: UInt64 = 0
+        var pendingLine = Data()
+        while stop.wait(timeout: .now() + .milliseconds(250)) == .timedOut {
+            drainProgressFile(
+                file: file,
+                offset: &offset,
+                pendingLine: &pendingLine,
+                onProgress: onProgress
+            )
+        }
+        // Final drain after the subprocess exits — captures the
+        // terminal event the CLI wrote just before exit.
+        drainProgressFile(
+            file: file,
+            offset: &offset,
+            pendingLine: &pendingLine,
+            onProgress: onProgress
+        )
+    }
+
+    private static func drainProgressFile(
+        file: String,
+        offset: inout UInt64,
+        pendingLine: inout Data,
+        onProgress: (Scan.ProgressSnapshot) -> Void
+    ) {
+        guard let handle = FileHandle(forReadingAtPath: file) else {
+            return
+        }
+        defer { try? handle.close() }
+        do {
+            try handle.seek(toOffset: offset)
+        } catch {
+            return
+        }
+        let data: Data
+        if #available(macOS 10.15.4, *) {
+            data = (try? handle.readToEnd()) ?? Data()
+        } else {
+            data = handle.readDataToEndOfFile()
+        }
+        if data.isEmpty {
+            return
+        }
+        offset += UInt64(data.count)
+        pendingLine.append(data)
+        // Split on '\n'. Last fragment without a trailing newline
+        // stays in pendingLine until the next drain.
+        while let newlineIndex = pendingLine.firstIndex(of: 0x0A) {
+            let lineData = pendingLine.subdata(in: 0..<newlineIndex)
+            pendingLine.removeSubrange(0...newlineIndex)
+            guard let snapshot = parseProgressLine(lineData) else { continue }
+            onProgress(snapshot)
+        }
+    }
+
+    private static func parseProgressLine(_ data: Data) -> Scan.ProgressSnapshot? {
+        guard !data.isEmpty else { return nil }
+        guard let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] else {
+            return nil
+        }
+        // The CLI's --progress shape is documented in
+        // `crates/apfs-fastindex/src/main.rs`:
+        //   {"scanned":N,"skipped":N,"bytes":N,"elapsed_ms":N,"terminal":<bool>}
+        let scanned = (json["scanned"] as? NSNumber)?.uint64Value ?? 0
+        let skipped = (json["skipped"] as? NSNumber)?.uint64Value ?? 0
+        let bytes = (json["bytes"] as? NSNumber)?.uint64Value ?? 0
+        let elapsedMs = (json["elapsed_ms"] as? NSNumber)?.uint64Value ?? 0
+        let terminal = (json["terminal"] as? Bool) ?? false
+        return Scan.ProgressSnapshot(
+            scanned: scanned,
+            skipped: skipped,
+            bytes: bytes,
+            elapsedMs: elapsedMs,
+            terminal: terminal
+        )
     }
 
     // ---- helpers ------------------------------------------------- //
