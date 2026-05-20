@@ -2,39 +2,24 @@ import SwiftUI
 import Sparkle
 
 /// SwiftUI menu-item wrapper around Sparkle's `checkForUpdates`
-/// action. Disabled while another check or download is already
-/// in flight so a user mashing the menu doesn't queue multiple
-/// concurrent checks. The `canCheckForUpdates` publisher on
-/// `SPUUpdater` flips the `@Published` bound to the button's
-/// `disabled` modifier.
+/// action.
 ///
-/// Lives in its own file so the `App` body in
-/// `ApfsFastindexApp.swift` stays focused on scene/command
-/// wiring and doesn't have to carry the view-model boilerplate.
+/// Earlier iterations of this view tried to mirror Sparkle's
+/// canonical sample by bridging `SPUUpdater.canCheckForUpdates`
+/// (KVO-observable) into a `@Published` flag and toggling the
+/// button's `.disabled(...)` accordingly. That pattern composes
+/// poorly with `CommandGroup`'s rendering on macOS — the menu
+/// item could end up registered-but-invisible when the
+/// `@ObservedObject` failed to materialise during the command
+/// pass. Plain unconditional button is reliable; Sparkle
+/// handles re-entrant-check serialisation internally, so we
+/// don't lose much by dropping the disabled-binding.
 struct CheckForUpdatesView: View {
-    /// View model that bridges Sparkle's KVO-observable
-    /// `canCheckForUpdates` into SwiftUI's reactive layer.
-    private final class ViewModel: ObservableObject {
-        @Published var canCheckForUpdates: Bool = false
-
-        init(updater: SPUUpdater) {
-            // Sparkle's docs use this exact pattern for the
-            // SwiftUI menu-item wiring.
-            updater.publisher(for: \.canCheckForUpdates)
-                .assign(to: &$canCheckForUpdates)
-        }
-    }
-
-    private let updater: SPUUpdater
-    @ObservedObject private var viewModel: ViewModel
-
-    init(updater: SPUUpdater) {
-        self.updater = updater
-        self.viewModel = ViewModel(updater: updater)
-    }
+    let updater: SPUUpdater
 
     var body: some View {
-        Button("Check for Updates…", action: updater.checkForUpdates)
-            .disabled(!viewModel.canCheckForUpdates)
+        Button("Check for Updates…") {
+            updater.checkForUpdates()
+        }
     }
 }

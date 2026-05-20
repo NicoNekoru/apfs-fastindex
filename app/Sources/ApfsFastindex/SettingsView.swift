@@ -25,6 +25,16 @@ enum AppPrefs {
     /// this option auto-routes scans through the admin path.
     static let expandSnapshotsKey = "apfs.expandSnapshots"
 
+    /// Hours between automatic auto-update checks. `0` means
+    /// "check on every app launch and never schedule a
+    /// background check"; positive values configure
+    /// `SPUUpdater.updateCheckInterval` to that many hours.
+    /// Default is `24` (daily) to match the Info.plist baked-in
+    /// default. Range clamped to `[0, 168]` (1 week) in the UI
+    /// so a user can't accidentally type `99999` and trip the
+    /// auto-updater's max-interval clamp.
+    static let updateCheckIntervalHoursKey = "apfs.updateCheckIntervalHours"
+
     /// Upper bound on the worker-threads stepper. Pulled from
     /// `sysctl hw.physicalcpu` — the count of physical CPU
     /// cores, *not* the SMT-doubled logical count. EX-25
@@ -50,6 +60,7 @@ enum AppPrefs {
 
 struct SettingsView: View {
     @AppStorage(AppPrefs.expandSnapshotsKey) private var expandSnapshots: Bool = false
+    @AppStorage(AppPrefs.updateCheckIntervalHoursKey) private var updateIntervalHours: Int = 24
     @AppStorage(AppPrefs.depthKey) private var depth: Int = 0
     @AppStorage(AppPrefs.threadsKey) private var threads: Int = 0
 
@@ -118,6 +129,41 @@ struct SettingsView: View {
             Section {
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 2) {
+                        Text("Check for updates every")
+                            .font(AppFont.ui(13, weight: .semibold))
+                        Text("How often the app polls the appcast.xml on main for a newer build. 0 = check once on every launch (and never schedule a background check). Range 0–168 hours (1 week).")
+                            .font(AppFont.ui(11))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(4)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 12)
+                    Text(updateIntervalHours == 0
+                        ? "on launch"
+                        : "\(updateIntervalHours) h")
+                        .font(AppFont.ui(13))
+                        .monospacedDigit()
+                        .frame(minWidth: 80, alignment: .trailing)
+                    Stepper("", value: $updateIntervalHours, in: 0...168)
+                        .labelsHidden()
+                }
+                .onAppear {
+                    // Clamp stale prefs from older builds that may
+                    // have stored a value outside the 0–168 range.
+                    if updateIntervalHours < 0 {
+                        updateIntervalHours = 0
+                    } else if updateIntervalHours > 168 {
+                        updateIntervalHours = 168
+                    }
+                }
+            } header: {
+                Text("Updates")
+                    .font(AppFont.ui(11, weight: .semibold))
+            }
+
+            Section {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text("Expand local snapshots")
                             .font(AppFont.ui(13, weight: .semibold))
                         Text("Mount each user-visible Time Machine local snapshot of the scanned volume and fold its contents into the result under __snapshots__/<name>/. Adds ≈ one full volume walk per snapshot. Forces administrator mode.")
@@ -137,7 +183,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 600, height: 380)
+        .frame(width: 600, height: 480)
         .font(AppFont.ui(12))
     }
 }
