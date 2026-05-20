@@ -44,6 +44,21 @@ pub mod render;
 pub mod tree;
 mod volume;
 
+/// Depth ceiling for every recursive / iterative tree walk in
+/// the crate. Real APFS volumes have OMAP B-trees ≤ 5 levels
+/// deep and FS-trees ≤ 8 levels; directory nesting on macOS
+/// typically tops out around 10–20. 128 is comfortably above
+/// anything legitimate and tight enough that a crafted image
+/// with a million-deep chain (or a B-tree cycle pretending to
+/// have unbounded depth) hits the cap in milliseconds rather
+/// than blowing the stack or hanging the scanner.
+///
+/// Walkers that respect this constant: `omap::OmapResolver::lookup`,
+/// `omap::walk_node`, `fs_records::walk_fs_node`,
+/// `namespace::walk_dir`. `tree::compute_path` is iterative so
+/// the depth cap there is informational only.
+pub const MAX_TREE_DEPTH: usize = 128;
+
 use block_io::{checksum_matches, le_u32, le_u64, open_block_source, read_block};
 use object::{
     validate_object_block, ExpectedStorage, ObjectExpectation, OBJECT_TYPE_FSTREE,

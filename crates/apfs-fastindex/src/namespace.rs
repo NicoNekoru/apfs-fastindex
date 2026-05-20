@@ -139,7 +139,7 @@ impl<'a> NamespaceIndex<'a> {
         // still owns the per-directory aggregate row keyed by `.`.
         let mut visited: BTreeSet<u64> = BTreeSet::new();
         visited.insert(APFS_ROOT_DIR_OID);
-        self.walk_dir(APFS_ROOT_DIR_OID, ".", out, &mut visited);
+        self.walk_dir(APFS_ROOT_DIR_OID, ".", out, &mut visited, 0);
     }
 
     fn walk_dir(
@@ -148,7 +148,19 @@ impl<'a> NamespaceIndex<'a> {
         parent_path: &str,
         out: &mut Vec<NamespaceEntry>,
         visited: &mut BTreeSet<u64>,
+        depth: usize,
     ) {
+        // Stack-safety cap (audit #3). The `visited` set above
+        // catches DREC cycles by file_id; the depth bound catches
+        // pathologically deep but non-cyclic chains (a hostile
+        // image could supply 100k nested directories with unique
+        // file_ids). Refuse to recurse past `MAX_TREE_DEPTH` and
+        // drop the subtree silently — this walker has no error
+        // channel, so silently truncating matches its existing
+        // behaviour on `walk_skips`.
+        if depth >= crate::MAX_TREE_DEPTH {
+            return;
+        }
         let Some(children) = self.drec_children.get(&parent_id) else {
             return;
         };
@@ -172,7 +184,7 @@ impl<'a> NamespaceIndex<'a> {
                 // Recurse before the entry move so we can hand the
                 // child path in by reference; the parent path Vec push
                 // still consumes its own owned String afterwards.
-                self.walk_dir(child.file_id, &path, out, visited);
+                self.walk_dir(child.file_id, &path, out, visited, depth + 1);
             }
             out.push(NamespaceEntry {
                 path: path.into_boxed_str(),

@@ -9,7 +9,7 @@
 //! does not emit `NamespaceEntry` rows. Those steps require oracle parity
 //! probes that have not been run against Rust output yet.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::io::{Read, Seek};
 
 use serde::Serialize;
@@ -84,7 +84,16 @@ pub(crate) fn dump_fs_records<R: Read + Seek>(
         validation_notes: Vec::new(),
         records: Vec::new(),
     };
-    walk_fs_node(&mut state, reader, root_paddr, true, volume_omap)?;
+    let mut visited: HashSet<u64> = HashSet::new();
+    walk_fs_node(
+        &mut state,
+        reader,
+        root_paddr,
+        true,
+        volume_omap,
+        0,
+        &mut visited,
+    )?;
     let mut family_counts: Vec<FamilyCount> = state
         .family_counts
         .iter()
@@ -134,7 +143,26 @@ fn walk_fs_node<R: Read + Seek>(
     paddr: u64,
     is_root: bool,
     volume_omap: &OmapResolver,
+    depth: usize,
+    visited: &mut HashSet<u64>,
 ) -> Result<(), ScanError> {
+    // FS-tree cycle / depth guard (audit #3). FS-tree internal
+    // nodes hold child virtual OIDs that get resolved through
+    // the volume OMAP to physical paddrs; both layers can be
+    // crafted to point at an ancestor or to descend unboundedly.
+    // We dedup on the resolved paddr (post-OMAP) since that's
+    // the storage layer the cycle has to manifest at.
+    if depth >= crate::MAX_TREE_DEPTH {
+        return Err(ScanError::InvalidObject(format!(
+            "FS-tree walk depth exceeded {} at paddr {paddr}",
+            crate::MAX_TREE_DEPTH
+        )));
+    }
+    if !visited.insert(paddr) {
+        return Err(ScanError::InvalidObject(format!(
+            "FS-tree cycle detected at paddr {paddr}"
+        )));
+    }
     let (block, header) = read_btree_node(
         reader,
         state.block_size,
@@ -212,7 +240,15 @@ fn walk_fs_node<R: Read + Seek>(
                     state.max_xid
                 ))
             })?;
-        walk_fs_node(state, reader, mapping.paddr, false, volume_omap)?;
+        walk_fs_node(
+            state,
+            reader,
+            mapping.paddr,
+            false,
+            volume_omap,
+            depth + 1,
+            visited,
+        )?;
     }
     Ok(())
 }
