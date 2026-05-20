@@ -1,0 +1,95 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# The whole build is macOS-bound (apfs-fastindex links against
+# libSystem for getattrlistbulk and SwiftUI for the app target).
+# Linux runners would only confuse the matrix and Apple-Silicon
+# perf data, so we just don't run there.
+jobs:
+  rust-test:
+    name: cargo test
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+      - name: cargo test
+        run: cargo test -p apfs-fastindex --release
+
+  cargo-audit:
+    name: cargo audit
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cargo-audit
+        run: cargo install --locked cargo-audit
+      - name: Run audit
+        # `--deny warnings` would also fail on unmaintained-but-
+        # safe crates; we only care about advisories for now.
+        run: cargo audit
+
+  swift-ffi-tests:
+    name: swift FFI tests
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+      - name: Build Rust crate + stage native bridge
+        # `make-release.sh --no-bundle` runs cargo build, copies
+        # libapfs_fastindex.a + apfs_fastindex.h into the SwiftPM
+        # shim, and runs `swift build`. We skip the .app bundle
+        # step because the FFI tests run against the built
+        # library, not the bundle.
+        run: ./make-release.sh --no-bundle
+      - name: Run Swift FFI tests
+        run: swift run --package-path app apfs-ffi-tests
+
+  cbindgen-drift:
+    name: cbindgen no-drift
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+      - name: Build the crate so cbindgen runs
+        # `build.rs` regenerates the header into
+        # `target/<profile>/include/apfs_fastindex.h`. A
+        # cbindgen failure now panics the build script (audit
+        # fix #7), so a successful build here is itself the
+        # drift check — there's no committed header to diff
+        # against, and `build.rs` no longer swallows errors.
+        run: cargo build --release -p apfs-fastindex
+      - name: Sanity-check the header has the expected FFI symbols
+        # Lightweight grep so a future build.rs change that
+        # silently skips cbindgen still trips here.
+        run: |
+          set -e
+          HEADER=target/release/include/apfs_fastindex.h
+          test -f "$HEADER" || { echo "header missing"; exit 1; }
+          for sym in apfs_hello apfs_version apfs_scan_directory apfs_last_error apfs_log_path; do
+            grep -q "\b$sym\b" "$HEADER" || { echo "missing symbol: $sym"; exit 1; }
+          done
+          echo "all expected symbols present in $HEADER"
