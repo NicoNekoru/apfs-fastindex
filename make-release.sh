@@ -156,6 +156,37 @@ cat > "$BUNDLE/Contents/Info.plist" <<EOF
 </plist>
 EOF
 
+
+# ---------------------------------------------------------------
+# Codesign — ad-hoc (identity `-`), hardened runtime, with the
+# `app.entitlements` file. No developer cert / notarization;
+# locally-built bundles still launch because Gatekeeper allows
+# ad-hoc-signed apps built on the same machine. For
+# distribution, swap `-` for a real Developer ID identity.
+#
+# Hardened runtime is the new-since-Catalina lockdown profile;
+# it disables a few legacy macOS conveniences (JIT, unsigned
+# dylibs, dyld env vars) that the app doesn't use. Pairs with
+# `app/app.entitlements` to grant the specific exceptions the
+# context menu / file viewer needs.
+# ---------------------------------------------------------------
+ENTITLEMENTS="$REPO_ROOT/app/app.entitlements"
+if [ -f "$ENTITLEMENTS" ]; then
+    echo "==> [5/5] codesign --options runtime (ad-hoc)"
+    codesign \
+        --force \
+        --sign - \
+        --options runtime \
+        --entitlements "$ENTITLEMENTS" \
+        --timestamp=none \
+        "$BUNDLE"
+    # Verify the signature stuck. `--strict` catches bundles
+    # where the executable is signed but a nested resource
+    # isn't (we don't have nested bundles today, but the check
+    # is free and protects against future regressions).
+    codesign --verify --strict --verbose=1 "$BUNDLE" 2>&1 | sed 's/^/    /'
+fi
+
 echo
 echo "Done. App: $BUNDLE"
 echo "Run with: open $BUNDLE"
