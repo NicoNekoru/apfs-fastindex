@@ -125,6 +125,110 @@ fn admin_mode_missing_file_returns_null_and_records_error() {
     );
 }
 
+/// The CLI's `--server` mode (used by AdminSession's long-lived
+/// privileged helper) speaks a tab-delimited protocol over
+/// stdin/stdout. This integration test exercises the protocol
+/// end-to-end with a real subprocess: emit a `scan` command for
+/// the source tree, expect the `ready\t1` handshake plus `ok\t0`,
+/// then `quit`. The result file is checked back through
+/// apfs_scan_from_msgpack_file so the round-trip is the same one
+/// the GUI bridge uses.
+#[test]
+fn admin_mode_server_loop_scans_and_quits() {
+    use std::io::{BufRead, BufReader, Write};
+    use std::process::{Command, Stdio};
+
+    let crate_root =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let bin = crate_root
+        .parent()
+        .expect("crate parent")
+        .parent()
+        .expect("repo root")
+        .join("target")
+        .join(if cfg!(debug_assertions) { "debug" } else { "release" })
+        .join("apfs-fastindex-scan");
+    if !bin.exists() {
+        eprintln!(
+            "skip: apfs-fastindex-scan not built at {} — \
+             run `cargo build --bin apfs-fastindex-scan` first",
+            bin.display()
+        );
+        return;
+    }
+    let scan_target = crate_root.join("src");
+
+    let temp_dir = std::env::temp_dir();
+    let pid = std::process::id();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let out_path = temp_dir.join(format!("apfs-fastindex-server-out-{pid}-{now}.msgpack"));
+    let progress_path =
+        temp_dir.join(format!("apfs-fastindex-server-progress-{pid}-{now}.log"));
+
+    let mut child = Command::new(&bin)
+        .arg("--server")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn server-mode CLI");
+
+    let stdin = child.stdin.as_mut().expect("stdin");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut reader = BufReader::new(stdout);
+
+    // First line should be the ready handshake.
+    let mut line = String::new();
+    reader.read_line(&mut line).expect("read ready");
+    assert_eq!(line.trim_end(), "ready\t1", "unexpected handshake: {line:?}");
+
+    // Send a scan command.
+    let command = format!(
+        "scan\t{}\t{}\t{}\n",
+        scan_target.display(),
+        out_path.display(),
+        progress_path.display(),
+    );
+    stdin.write_all(command.as_bytes()).expect("write scan");
+    stdin.flush().expect("flush");
+
+    line.clear();
+    reader.read_line(&mut line).expect("read scan reply");
+    assert!(
+        line.trim_end().starts_with("ok\t"),
+        "expected ok\\t<exit>; got {line:?}"
+    );
+
+    // Send quit.
+    stdin.write_all(b"quit\n").expect("write quit");
+    stdin.flush().expect("flush");
+    line.clear();
+    reader.read_line(&mut line).expect("read quit reply");
+    assert_eq!(line.trim_end(), "ok\t0");
+
+    let status = child.wait().expect("wait");
+    assert!(status.success(), "server exited non-zero: {status:?}");
+
+    // The output msgpack should rehydrate cleanly via the
+    // existing FFI — same shape as a non-server-mode scan.
+    let c_path = CString::new(out_path.to_string_lossy().into_owned()).unwrap();
+    let handle = apfs_scan_from_msgpack_file(c_path.as_ptr());
+    assert!(
+        !handle.is_null(),
+        "server-produced msgpack failed to rehydrate; last_error = {:?}",
+        cstr_to_string(apfs_last_error())
+    );
+    let count = apfs_scan_entry_count(handle);
+    assert!(count > 0, "server scan returned zero entries");
+    apfs_scan_free(handle);
+
+    let _ = std::fs::remove_file(&out_path);
+    let _ = std::fs::remove_file(&progress_path);
+}
+
 /// A file that exists but isn't valid msgpack returns NULL and
 /// records the decode error.
 #[test]

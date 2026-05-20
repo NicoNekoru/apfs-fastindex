@@ -163,162 +163,36 @@ enum PrivilegedScan {
 
     /// Synchronous; intended to be called from a background queue.
     ///
-    /// If the GUI process is already running as root, this runs the
-    /// in-process fallback walker directly — no auth dialog, no
-    /// subprocess overhead, and the result is still marked
-    /// `isAdmin = true` so the UI shows the privileged-state
-    /// indicators.
+    /// Thin delegate to `AdminSession.shared.requestScan`. The
+    /// session manages the long-lived osascript-under-admin
+    /// helper so successive scans don't re-prompt for auth.
     ///
-    /// Otherwise it spawns the bundled CLI under
-    /// `osascript ... with administrator privileges`, which pops
-    /// the macOS auth dialog (modal). The calling thread blocks
-    /// until the subprocess exits.
+    /// `onSessionReady` fires the moment auth completes (after
+    /// the helper sends its `ready\t1` handshake) — wire this to
+    /// flip the UI's admin-mode flag immediately so the title
+    /// bar updates before the scan finishes.
     ///
-    /// `onProgress` is invoked on a background thread (NOT the
-    /// main queue) for each progress event the CLI emits via
-    /// `--progress`, including the terminal event. The callback
-    /// should marshal back to the main queue if it touches
-    /// SwiftUI state — same contract as
-    /// `Scan.fallbackWithProgress`.
+    /// `onProgress` follows the same contract as
+    /// `Scan.fallbackWithProgress.onProgress` — invoked from a
+    /// background thread, marshal to main if you touch SwiftUI.
     static func run(
         path: String,
+        onSessionReady: (() -> Void)? = nil,
         onProgress: ((Scan.ProgressSnapshot) -> Void)? = nil
     ) -> Outcome {
-        // Already-root fast path: skip osascript entirely. The
-        // in-process scan inherits EUID 0 and sees every path the
-        // privileged subprocess would. Route through
-        // Scan.fallbackWithProgress when a callback is supplied
-        // so the UI still gets live progress; otherwise the
-        // simpler non-progress entry point.
-        if alreadyRoot {
-            let scan: Scan?
-            if let onProgress {
-                scan = Scan.fallbackWithProgress(path: path, onProgress: onProgress)
-            } else {
-                scan = Scan.fallbackAsAdministrator(path: path)
-            }
-            guard let scan else {
-                let cause = lastFfiError()
-                return .failed(
-                    message: "Administrator scan failed: \(cause).",
-                    stderr: ""
-                )
-            }
-            // The fallbackWithProgress path returns an
-            // isAdmin=false Scan; flip it on regardless of which
-            // entry point produced it so the UI gets admin
-            // badging.
-            scan.isAdmin = true
-            return .ok(scan)
-        }
-
-        guard let cliURL = bundledCliURL else {
-            return .failed(
-                message: "apfs-fastindex-scan helper is missing from the app bundle. "
-                    + "Rebuild with make-release.sh.",
-                stderr: ""
-            )
-        }
-        let cliPath = cliURL.path
-
-        let tempDir = NSTemporaryDirectory()
-        let runId = "\(ProcessInfo.processInfo.processIdentifier)-\(UInt64(Date().timeIntervalSince1970 * 1000))"
-        let tempOut = (tempDir as NSString)
-            .appendingPathComponent("apfs-fastindex-admin-scan-\(runId).msgpack")
-        let progressFile = (tempDir as NSString)
-            .appendingPathComponent("apfs-fastindex-admin-progress-\(runId).log")
-        defer {
-            // Best-effort cleanup. Leave files in place if removal
-            // fails (no point surfacing IO errors here); the OS's
-            // temp-cleaner will catch them on next reboot.
-            try? FileManager.default.removeItem(atPath: tempOut)
-            try? FileManager.default.removeItem(atPath: progressFile)
-        }
-
-        // Build the shell command. Every path is single-quoted
-        // with embedded single-quotes escaped via the standard
-        // sh `'\''` pattern. stdout → msgpack temp file; stderr →
-        // progress temp file (one JSON line per ~250ms via the
-        // CLI's --progress flag). Splitting them means the
-        // parent's progress poller never has to parse a binary
-        // msgpack stream.
-        let shellCommand =
-            shellQuote(cliPath)
-            + " --format msgpack --progress "
-            + shellQuote(path)
-            + " > "
-            + shellQuote(tempOut)
-            + " 2> "
-            + shellQuote(progressFile)
-
-        let appleScriptCommand =
-            "do shell script "
-            + appleScriptQuote(shellCommand)
-            + " with administrator privileges"
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", appleScriptCommand]
-        let stderrPipe = Pipe()
-        process.standardError = stderrPipe
-        process.standardOutput = Pipe()
-
-        // Kick off a progress poller on a dedicated background
-        // queue. It reads new bytes from `progressFile` every
-        // 250ms, parses one JSON event per newline-terminated
-        // line, and forwards to `onProgress`. The semaphore
-        // gates termination: when osascript exits, we signal
-        // and the loop drains any remaining events before
-        // returning.
-        let progressStop = DispatchSemaphore(value: 0)
-        let progressQueue = DispatchQueue(
-            label: "apfsfastindex.privileged.progress.poll",
-            qos: .userInitiated
+        let outcome = AdminSession.shared.requestScan(
+            path: path,
+            onSessionReady: onSessionReady,
+            onProgress: onProgress
         )
-        let pollGroup = DispatchGroup()
-        if let onProgress {
-            pollGroup.enter()
-            progressQueue.async {
-                defer { pollGroup.leave() }
-                pollProgress(file: progressFile, stop: progressStop, onProgress: onProgress)
-            }
+        switch outcome {
+        case .ok(let scan):
+            return .ok(scan)
+        case .cancelled:
+            return .cancelled
+        case .failed(let message, let stderr):
+            return .failed(message: message, stderr: stderr)
         }
-
-        do {
-            try process.run()
-        } catch {
-            progressStop.signal()
-            pollGroup.wait()
-            return .failed(
-                message: "Could not start osascript: \(error.localizedDescription)",
-                stderr: ""
-            )
-        }
-        process.waitUntilExit()
-        progressStop.signal()
-        pollGroup.wait()
-
-        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-        let stderrString = String(data: stderrData, encoding: .utf8) ?? ""
-
-        if process.terminationStatus != 0 {
-            if stderrString.contains("User canceled") || stderrString.contains("(-128)") {
-                return .cancelled
-            }
-            let trimmed = stderrString.trimmingCharacters(in: .whitespacesAndNewlines)
-            let message = trimmed.isEmpty
-                ? "Privileged scan exited with status \(process.terminationStatus)."
-                : "Privileged scan failed: \(trimmed)"
-            return .failed(message: message, stderr: stderrString)
-        }
-
-        guard let scan = Scan.fromPrivilegedMsgpack(path: tempOut) else {
-            let cause = lastFfiError()
-            let message = "Privileged scan finished but the result file "
-                + "couldn't be loaded: \(cause)."
-            return .failed(message: message, stderr: stderrString)
-        }
-        return .ok(scan)
     }
 
     // ---- progress polling -------------------------------------- //
@@ -327,8 +201,9 @@ enum PrivilegedScan {
     /// events written by `apfs-fastindex-scan --progress`. Each
     /// event has the shape
     /// `{"scanned":N,"skipped":N,"bytes":N,"elapsed_ms":N,"terminal":true|false}`.
-    /// Returns when `stop` is signalled.
-    private static func pollProgress(
+    /// Returns when `stop` is signalled. `internal` so the
+    /// long-lived `AdminSession` helper can reuse it.
+    static func pollProgress(
         file: String,
         stop: DispatchSemaphore,
         onProgress: @escaping (Scan.ProgressSnapshot) -> Void
@@ -416,15 +291,16 @@ enum PrivilegedScan {
     /// Wrap a string in single quotes for /bin/sh. Embedded
     /// single-quotes are escaped via `'\''` (standard sh idiom).
     /// Everything else inside single quotes is literal — no $, no
-    /// backtick, no \ interpolation.
-    private static func shellQuote(_ s: String) -> String {
+    /// backtick, no \ interpolation. `internal` so the long-lived
+    /// `AdminSession` helper can reuse it.
+    static func shellQuote(_ s: String) -> String {
         let escaped = s.replacingOccurrences(of: "'", with: "'\\''")
         return "'\(escaped)'"
     }
 
     /// Wrap a string as an AppleScript double-quoted literal.
     /// Inside double-quotes, only `"` and `\` need escaping.
-    private static func appleScriptQuote(_ s: String) -> String {
+    static func appleScriptQuote(_ s: String) -> String {
         let escaped = s
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
@@ -434,7 +310,7 @@ enum PrivilegedScan {
     /// Pull the most recent FFI error message off the thread-local
     /// slot the Rust diag module populates. Returns "unknown" if
     /// no error was recorded.
-    private static func lastFfiError() -> String {
+    static func lastFfiError() -> String {
         let ptr = apfs_last_error()
         guard let ptr else { return "unknown" }
         let cstr = String(cString: ptr)

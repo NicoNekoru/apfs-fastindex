@@ -97,4 +97,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
     }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        // Tear down the privileged helper (if any) so it doesn't
+        // hang around as a zombie after the GUI dies. Best-effort
+        // — `AdminSession.shutdown()` is idempotent on the
+        // already-not-running state.
+        AdminSession.shared.shutdown()
+    }
 }

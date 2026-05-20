@@ -64,6 +64,31 @@ fn main() -> ExitCode {
         .next()
         .unwrap_or_else(|| "apfs-fastindex-scan".to_string());
 
+    // Long-lived privileged-helper mode (admin-session productisation):
+    // when the GUI's `AdminSession` spawns this binary via
+    // osascript-with-administrator-privileges, it passes `--server` as
+    // the single argument. The CLI then reads tab-delimited commands
+    // from stdin (one per line) and acts on them — reusing the same
+    // privileged process across all subsequent scans means the auth
+    // dialog pops once per session, not once per scan.
+    //
+    // Protocol:
+    //   stdin:  scan<TAB><path><TAB><out_msgpack><TAB><progress_log>\n
+    //           quit\n
+    //   stdout: ready<TAB>1\n     (emitted once at startup)
+    //           ok<TAB><exit>\n   (after each scan)
+    //           err<TAB><msg>\n   (malformed command, missing args, etc.)
+    //
+    // All stdout writes are explicitly flushed so the parent never
+    // waits behind pipe buffering.
+    // Collect args once so we can both peek for `--server` and
+    // continue parsing the rest if it isn't present.
+    let args: Vec<String> = args.collect();
+    if args.iter().any(|a| a == "--server") {
+        return run_server_mode();
+    }
+    let args = args.into_iter();
+
     let mut summary_only = false;
     let mut pretty = false;
     let mut slim = false;
@@ -756,4 +781,151 @@ fn print_summary_with_skips(
     for item in not_claimed {
         println!("  - {item}");
     }
+}
+
+/// Long-lived privileged-helper loop. Reads tab-delimited commands
+/// from stdin, runs scans, writes status lines to stdout. See the
+/// `--server` block in `main` for the full protocol contract.
+///
+/// Each `ok`/`err`/`ready` line is flushed immediately so the GUI
+/// parent observes them in real time. The scan itself writes
+/// msgpack to the caller-supplied output path and JSON progress
+/// events (one per line, ~250 ms cadence) to the progress path.
+fn run_server_mode() -> ExitCode {
+    use std::io::{BufRead, BufReader, Write};
+
+    let threads = default_fallback_threads();
+
+    // Handshake: tell the parent the helper is up and reading
+    // stdin. The parent uses this to flip `adminMode` (title-bar
+    // update) the moment auth completes, before the first scan
+    // even starts.
+    {
+        let mut out = std::io::stdout().lock();
+        let _ = writeln!(out, "ready\t1");
+        let _ = out.flush();
+    }
+
+    let stdin = std::io::stdin();
+    let mut reader = BufReader::new(stdin.lock());
+    let mut line = String::new();
+    loop {
+        line.clear();
+        let n = match reader.read_line(&mut line) {
+            Ok(0) => return ExitCode::SUCCESS, // EOF: parent closed stdin.
+            Ok(n) => n,
+            Err(err) => {
+                let _ = writeln!(
+                    std::io::stderr().lock(),
+                    "apfs-fastindex-scan: server: stdin read error: {err}"
+                );
+                return ExitCode::from(1);
+            }
+        };
+        let _ = n; // silence unused-must-use; n is read above.
+        let trimmed = line.trim_end_matches(['\r', '\n']);
+        if trimmed.is_empty() {
+            continue;
+        }
+        let parts: Vec<&str> = trimmed.split('\t').collect();
+        let mut stdout = std::io::stdout().lock();
+        match parts.as_slice() {
+            ["scan", path, out_msgpack, progress_log] => {
+                let exit = run_server_scan(
+                    path,
+                    out_msgpack,
+                    progress_log,
+                    threads,
+                );
+                let _ = writeln!(stdout, "ok\t{exit}");
+                let _ = stdout.flush();
+            }
+            ["quit"] => {
+                let _ = writeln!(stdout, "ok\t0");
+                let _ = stdout.flush();
+                return ExitCode::SUCCESS;
+            }
+            other => {
+                let _ = writeln!(
+                    stdout,
+                    "err\tunknown command: {}",
+                    other.join("\\t")
+                );
+                let _ = stdout.flush();
+            }
+        }
+    }
+}
+
+/// Run one scan from the server loop. Writes msgpack to
+/// `out_msgpack` and one JSON progress line per ~250 ms to
+/// `progress_log`. Returns the process-equivalent exit code
+/// (0 = success, non-zero = scan-side failure).
+fn run_server_scan(
+    path: &str,
+    out_msgpack: &str,
+    progress_log: &str,
+    threads: usize,
+) -> i32 {
+    use std::fs::File;
+    use std::io::Write;
+
+    let mut progress_file = match File::create(progress_log) {
+        Ok(f) => f,
+        Err(err) => {
+            let _ = writeln!(
+                std::io::stderr().lock(),
+                "apfs-fastindex-scan: server: cannot open progress log {progress_log}: {err}"
+            );
+            return 1;
+        }
+    };
+    let mut progress_writer = |event: ProgressEvent| {
+        let _ = writeln!(
+            progress_file,
+            "{{\"scanned\":{},\"skipped\":{},\"bytes\":{},\"elapsed_ms\":{},\"terminal\":{}}}",
+            event.scanned,
+            event.skipped,
+            event.bytes,
+            event.elapsed.as_millis(),
+            event.terminal
+        );
+        let _ = progress_file.flush();
+    };
+    let options = FallbackOptions {
+        cross_mounts: false,
+        progress: Some(&mut progress_writer as &mut (dyn FnMut(ProgressEvent) + Send)),
+        threads,
+        skip_aggregates: false,
+    };
+
+    let scan = match fallback_scan_path_with_options(path, options) {
+        Ok(s) => s,
+        Err(err) => {
+            let _ = writeln!(
+                std::io::stderr().lock(),
+                "apfs-fastindex-scan: server: scan {path} failed: {err}"
+            );
+            return 1;
+        }
+    };
+
+    let bytes = match rmp_serde::to_vec_named(&scan) {
+        Ok(b) => b,
+        Err(err) => {
+            let _ = writeln!(
+                std::io::stderr().lock(),
+                "apfs-fastindex-scan: server: serialise {out_msgpack} failed: {err}"
+            );
+            return 1;
+        }
+    };
+    if let Err(err) = std::fs::write(out_msgpack, &bytes) {
+        let _ = writeln!(
+            std::io::stderr().lock(),
+            "apfs-fastindex-scan: server: write {out_msgpack} failed: {err}"
+        );
+        return 1;
+    }
+    0
 }

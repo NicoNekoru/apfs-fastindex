@@ -142,11 +142,12 @@ struct NativeContentView: View {
             // matching the regular Scan button's flow.
             startPrivilegedScan()
         }
-        .onChange(of: scan?.isAdmin) { _ in
-            // Refresh the window title so the "— Administrator"
-            // suffix reflects the current scan's privileged state.
-            // Routes through NSApp because SwiftUI's `.navigationTitle`
-            // is per-toolbar on macOS rather than per-window.
+        .onChange(of: adminMode) { _ in
+            // adminMode flips the moment auth completes
+            // (AdminSession's ready handshake); refresh the
+            // title and chip immediately. Routes through NSApp
+            // because SwiftUI's `.navigationTitle` is per-toolbar
+            // on macOS rather than per-window.
             applyWindowTitle()
         }
         .onAppear { applyWindowTitle() }
@@ -802,14 +803,14 @@ struct NativeContentView: View {
             } else if let scan {
                 statusPill(scan.sourceKind.isEmpty ? "fallback" : scan.sourceKind,
                            tint: VizPalette.accent)
-                // Admin-mode chip (EX-28 follow-up): when this Scan
-                // came from the "Scan as Administrator…" path, the
-                // results include TCC-restricted paths the
-                // unprivileged walker can't see. Surfacing the
-                // privileged state in the status bar tells the user
-                // at a glance that this view is a sudo-scan, not the
-                // standard one.
-                if scan.isAdmin {
+                // Admin-mode chip (EX-28 follow-up): bound to
+                // sticky `adminMode`, not `scan.isAdmin`, so it
+                // flips the moment auth completes (before the
+                // first scan returns). Once sticky-admin is
+                // engaged for the session, every Scan-button
+                // press routes through AdminSession's long-lived
+                // privileged helper and the chip stays on.
+                if adminMode {
                     HStack(spacing: 4) {
                         Image(systemName: "lock.fill")
                             .font(.system(size: 10, weight: .semibold))
@@ -1214,18 +1215,17 @@ struct NativeContentView: View {
 
     // MARK: - Window title
 
-    /// Apply the window title for the current scan state. When the
-    /// active Scan was produced by the privileged subprocess path,
-    /// the title gets an "— Administrator" suffix so users moving
-    /// between regular and admin scans (e.g. one window of each in
-    /// future Cmd-N support) can tell at a glance which one they're
-    /// looking at without consulting the status bar.
+    /// Apply the window title for the current admin-mode state.
+    /// The suffix flips the moment `adminMode = true` is set —
+    /// which happens via the `onSessionReady` callback as soon
+    /// as the privileged helper sends its `ready\t1` handshake,
+    /// i.e. immediately after the user authenticates. This is
+    /// strictly tied to admin-mode state (not to the displayed
+    /// scan's `isAdmin` field) so the indicator updates before
+    /// the first scan completes.
     private func applyWindowTitle() {
         let base = "apfs-fastindex"
-        let title = (scan?.isAdmin == true) ? "\(base) — Administrator" : base
-        // Apply to every window the app owns; in practice that's
-        // one window today, but the loop costs nothing and is
-        // future-proof for Cmd-N.
+        let title = adminMode ? "\(base) — Administrator" : base
         for window in NSApplication.shared.windows {
             window.title = title
         }
@@ -1280,11 +1280,20 @@ struct NativeContentView: View {
         DispatchQueue.global(qos: .userInitiated).async {
             let outcome = PrivilegedScan.run(
                 path: path,
+                onSessionReady: {
+                    // Auth just completed (helper sent its
+                    // ready handshake). Engage sticky admin
+                    // mode NOW so the title bar and chip flip
+                    // immediately, not after the first scan
+                    // finishes. The session is reusable for
+                    // every subsequent scan; the auth dialog
+                    // pops once per app lifetime.
+                    DispatchQueue.main.async {
+                        adminMode = true
+                        applyWindowTitle()
+                    }
+                },
                 onProgress: { snapshot in
-                    // Marshal from the poll thread onto the main
-                    // queue before touching SwiftUI state. Same
-                    // contract as Scan.fallbackWithProgress's
-                    // onProgress.
                     DispatchQueue.main.async {
                         if scanPhaseLabel == "Authorizing" {
                             scanPhaseLabel = "Scanning (administrator)"
@@ -1295,10 +1304,6 @@ struct NativeContentView: View {
                         scanProgressElapsedMs = snapshot.elapsedMs
                         if snapshot.terminal {
                             scanPhaseLabel = "Indexing"
-                            // Terminal snap (B): subpath scans
-                            // that started indeterminate now know
-                            // the actual byte total — set the
-                            // denominator so the bar fills to 100%.
                             if scanProgressBytesTotal == 0 {
                                 scanProgressBytesTotal = snapshot.bytes
                             }
@@ -1323,19 +1328,13 @@ struct NativeContentView: View {
                     if !result.allocatedAvailable && metric == .allocated {
                         metric = .logical
                     }
-                    // Engage sticky admin mode: every subsequent
-                    // Scan-button click now routes through the
-                    // privileged path (with the same auth prompt
-                    // each time unless macOS's auth cache is
-                    // active).
+                    // adminMode was already engaged via
+                    // onSessionReady above; idempotent here.
                     adminMode = true
                     updateLayout()
                     rebuildTreeRows()
                     rebuildExtSummary()
                 case .cancelled:
-                    // Quiet — user dismissed the auth dialog. No
-                    // error popup, no toast, just go back to
-                    // where we were.
                     break
                 case .failed(let message, _):
                     scan = nil
