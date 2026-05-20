@@ -58,16 +58,47 @@ else
 fi
 
 # ---------------------------------------------------------------
-# Step 2 — Stage the static library + generated header into the
+# Step 2 — Stage the static library + canonical header into the
 # SwiftPM systemLibrary shim. The shim's module.modulemap names
 # `apfs_fastindex` and `apfs_fastindex.h`, so the file names below
 # must match exactly.
+#
+# The header source is the **CI-checked canonical snapshot** at
+# `crates/apfs-fastindex/include/apfs_fastindex.h`, not the
+# per-build output at `target/<profile>/include/`. That single-
+# sources the bridging copy: a hand-edit to the SwiftPM file
+# can't drift undetected (audit r3 #F4), because the next run
+# of `make-release.sh` overwrites it from the canonical.
+#
+# A consistency gate runs first: if `cargo build` produced a
+# different header from the committed canonical, the script
+# stops with a clear message. That catches the dev workflow
+# where someone modified `ffi.rs` but hasn't yet committed the
+# regenerated header — same failure mode CI catches, but local
+# and immediate.
 # ---------------------------------------------------------------
 echo "==> [2/4] stage native bridge artifacts"
 SHIM_DIR="$REPO_ROOT/app/Sources/CApfsFastindex"
 mkdir -p "$SHIM_DIR"
-cp "$REPO_ROOT/target/$PROFILE/libapfs_fastindex.a"      "$SHIM_DIR/libapfs_fastindex.a"
-cp "$REPO_ROOT/target/$PROFILE/include/apfs_fastindex.h" "$SHIM_DIR/apfs_fastindex.h"
+
+CANONICAL_HEADER="$REPO_ROOT/crates/apfs-fastindex/include/apfs_fastindex.h"
+GENERATED_HEADER="$REPO_ROOT/target/$PROFILE/include/apfs_fastindex.h"
+
+if [ ! -f "$CANONICAL_HEADER" ]; then
+    echo "make-release.sh: canonical header missing at $CANONICAL_HEADER" >&2
+    echo "  cargo build produced one at $GENERATED_HEADER — copy it there and commit." >&2
+    exit 1
+fi
+if ! diff -q "$CANONICAL_HEADER" "$GENERATED_HEADER" >/dev/null 2>&1; then
+    echo "make-release.sh: canonical header is stale." >&2
+    echo "  cargo build produced a different header at $GENERATED_HEADER." >&2
+    echo "  Run: cp $GENERATED_HEADER $CANONICAL_HEADER && git add -p" >&2
+    echo "  (this catches the same drift CI's cbindgen-drift job catches.)" >&2
+    exit 1
+fi
+
+cp "$REPO_ROOT/target/$PROFILE/libapfs_fastindex.a" "$SHIM_DIR/libapfs_fastindex.a"
+cp "$CANONICAL_HEADER" "$SHIM_DIR/apfs_fastindex.h"
 
 # ---------------------------------------------------------------
 # Step 3 — Swift executable.
@@ -155,6 +186,37 @@ cat > "$BUNDLE/Contents/Info.plist" <<EOF
 </dict>
 </plist>
 EOF
+
+
+# ---------------------------------------------------------------
+# Codesign — ad-hoc (identity `-`), hardened runtime, with the
+# `app.entitlements` file. No developer cert / notarization;
+# locally-built bundles still launch because Gatekeeper allows
+# ad-hoc-signed apps built on the same machine. For
+# distribution, swap `-` for a real Developer ID identity.
+#
+# Hardened runtime is the new-since-Catalina lockdown profile;
+# it disables a few legacy macOS conveniences (JIT, unsigned
+# dylibs, dyld env vars) that the app doesn't use. Pairs with
+# `app/app.entitlements` to grant the specific exceptions the
+# context menu / file viewer needs.
+# ---------------------------------------------------------------
+ENTITLEMENTS="$REPO_ROOT/app/app.entitlements"
+if [ -f "$ENTITLEMENTS" ]; then
+    echo "==> [5/5] codesign --options runtime (ad-hoc)"
+    codesign \
+        --force \
+        --sign - \
+        --options runtime \
+        --entitlements "$ENTITLEMENTS" \
+        --timestamp=none \
+        "$BUNDLE"
+    # Verify the signature stuck. `--strict` catches bundles
+    # where the executable is signed but a nested resource
+    # isn't (we don't have nested bundles today, but the check
+    # is free and protects against future regressions).
+    codesign --verify --strict --verbose=1 "$BUNDLE" 2>&1 | sed 's/^/    /'
+fi
 
 echo
 echo "Done. App: $BUNDLE"

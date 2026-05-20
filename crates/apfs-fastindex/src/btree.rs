@@ -262,3 +262,161 @@ pub(crate) fn read_btree_node<R: Read + Seek>(
     )?;
     Ok((block, header))
 }
+
+#[cfg(test)]
+mod tests {
+    //! Adversarial-input coverage for the `key_bytes` /
+    //! `value_bytes` bounds checks landed in commit fcdb597
+    //! (security: btree-panic class). Each test constructs a
+    //! `BtreeNode` directly with a hostile `BtreeEntry` and
+    //! asserts the accessor returns `Err(InvalidObject)` instead
+    //! of panicking the way the pre-fix code did.
+
+    use super::*;
+
+    /// Build a stand-alone `BtreeNode` over `block` without going
+    /// through `parse` (which requires a full APFS object header
+    /// and TOC). The fields most callers don't care about are
+    /// stubbed to defaults; `block_size` matches `block.len()` so
+    /// the bounds-check math is independent of node geometry.
+    fn make_node(block: &[u8]) -> BtreeNode<'_> {
+        BtreeNode {
+            block,
+            block_size: block.len(),
+            flags: 0,
+            level: 0,
+            nkeys: 0,
+            data_offset: 0,
+            toc_offset: 0,
+            toc_len: 0,
+            key_area_offset: 0,
+            value_area_end: block.len(),
+            fixed_kv_size: false,
+            is_root: false,
+            is_leaf: true,
+        }
+    }
+
+    #[test]
+    fn key_bytes_rejects_oob_len() {
+        // A crafted entry with `key_offset + key_len` past the
+        // end of the block. Pre-fix this would panic in
+        // `&self.block[..end]`; the bounds check converts it
+        // to a typed error.
+        let block = vec![0u8; 64];
+        let node = make_node(&block);
+        let entry = BtreeEntry {
+            key_offset: 60,
+            key_len: Some(10), // 60 + 10 = 70 > 64
+            value_start: 0,
+            value_len: Some(0),
+        };
+        let err = node
+            .key_bytes(&entry, 0)
+            .expect_err("OOB k_len must fail-closed");
+        assert!(matches!(err, ScanError::InvalidObject(_)));
+    }
+
+    #[test]
+    fn key_bytes_rejects_offset_overflow() {
+        // `key_offset + key_len` overflows `usize`. The
+        // `checked_add` branch fires before the slice index.
+        let block = vec![0u8; 64];
+        let node = make_node(&block);
+        let entry = BtreeEntry {
+            key_offset: usize::MAX - 4,
+            key_len: Some(10),
+            value_start: 0,
+            value_len: Some(0),
+        };
+        let err = node
+            .key_bytes(&entry, 0)
+            .expect_err("offset overflow must fail-closed");
+        assert!(matches!(err, ScanError::InvalidObject(_)));
+    }
+
+    #[test]
+    fn value_bytes_rejects_oob_len() {
+        let block = vec![0u8; 64];
+        let node = make_node(&block);
+        let entry = BtreeEntry {
+            key_offset: 0,
+            key_len: Some(0),
+            value_start: 60,
+            value_len: Some(10), // 60 + 10 = 70 > 64
+        };
+        let err = node
+            .value_bytes(&entry, 0)
+            .expect_err("OOB v_len must fail-closed");
+        assert!(matches!(err, ScanError::InvalidObject(_)));
+    }
+
+    #[test]
+    fn value_bytes_rejects_offset_overflow() {
+        // The pre-fix code used `.expect("btree value end")`
+        // here; the new bounds check returns `InvalidObject`
+        // for the checked_add miss.
+        let block = vec![0u8; 64];
+        let node = make_node(&block);
+        let entry = BtreeEntry {
+            key_offset: 0,
+            key_len: Some(0),
+            value_start: usize::MAX - 4,
+            value_len: Some(10),
+        };
+        let err = node
+            .value_bytes(&entry, 0)
+            .expect_err("offset overflow must fail-closed");
+        assert!(matches!(err, ScanError::InvalidObject(_)));
+    }
+
+    #[test]
+    fn key_bytes_accepts_inbounds_variable() {
+        // Variable-size key, in-bounds — round-trips the byte
+        // slice unchanged.
+        let mut block = vec![0u8; 64];
+        block[10..18].copy_from_slice(b"hello-rs");
+        let node = make_node(&block);
+        let entry = BtreeEntry {
+            key_offset: 10,
+            key_len: Some(8),
+            value_start: 0,
+            value_len: Some(0),
+        };
+        let slice = node.key_bytes(&entry, 0).expect("in-bounds key");
+        assert_eq!(slice, b"hello-rs");
+    }
+
+    #[test]
+    fn key_bytes_accepts_inbounds_fixed_size() {
+        // Fixed-size path: `entry.key_len = None` so the
+        // caller-supplied `fixed_key_size` is used; same OOB
+        // check applies.
+        let mut block = vec![0u8; 64];
+        block[20..28].copy_from_slice(b"fixedkey");
+        let node = make_node(&block);
+        let entry = BtreeEntry {
+            key_offset: 20,
+            key_len: None,
+            value_start: 0,
+            value_len: None,
+        };
+        let slice = node.key_bytes(&entry, 8).expect("in-bounds fixed key");
+        assert_eq!(slice, b"fixedkey");
+    }
+
+    #[test]
+    fn value_bytes_accepts_inbounds_variable() {
+        let mut block = vec![0u8; 64];
+        block[40..52].copy_from_slice(b"value-bytes!");
+        let node = make_node(&block);
+        let entry = BtreeEntry {
+            key_offset: 0,
+            key_len: Some(0),
+            value_start: 40,
+            value_len: Some(12),
+        };
+        let slice = node.value_bytes(&entry, 0).expect("in-bounds value");
+        assert_eq!(slice, b"value-bytes!");
+    }
+}

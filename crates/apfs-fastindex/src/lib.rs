@@ -44,6 +44,21 @@ pub mod render;
 pub mod tree;
 mod volume;
 
+/// Depth ceiling for every recursive / iterative tree walk in
+/// the crate. Real APFS volumes have OMAP B-trees ≤ 5 levels
+/// deep and FS-trees ≤ 8 levels; directory nesting on macOS
+/// typically tops out around 10–20. 128 is comfortably above
+/// anything legitimate and tight enough that a crafted image
+/// with a million-deep chain (or a B-tree cycle pretending to
+/// have unbounded depth) hits the cap in milliseconds rather
+/// than blowing the stack or hanging the scanner.
+///
+/// Walkers that respect this constant: `omap::OmapResolver::lookup`,
+/// `omap::walk_node`, `fs_records::walk_fs_node`,
+/// `namespace::walk_dir`. `tree::compute_path` is iterative so
+/// the depth cap there is informational only.
+pub const MAX_TREE_DEPTH: usize = 128;
+
 use block_io::{checksum_matches, le_u32, le_u64, open_block_source, read_block};
 use object::{
     validate_object_block, ExpectedStorage, ObjectExpectation, OBJECT_TYPE_FSTREE,
@@ -503,13 +518,13 @@ pub fn checkpoint_scan_source<P: AsRef<Path>>(
     // entry emission on `selected_checkpoint` + the volume's
     // `fs_record_dump` keeps the emission off when any earlier
     // fail-closed gate trips.
-    let (entries, aggregates) = match selected
+    let (entries, aggregates, depth_truncations) = match selected
         .as_ref()
         .and_then(|sel| sel.volumes.first())
         .and_then(|vol| vol.fs_record_dump.as_ref())
     {
         Some(dump) => namespace::build_namespace(dump),
-        None => (Vec::new(), Vec::new()),
+        None => (Vec::new(), Vec::new(), Vec::new()),
     };
     let namespace_emitted = !entries.is_empty();
 
@@ -519,7 +534,10 @@ pub fn checkpoint_scan_source<P: AsRef<Path>>(
         backend_name: "rust-checkpoint-scan".to_string(),
         entries,
         aggregates,
-        walk_skips: Vec::new(),
+        // Round-2 audit #N4: surface namespace depth-cap
+        // truncations so they're visible to CLI/UI consumers
+        // instead of being silently dropped subtrees.
+        walk_skips: depth_truncations,
     };
 
     let correctness_claim = if namespace_emitted {

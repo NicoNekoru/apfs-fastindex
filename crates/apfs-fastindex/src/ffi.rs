@@ -550,7 +550,20 @@ pub extern "C" fn apfs_scan_node_path(scan: *const ApfsScan, idx: u32) -> ApfsPa
             if (idx as usize) >= s.tree.nodes.len() {
                 return null_ref;
             }
-            let mut cache = s.path_cache.lock().unwrap();
+            // Recover from a poisoned mutex by taking the inner
+            // guard anyway. The `path_cache` only holds owned
+            // `Box<str>` values that don't observe any external
+            // invariants — a panic mid-insert can't leave them in
+            // a partially-constructed state — so the audit's #N1
+            // "one panic → permanent DoS on all path queries"
+            // amplification doesn't apply. Pre-fix this was
+            // `.unwrap()`, which returned the FFI sentinel
+            // `(NULL, 0)` for every subsequent `apfs_scan_node_path`
+            // on the same scan handle.
+            let mut cache = s
+                .path_cache
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             // The entry stays in the HashMap for the lifetime of
             // `ApfsScan`, so the borrowed slice is valid until
             // `apfs_scan_free`. The `&'static str` lifetime extension
@@ -1024,4 +1037,168 @@ pub extern "C" fn apfs_scan_source_requested_path(scan: *const ApfsScan) -> *con
         };
         s.source_requested_path.as_ptr()
     })
+}
+
+// ─────────────────────────────────────────────────────────────
+// Walk-skip enumeration (audit r3 #F1)
+//
+// `parser_output.walk_skips` carries per-subtree skip notes
+// (permission_denied, mount_boundary, non_utf8_name,
+// depth_cap_reached, drec_cycle). The CLI's JSONL output
+// already emits them, but the SwiftUI app saw nothing — a
+// crafted image with a 1000-deep directory chain truncated
+// silently in the treemap. These two accessors expose the
+// list to Swift so the status bar can show a "N subtrees
+// elided" banner.
+//
+// Mirrors `apfs_scan_ext_summary_*` shape: `_count` returns the
+// row count and `_row(idx)` returns a borrowed (path, reason)
+// pair. Strings are valid for the lifetime of the `ApfsScan`
+// handle.
+// ─────────────────────────────────────────────────────────────
+
+/// Borrowed (path, reason) pair for one walk skip. Both strings
+/// are `ApfsPathRef`-shaped: pointer + length, no NUL terminator,
+/// owned by `ApfsScan`. UTF-8.
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct ApfsWalkSkipRow {
+    pub path: ApfsPathRef,
+    pub reason: ApfsPathRef,
+}
+
+/// Number of `walk_skip` rows recorded during the scan. 0 when
+/// the scan completed cleanly.
+#[no_mangle]
+pub extern "C" fn apfs_scan_walk_skip_count(scan: *const ApfsScan) -> u32 {
+    ffi_guard(0, move || {
+        let Some(s) = (unsafe { scan.as_ref() }) else {
+            return 0;
+        };
+        s.output.parser_output.walk_skips.len() as u32
+    })
+}
+
+/// Fetch walk-skip row `n`. Returns an all-NULL row for out-of-
+/// range indices or a NULL handle.
+#[no_mangle]
+pub extern "C" fn apfs_scan_walk_skip_row(
+    scan: *const ApfsScan,
+    n: u32,
+) -> ApfsWalkSkipRow {
+    let zero = ApfsWalkSkipRow {
+        path: ApfsPathRef {
+            bytes: ptr::null(),
+            len: 0,
+        },
+        reason: ApfsPathRef {
+            bytes: ptr::null(),
+            len: 0,
+        },
+    };
+    ffi_guard(zero, move || {
+        let Some(s) = (unsafe { scan.as_ref() }) else {
+            return zero;
+        };
+        let idx = n as usize;
+        let rows = &s.output.parser_output.walk_skips;
+        if idx >= rows.len() {
+            return zero;
+        }
+        let row = &rows[idx];
+        ApfsWalkSkipRow {
+            path: ApfsPathRef {
+                bytes: row.path.as_ptr(),
+                len: row.path.len() as u64,
+            },
+            reason: ApfsPathRef {
+                bytes: row.reason.as_ptr(),
+                len: row.reason.len() as u64,
+            },
+        }
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    //! Adversarial-input coverage for the FFI panic safety
+    //! landed in commit 1eacf54. The in-module tests focus on
+    //! `ffi_guard` itself — happy-path, sentinel on panic, and
+    //! interaction with the thread-local error slot. Cross-
+    //! binary lifecycle (process-isolated panic-hook installs,
+    //! `apfs_last_error` clear-on-read) lives in
+    //! `tests/diag_ffi.rs` so each case runs fresh.
+
+    use super::*;
+
+    #[test]
+    fn ffi_guard_returns_closure_value_when_no_panic() {
+        let result = ffi_guard(0_u32, || 42);
+        assert_eq!(result, 42);
+    }
+
+    #[test]
+    fn ffi_guard_returns_sentinel_on_panic() {
+        // `catch_unwind` is active in debug builds (cargo test
+        // runs debug by default); release builds with
+        // `panic = "abort"` would abort the test process and
+        // never reach this assertion.
+        #[cfg(debug_assertions)]
+        {
+            let result = ffi_guard(99_u32, || panic!("ffi_guard test panic"));
+            assert_eq!(result, 99, "panic should yield the sentinel");
+        }
+    }
+
+    #[test]
+    fn ffi_guard_with_pointer_sentinel() {
+        // Mirror the pattern the real FFI uses: returning a
+        // NULL pointer on bad input or panic. Confirms the
+        // generic over `R = *mut T` compiles and behaves.
+        let sentinel: *mut ApfsScan = ptr::null_mut();
+        #[cfg(debug_assertions)]
+        {
+            let result = ffi_guard(sentinel, || -> *mut ApfsScan {
+                panic!("simulated parser failure")
+            });
+            assert!(result.is_null());
+        }
+        // Non-panic path: returns whatever the closure made.
+        let result = ffi_guard(sentinel, || -> *mut ApfsScan { sentinel });
+        assert!(result.is_null());
+    }
+
+    /// Round-2 audit #N1 regression: the `path_cache` Mutex must
+    /// recover from a poison instead of permanently returning
+    /// `(NULL, 0)` to every subsequent `apfs_scan_node_path`
+    /// call. We force a poison by panicking while holding the
+    /// guard, then confirm we can still read and write the map
+    /// afterwards.
+    #[test]
+    fn path_cache_recovers_from_poison() {
+        use std::collections::HashMap;
+        use std::sync::Mutex;
+
+        let cache: Mutex<HashMap<u32, Box<str>>> = Mutex::new(HashMap::new());
+
+        // Poison the mutex: panic while the guard is held.
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut guard = cache.lock().unwrap();
+            guard.insert(7, Box::from("pre-poison"));
+            panic!("synthetic panic to poison the mutex");
+        }));
+
+        // Sanity: the mutex is poisoned.
+        assert!(cache.lock().is_err(), "mutex should be poisoned after panic");
+
+        // The recovery idiom we ship in `apfs_scan_node_path`.
+        let mut guard = cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        // Pre-poison entry survived.
+        assert_eq!(guard.get(&7).map(|s| s.as_ref()), Some("pre-poison"));
+        // And we can still write.
+        guard.insert(9, Box::from("post-poison"));
+        assert_eq!(guard.get(&9).map(|s| s.as_ref()), Some("post-poison"));
+    }
 }

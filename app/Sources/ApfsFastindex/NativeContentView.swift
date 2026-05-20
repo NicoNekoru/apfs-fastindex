@@ -1,5 +1,6 @@
-import SwiftUI
 import AppKit
+import ApfsCore
+import SwiftUI
 
 /// Phase-5b SwiftUI shell over the native renderer. Path field
 /// + scan trigger live up top; the centre is the treemap; a
@@ -40,6 +41,12 @@ struct NativeContentView: View {
     /// typical /Applications-class scan that's well under
     /// 10 ms so we don't bother caching across navigations.
     @State private var extSummary: Scan.ExtSummary?
+    /// Walker-side skips reported by the FFI (audit r3 #F1):
+    /// permission-denied subtrees, depth-cap truncations,
+    /// DREC cycles, etc. Snapshotted once at scan finalize so
+    /// the status-bar banner doesn't re-walk the FFI on every
+    /// redraw.
+    @State private var walkSkips: [Scan.WalkSkip] = []
 
     // Live scan progress. While `scanning` is true the centered
     // overlay shows `scanPhaseLabel` + the counters below. Phase
@@ -282,9 +289,12 @@ struct NativeContentView: View {
                 Button {
                     navigate(to: row.nodeIndex)
                 } label: {
+                    // Sanitise parser-supplied names before
+                    // they hit the tree-list row (audit #App-2).
                     let name: String = {
                         if row.nodeIndex == 0 { return "/" }
-                        return scan?.name(of: row.nodeIndex) ?? "?"
+                        let raw = scan?.name(of: row.nodeIndex) ?? "?"
+                        return DisplaySanitizer.sanitiseDisplay(raw)
                     }()
                     HStack(spacing: 0) {
                         Text(name)
@@ -368,8 +378,13 @@ struct NativeContentView: View {
     private func navigate(to nodeIndex: UInt32) {
         guard let scan else { return }
         currentNode = nodeIndex
+        // `lastClickedPath` is rendered in the status bar; route
+        // parser bytes through the display sanitiser before they
+        // become UI text (audit #App-2). The unsanitised string
+        // is never used for any FS action — that path goes
+        // through `PathContainment` in `TreemapView`.
         let path = scan.path(of: nodeIndex) ?? ""
-        lastClickedPath = path.isEmpty ? "/" : path
+        lastClickedPath = DisplaySanitizer.sanitiseDisplay(path.isEmpty ? "/" : path)
         // Expand the path so the highlighted row is visible.
         // We don't auto-expand subtrees — only ancestors of the
         // navigated node.
@@ -720,11 +735,16 @@ struct NativeContentView: View {
             let label: String
             if c == 0 {
                 // Synthetic root — show "/" plus the scan's
-                // requested path so the user has context.
+                // requested path so the user has context. The
+                // requested path came from the user (typed into
+                // the toolbar), not from a parser, so no
+                // sanitisation needed here.
                 let root = scan.sourceRequestedPath
                 label = root.isEmpty ? "/" : root
             } else {
-                label = scan.name(of: c) ?? "?"
+                // Parser-supplied name; sanitise before
+                // rendering into the breadcrumb (audit #App-2).
+                label = DisplaySanitizer.sanitiseDisplay(scan.name(of: c) ?? "?")
             }
             chain.append(BreadcrumbNode(index: c, label: label))
             cursor = scan.parent(of: c)
@@ -748,6 +768,16 @@ struct NativeContentView: View {
                 Text(totalsText(for: scan))
                     .font(AppFont.ui(12)).monospacedDigit()
                     .foregroundStyle(VizPalette.muted)
+                // Walk-skip banner (audit r3 #F1). Shown when
+                // the walker recorded any skip — permission
+                // denied, mount boundary, depth-cap truncation,
+                // DREC cycle. Tooltip lists the first few
+                // entries so the user can investigate without
+                // a separate UI surface.
+                if !walkSkips.isEmpty {
+                    statusPill("\(walkSkips.count) elided", tint: VizPalette.warning)
+                        .help(walkSkipTooltip)
+                }
                 if !lastClickedPath.isEmpty {
                     Spacer()
                     Text(lastClickedPath)
@@ -767,6 +797,27 @@ struct NativeContentView: View {
                 Spacer()
             }
         }
+    }
+
+    /// Multi-line tooltip text for the walk-skip pill. Sums
+    /// reasons by category + lists the first few paths so the
+    /// user has enough to investigate without a popover.
+    /// Sanitised so a crafted skip-path can't spoof the tooltip
+    /// (audit #App-2 applies here too).
+    private var walkSkipTooltip: String {
+        var counts: [String: Int] = [:]
+        for s in walkSkips {
+            counts[s.reason, default: 0] += 1
+        }
+        let summary = counts
+            .sorted { $0.key < $1.key }
+            .map { "\($1) × \($0)" }
+            .joined(separator: ", ")
+        let sample = walkSkips.prefix(5)
+            .map { "  \(DisplaySanitizer.sanitiseDisplay($0.path)) — \($0.reason)" }
+            .joined(separator: "\n")
+        let more = walkSkips.count > 5 ? "\n  … and \(walkSkips.count - 5) more" : ""
+        return "Walker elided \(walkSkips.count) subtree(s): \(summary)\n\(sample)\(more)"
     }
 
     @ViewBuilder
@@ -1111,6 +1162,10 @@ struct NativeContentView: View {
                     currentNode = 0
                     lastClickedPath = ""
                     expandedNodes = [0]
+                    // Snapshot walk-skips (audit r3 #F1) so the
+                    // status-bar banner can show how many
+                    // subtrees the walker refused to descend.
+                    walkSkips = result.walkSkips()
                     if !result.allocatedAvailable && metric == .allocated {
                         metric = .logical
                     }
@@ -1122,6 +1177,7 @@ struct NativeContentView: View {
                     layout = nil
                     treeRows = []
                     extSummary = nil
+                    walkSkips = []
                     // Pull the Rust-side last-error if there is
                     // one — this is what makes panics and
                     // recoverable scan failures user-visible
@@ -1172,8 +1228,10 @@ struct NativeContentView: View {
         } else {
             // Leaf (file / symlink): surface the path but don't
             // drill — the cell isn't a navigable container.
+            // Sanitised for the status bar (audit #App-2); no
+            // FS action is keyed off this string.
             let path = scan.path(of: nodeIndex) ?? ""
-            lastClickedPath = path.isEmpty ? "/" : path
+            lastClickedPath = DisplaySanitizer.sanitiseDisplay(path.isEmpty ? "/" : path)
         }
     }
 
