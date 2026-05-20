@@ -893,9 +893,18 @@ struct NativeContentView: View {
                     .tint(VizPalette.accent)
             }
 
-            // Single line of "X / Y bytes (NN%)" — explicit
-            // numbers so the user can see real progress beyond
-            // the bar. Hidden when we have no denominator.
+            // Bytes-scanned ground truth (C): the left-hand
+            // number is the running sum of `entry.logical_size`
+            // that the walker reports — the same number the
+            // treemap shows as "logical" after the scan
+            // completes. Shown identically in both bar modes
+            // so the user has a stable anchor regardless of
+            // whether the bar is determinate.
+            //
+            // When the denominator is known (volume-root scan,
+            // or post-terminal-snap on a subpath scan) we
+            // append " / Y · NN%" for context. Otherwise just
+            // the running scanned bytes.
             if let fraction {
                 Text(
                     "\(formattedBytes(scanProgressBytes)) / \(formattedBytes(scanProgressBytesTotal)) "
@@ -904,19 +913,21 @@ struct NativeContentView: View {
                 .font(AppFont.ui(11)).monospacedDigit()
                 .foregroundStyle(VizPalette.text)
             } else {
-                Text(formattedBytes(scanProgressBytes))
+                Text("\(formattedBytes(scanProgressBytes)) scanned")
                     .font(AppFont.ui(11)).monospacedDigit()
                     .foregroundStyle(VizPalette.text)
             }
 
-            // Items / skipped row. `Skipped` is rendered with
-            // value "0" when none have skipped yet, so the row
-            // height is stable across the whole scan — the user
-            // doesn't get a layout-shift the first time a
-            // permission-denied directory appears.
+            // Items / skipped row. The "Items" cell shows the
+            // running entry count — the same number the final
+            // treemap reports as `entryCount`. `Skipped` is
+            // rendered with value "0" when none have skipped
+            // yet, so the row height is stable across the whole
+            // scan — the user doesn't get a layout-shift the
+            // first time a permission-denied directory appears.
             HStack(spacing: 0) {
                 Spacer(minLength: 0)
-                fixedMetricCell(label: "Scanned",
+                fixedMetricCell(label: "Items",
                                 value: scanProgressScanned.formatted(),
                                 width: 130)
                 fixedMetricCell(label: "Skipped",
@@ -1083,6 +1094,37 @@ struct NativeContentView: View {
         )
     }
 
+    /// Returns `true` iff `path` is the mount point of its
+    /// containing volume — i.e. scanning `path` covers exactly
+    /// the bytes `statfs` reports as "used" for that volume.
+    /// Drives the progress-bar denominator choice in
+    /// `startScan`: volume-root scans get an accurate
+    /// determinate bar from byte zero; subpath scans start
+    /// indeterminate and snap on terminal.
+    ///
+    /// Comparison is on `standardizedFileURL` (resolves `.` /
+    /// `..` and trailing slashes) so `"/"`, `"/."`, and
+    /// `"/Volumes/MyDisk/"` all normalise to their canonical
+    /// volume URL before the `==`. Symlink resolution is
+    /// deliberately *not* applied — a symlink whose target
+    /// happens to be a mount point shouldn't be treated as
+    /// the volume root for accounting purposes; the user
+    /// asked us to scan the symlink, not the resolved path.
+    private func isVolumeRoot(path: String) -> Bool {
+        guard !path.isEmpty else { return false }
+        let url = URL(fileURLWithPath: path).standardizedFileURL
+        // Note: `URLResourceValues`'s property is `.volume`,
+        // accessed via the `volumeURLKey` lookup. The Swift
+        // shape is consistent with `volumeLocalizedNameKey` →
+        // `values.volumeLocalizedName` above.
+        guard let values = try? url.resourceValues(forKeys: [.volumeURLKey]),
+              let volumeURL = values.volume
+        else {
+            return false
+        }
+        return url == volumeURL.standardizedFileURL
+    }
+
     @ViewBuilder
     private func metricCell(label: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 1) {
@@ -1121,12 +1163,27 @@ struct NativeContentView: View {
         scanProgressSkipped = 0
         scanProgressBytes = 0
         scanProgressElapsedMs = 0
-        // Snapshot the volume's used bytes as the progress
-        // denominator. Whole-volume scans land near 100%; subdir
-        // scans terminate before the bar fills (the bar
-        // disappears when `scanning` flips false, so an
-        // under-100% finish is invisible).
-        scanProgressBytesTotal = volumeStats(for: path)?.used ?? 0
+        // Progress-bar denominator strategy (A+B):
+        //
+        //   A. Volume-root scan (path is its own mount point) →
+        //      use the volume's `used` bytes. The denominator
+        //      is accurate by construction because scanning
+        //      the whole volume covers exactly those bytes.
+        //
+        //   B. Subpath scan → start indeterminate (`= 0`,
+        //      which the overlay reads as "no fraction").
+        //      `volume.used` here would be wrong — it
+        //      includes data outside the scan root that we
+        //      never visit, so the bar would never reach 100%.
+        //      On the walker's `terminal` event we snap the
+        //      denominator to the actual scanned bytes so the
+        //      bar visually completes at exactly 100% before
+        //      transitioning to the treemap.
+        if isVolumeRoot(path: path) {
+            scanProgressBytesTotal = volumeStats(for: path)?.used ?? 0
+        } else {
+            scanProgressBytesTotal = 0
+        }
         DispatchQueue.global(qos: .userInitiated).async {
             let result = Scan.fallbackWithProgress(
                 path: path,
@@ -1145,6 +1202,18 @@ struct NativeContentView: View {
                         scanProgressElapsedMs = snapshot.elapsedMs
                         if snapshot.terminal {
                             scanPhaseLabel = "Indexing"
+                            // Terminal snap (B): for subpath
+                            // scans that started indeterminate,
+                            // we now know the actual total —
+                            // set the denominator to it so the
+                            // bar fills to exactly 100% on the
+                            // last frame before transitioning.
+                            // Volume-root scans already have a
+                            // valid denominator from startScan,
+                            // so the `== 0` guard skips them.
+                            if scanProgressBytesTotal == 0 {
+                                scanProgressBytesTotal = snapshot.bytes
+                            }
                         }
                     }
                 }
