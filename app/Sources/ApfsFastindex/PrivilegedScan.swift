@@ -68,10 +68,46 @@ enum PrivilegedScan {
         Bundle.main.url(forAuxiliaryExecutable: "apfs-fastindex-scan")
     }
 
+    /// True iff the GUI process is already running with EUID 0.
+    /// In that case the in-process fallback walker already sees
+    /// every TCC-restricted path (the kernel checks EUID, not
+    /// whether the call came from a freshly-spawned subprocess),
+    /// so the osascript escalation prompt is unnecessary.
+    /// Typical paths to this state: `sudo open …` rarely works
+    /// for sandboxed GUI apps but `sudo
+    /// /path/to/App.app/Contents/MacOS/ApfsFastindex` does, and a
+    /// future SMAppService helper would inherit it too.
+    static var alreadyRoot: Bool {
+        geteuid() == 0
+    }
+
     /// Synchronous; intended to be called from a background queue.
-    /// Pops the macOS auth dialog (modal); the calling thread blocks
+    ///
+    /// If the GUI process is already running as root, this runs the
+    /// in-process fallback walker directly — no auth dialog, no
+    /// subprocess overhead, and the result is still marked
+    /// `isAdmin = true` so the UI shows the privileged-state
+    /// indicators.
+    ///
+    /// Otherwise it spawns the bundled CLI under
+    /// `osascript ... with administrator privileges`, which pops
+    /// the macOS auth dialog (modal). The calling thread blocks
     /// until the subprocess exits.
     static func run(path: String) -> Outcome {
+        // Already-root fast path: skip osascript entirely. The
+        // in-process scan inherits EUID 0 and sees every path the
+        // privileged subprocess would.
+        if alreadyRoot {
+            guard let scan = Scan.fallbackAsAdministrator(path: path) else {
+                let cause = lastFfiError()
+                return .failed(
+                    message: "Administrator scan failed: \(cause).",
+                    stderr: ""
+                )
+            }
+            return .ok(scan)
+        }
+
         guard let cliURL = bundledCliURL else {
             return .failed(
                 message: "apfs-fastindex-scan helper is missing from the app bundle. "

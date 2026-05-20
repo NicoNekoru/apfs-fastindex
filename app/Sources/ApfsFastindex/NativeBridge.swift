@@ -293,6 +293,26 @@ final class Scan {
         return Scan(handle: handle, isAdmin: true)
     }
 
+    /// Run the in-process fallback walker and mark the result as
+    /// admin-mode. Used when the GUI app is already running as
+    /// root (e.g. launched via `sudo` or by a SMAppService helper
+    /// in a future build) — the osascript escalation prompt is
+    /// redundant in that case, and the in-process walker already
+    /// sees every TCC-restricted path because the process EUID
+    /// is 0. The result carries `isAdmin = true` so the
+    /// status-bar chip and window title suffix still appear.
+    static func fallbackAsAdministrator(
+        path: String,
+        threads: UInt32 = 0,
+        crossMounts: Bool = false
+    ) -> Scan? {
+        let handle = path.withCString { cPath in
+            apfs_scan_directory(cPath, threads, crossMounts)
+        }
+        guard let handle else { return nil }
+        return Scan(handle: handle, isAdmin: true)
+    }
+
     /// One snapshot from the running scanner — `scanned` and
     /// `skipped` are running entry counts, `elapsedMs` is wall
     /// time since the scan began, `terminal` is `true` on the
