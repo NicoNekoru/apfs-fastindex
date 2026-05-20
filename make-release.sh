@@ -200,6 +200,42 @@ if [ -n "$RESOURCE_BUNDLE" ]; then
     cp -R "$RESOURCE_BUNDLE" "$BUNDLE/Contents/Resources/"
 fi
 
+# Sparkle.framework — copied into Contents/Frameworks/ so the
+# main binary's dyld can find it at runtime. SwiftPM only stages
+# the framework next to the binary at build time; we have to
+# ship it inside the bundle ourselves. The framework includes
+# Sparkle's nested helpers (Autoupdate, Updater.app,
+# Installer.xpc, Downloader.xpc) which the codesign step below
+# re-signs via `--deep`.
+SPARKLE_FRAMEWORK_SRC="$SWIFT_BUILD_DIR/Sparkle.framework"
+if [ ! -d "$SPARKLE_FRAMEWORK_SRC" ]; then
+    echo "make-release.sh: swift build did not produce $SPARKLE_FRAMEWORK_SRC" >&2
+    echo "  (Sparkle is a SwiftPM dependency — re-run `swift build` to repopulate.)" >&2
+    exit 1
+fi
+mkdir -p "$BUNDLE/Contents/Frameworks"
+# `cp -R` preserves symlinks (Sparkle.framework is symlink-heavy
+# under Versions/Current).
+cp -R "$SPARKLE_FRAMEWORK_SRC" "$BUNDLE/Contents/Frameworks/"
+
+# Sparkle auto-update configuration. Reads the EdDSA public key
+# from `app/sparkle-public-key.txt` if present; the corresponding
+# private key lives in the maintainer's Keychain (one-time
+# setup: `sign_update --generate-keys`). Without the public-key
+# file the build still succeeds, but auto-updates are disabled
+# (Sparkle refuses to install unsigned updates) — useful for dev
+# builds where the dev hasn't done the one-time setup yet.
+SPARKLE_PUBKEY_FILE="$REPO_ROOT/app/sparkle-public-key.txt"
+SPARKLE_PUBKEY=""
+if [ -f "$SPARKLE_PUBKEY_FILE" ]; then
+    SPARKLE_PUBKEY="$(tr -d ' \t\r\n' < "$SPARKLE_PUBKEY_FILE")"
+fi
+# Appcast lives on main; raw.githubusercontent serves it.
+# Hard-coded to the upstream `apfs-fastindex` repo. Forks that
+# want their own update channel can override SUFeedURL post-build
+# via `defaults write` or patch this string.
+SPARKLE_APPCAST_URL="https://raw.githubusercontent.com/NicoNekoru/apfs-fastindex/main/appcast.xml"
+
 cat > "$BUNDLE/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -231,6 +267,22 @@ cat > "$BUNDLE/Contents/Info.plist" <<EOF
     <string>NSApplication</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <!-- Sparkle (auto-update) keys. SUFeedURL is the appcast on
+         main; SUPublicEDKey is the EdDSA verification key Sparkle
+         uses to check every download before installing. Empty
+         pubkey disables updates rather than allowing unsigned
+         installs — the safe default for dev builds without the
+         one-time key setup. -->
+    <key>SUFeedURL</key>
+    <string>$SPARKLE_APPCAST_URL</string>
+    <key>SUPublicEDKey</key>
+    <string>$SPARKLE_PUBKEY</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUAutomaticallyUpdate</key>
+    <false/>
+    <key>SUScheduledCheckInterval</key>
+    <integer>86400</integer>
 </dict>
 </plist>
 EOF
@@ -252,6 +304,36 @@ EOF
 ENTITLEMENTS="$REPO_ROOT/app/app.entitlements"
 if [ -f "$ENTITLEMENTS" ]; then
     echo "==> [5/5] codesign --options runtime (ad-hoc)"
+
+    # Sign Sparkle.framework's nested helpers first. Sparkle 2
+    # ships an Autoupdate binary, an Updater.app, and two XPC
+    # services (Installer + Downloader) inside the framework;
+    # macOS requires each to be signed in inside-out order
+    # before the framework itself, then the outer app.
+    # `--force` overrides any pre-existing ad-hoc signature
+    # from the SwiftPM build; `--deep` would normally cascade
+    # but is documented as "best effort" in Apple's manpage,
+    # so we sign the leaves explicitly.
+    SPARKLE_FW="$BUNDLE/Contents/Frameworks/Sparkle.framework"
+    if [ -d "$SPARKLE_FW" ]; then
+        # Resolve `Versions/Current` once so the loop below
+        # doesn't traverse symlinks twice.
+        SPARKLE_VER="$SPARKLE_FW/Versions/Current"
+        for nested in \
+            "$SPARKLE_VER/XPCServices/Installer.xpc" \
+            "$SPARKLE_VER/XPCServices/Downloader.xpc" \
+            "$SPARKLE_VER/Autoupdate" \
+            "$SPARKLE_VER/Updater.app"
+        do
+            if [ -e "$nested" ]; then
+                codesign --force --sign - --options runtime \
+                    --timestamp=none "$nested"
+            fi
+        done
+        codesign --force --sign - --options runtime \
+            --timestamp=none "$SPARKLE_FW"
+    fi
+
     codesign \
         --force \
         --sign - \
@@ -261,8 +343,7 @@ if [ -f "$ENTITLEMENTS" ]; then
         "$BUNDLE"
     # Verify the signature stuck. `--strict` catches bundles
     # where the executable is signed but a nested resource
-    # isn't (we don't have nested bundles today, but the check
-    # is free and protects against future regressions).
+    # isn't (e.g. the Sparkle framework helpers above).
     codesign --verify --strict --verbose=1 "$BUNDLE" 2>&1 | sed 's/^/    /'
 fi
 
@@ -330,3 +411,117 @@ fi
 
 echo
 echo "Published $ASSET_NAME to release $RELEASE_TAG."
+
+# ---------------------------------------------------------------
+# Sparkle appcast update.
+#
+# Sign the zip with `sign_update` (Sparkle's CLI tool, ships
+# inside the Sparkle SwiftPM checkout under
+# artifacts/Sparkle/bin/) and append a new <item> to
+# appcast.xml. The maintainer then commits + pushes
+# appcast.xml so the next user-side daily check picks up the
+# release.
+#
+# Locating `sign_update`: SwiftPM unzips Sparkle's xcframework
+# under .build/artifacts/. The exact path varies by Sparkle
+# version, so we glob for the binary and fall back to a
+# clear error if we can't find it.
+#
+# When the EdDSA public-key file is missing (dev hasn't done
+# the one-time `sign_update --generate-keys` setup), skip the
+# appcast update entirely. The GitHub release still lands; the
+# release just isn't yet visible to auto-updaters until the
+# maintainer signs it manually.
+# ---------------------------------------------------------------
+if [ ! -f "$SPARKLE_PUBKEY_FILE" ]; then
+    echo
+    echo "    Sparkle: app/sparkle-public-key.txt missing — skipping appcast."
+    echo "    One-time setup:"
+    echo "      1. find .build -name sign_update -type f   # in app/"
+    echo "      2. <path-to-sign_update> --generate-keys"
+    echo "      3. The public key prints to stdout; write it to"
+    echo "         app/sparkle-public-key.txt (single line, no newline)."
+    echo "      4. Re-run make-release.sh --publish."
+    exit 0
+fi
+
+SIGN_UPDATE_BIN="$(
+    find "$REPO_ROOT/app/.build" -name sign_update -type f -perm +u+x 2>/dev/null | head -1
+)"
+if [ -z "$SIGN_UPDATE_BIN" ]; then
+    echo
+    echo "    Sparkle: sign_update binary not found under app/.build."
+    echo "    swift build should have unpacked it from the Sparkle SwiftPM"
+    echo "    artifact. The GitHub release was uploaded but the appcast was"
+    echo "    NOT updated; auto-update clients won't see this version until"
+    echo "    you re-run make-release.sh --publish after a clean build."
+    exit 1
+fi
+
+echo
+echo "==> Sparkle: sign + appcast update"
+SIGN_OUTPUT="$("$SIGN_UPDATE_BIN" "$ASSET_PATH")"
+# `sign_update` prints one line like:
+#   sparkle:edSignature="..." length="12345"
+# Parse out the signature and length so we can drop them into
+# the appcast item.
+ED_SIG="$(echo "$SIGN_OUTPUT" | sed -n 's/.*sparkle:edSignature="\([^"]*\)".*/\1/p')"
+ASSET_LEN="$(echo "$SIGN_OUTPUT" | sed -n 's/.*length="\([^"]*\)".*/\1/p')"
+if [ -z "$ED_SIG" ] || [ -z "$ASSET_LEN" ]; then
+    echo "    sign_update output not in the expected shape; got:"
+    echo "    $SIGN_OUTPUT"
+    exit 1
+fi
+
+# Build the new appcast item. Released URL is the GitHub
+# release-asset download URL — gh release returns it via the
+# `gh release view` JSON view.
+ASSET_URL="$(
+    gh release view "$RELEASE_TAG" --json assets \
+        --jq ".assets[] | select(.name == \"$ASSET_NAME\") | .url" 2>/dev/null
+)"
+if [ -z "$ASSET_URL" ]; then
+    echo "    Could not resolve asset URL for $ASSET_NAME on release $RELEASE_TAG."
+    exit 1
+fi
+
+PUB_DATE="$(date -u +'%a, %d %b %Y %H:%M:%S +0000')"
+NEW_ITEM=$(cat <<XML
+        <item>
+            <title>$RELEASE_TAG</title>
+            <pubDate>$PUB_DATE</pubDate>
+            <sparkle:version>$APP_VERSION</sparkle:version>
+            <sparkle:shortVersionString>$APP_VERSION</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <enclosure
+                url="$ASSET_URL"
+                length="$ASSET_LEN"
+                type="application/octet-stream"
+                sparkle:edSignature="$ED_SIG"
+            />
+        </item>
+XML
+)
+
+# Insert the new item right after `<channel>...</description>`
+# header block. The marker we splice on is `</language>` so
+# new items consistently land at the top (newest-first).
+APPCAST="$REPO_ROOT/appcast.xml"
+APPCAST_TMP="$APPCAST.tmp"
+awk -v item="$NEW_ITEM" '
+    /<\/language>/ {
+        print
+        print ""
+        print item
+        next
+    }
+    { print }
+' "$APPCAST" > "$APPCAST_TMP"
+mv "$APPCAST_TMP" "$APPCAST"
+
+echo "    appcast.xml updated with $RELEASE_TAG."
+echo
+echo "    Next step: commit appcast.xml and push to main so the"
+echo "    daily background check on existing installations sees"
+echo "    the new release:"
+echo "      git add appcast.xml && git commit -m 'release: $RELEASE_TAG' && git push"

@@ -1,8 +1,23 @@
 import SwiftUI
 import AppKit
+import Sparkle
 
 @main
 struct ApfsFastindexApp: App {
+    /// Sparkle 2 updater controller. Owns the SPUUpdater + the
+    /// user-driver that mediates UI prompts. Initialised with
+    /// `startingUpdater: true` so the daily background check
+    /// fires automatically; configured via Info.plist keys the
+    /// build pipeline (`make-release.sh`) injects:
+    ///
+    /// - `SUFeedURL`                appcast.xml URL on main
+    /// - `SUPublicEDKey`            EdDSA verification public key
+    /// - `SUEnableAutomaticChecks`  true (daily background poll)
+    /// - `SUAutomaticallyUpdate`    false (always prompt before
+    ///                              installing — clearer UX for
+    ///                              an early-stage app)
+    /// - `SUScheduledCheckInterval` 86400 seconds (one day)
+    private let updaterController: SPUStandardUpdaterController
     /// SwiftPM-built binaries launch as a CLI tool by default, so even
     /// though the SwiftUI scene wires up, the window is never raised to
     /// the foreground and no dock icon appears. We flip the activation
@@ -21,6 +36,11 @@ struct ApfsFastindexApp: App {
         // the FFI is misconfigured (wrong linker order, wrong
         // static-lib search path, name-mangling drift).
         NativeBridge.validate()
+        updaterController = SPUStandardUpdaterController(
+            startingUpdater: true,
+            updaterDelegate: nil,
+            userDriverDelegate: nil
+        )
     }
 
     var body: some Scene {
@@ -31,6 +51,17 @@ struct ApfsFastindexApp: App {
         }
         .windowResizability(.contentSize)
         .commands {
+            // Application menu: "Check for Updates…" — sits next
+            // to "About apfs-fastindex". `CommandGroup(after:
+            // .appInfo)` is the canonical placement for Sparkle's
+            // standard updater button per Sparkle 2's SwiftUI
+            // integration docs. The view's `disabled` state
+            // mirrors `SPUUpdater.canCheckForUpdates` (false
+            // while another check or download is in flight).
+            CommandGroup(after: .appInfo) {
+                CheckForUpdatesView(updater: updaterController.updater)
+            }
+
             // File menu: "Scan as Administrator…" (⌘⇧A). Posts a
             // notification picked up by the active
             // `NativeContentView`, which (per

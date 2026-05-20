@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Sparkle 2 appcast for apfs-fastindex.
+
+  Lives on main; served at
+  https://raw.githubusercontent.com/NicoNekoru/apfs-fastindex/main/appcast.xml
+  (the URL hard-coded into Info.plist's SUFeedURL during build).
+
+  The app polls this once a day in the background. Each <item>
+  describes one release: version string, download URL, EdDSA
+  signature (computed by `sign_update` against the .zip
+  uploaded to the matching GitHub release), and zip length in
+  bytes. Sparkle picks the highest version newer than the
+  running app's CFBundleShortVersionString, verifies the
+  signature against the public key embedded in Info.plist
+  (SUPublicEDKey), downloads the zip, replaces the bundle, and
+  restarts.
+
+  `make-release.sh --publish` appends a new <item> here
+  alongside the gh release upload. The maintainer commits the
+  updated appcast.xml to main so the next user-side
+  background-check sees the new release.
+
+  Items are listed newest-first. Each item must have:
+
+    <title>            human-readable version label
+    <pubDate>          RFC 822 timestamp
+    <sparkle:version>  the build-counter version
+                       (matches CFBundleVersion)
+    <sparkle:shortVersionString>
+                       user-visible version
+                       (matches CFBundleShortVersionString)
+    <enclosure>        url, length (bytes), type
+                       (application/octet-stream for zips),
+                       sparkle:edSignature (from sign_update)
+
+  Optional but recommended:
+
+    <description>      release notes, plain text or HTML
+                       (CDATA-wrapped if HTML)
+    <sparkle:minimumSystemVersion>  macOS floor
+
+  See https://sparkle-project.org/documentation/publishing/ for
+  the full schema.
+-->
+<rss
+    version="2.0"
+    xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"
+    xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <channel>
+        <title>apfs-fastindex updates</title>
+        <link>https://github.com/NicoNekoru/apfs-fastindex</link>
+        <description>Release feed for the apfs-fastindex macOS app.</description>
+        <language>en</language>
+        <!--
+          First real entry will be added by
+          `make-release.sh --publish` once the maintainer has
+          generated the EdDSA keypair (`sign_update
+          --generate-keys`) and written the public key to
+          `app/sparkle-public-key.txt`. Until then the channel is
+          empty and Sparkle reports "no updates available" on
+          every check — safe default.
+        -->
+    </channel>
+</rss>

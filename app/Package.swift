@@ -16,6 +16,24 @@ let package = Package(
     platforms: [
         .macOS(.v13)
     ],
+    dependencies: [
+        // Sparkle 2.x — the standard macOS auto-update framework.
+        // Used for the GitHub-releases-driven update flow: the
+        // app polls an appcast.xml hosted on main, finds new
+        // versions, downloads the EdDSA-signed zip from the
+        // matching release, verifies, replaces the bundle, and
+        // restarts. EdDSA signing lets us ship updates without
+        // Developer ID — Sparkle does the verification itself
+        // against a public key embedded in Info.plist.
+        //
+        // Pinned to 2.x minor-version-tracking. 2.6.0+ has the
+        // SwiftPM-native module the SwiftUI app can `import`
+        // directly.
+        .package(
+            url: "https://github.com/sparkle-project/Sparkle",
+            from: "2.6.0"
+        ),
+    ],
     targets: [
         .systemLibrary(
             name: "CApfsFastindex",
@@ -33,7 +51,11 @@ let package = Package(
         ),
         .executableTarget(
             name: "ApfsFastindex",
-            dependencies: ["CApfsFastindex", "ApfsCore"],
+            dependencies: [
+                "CApfsFastindex",
+                "ApfsCore",
+                .product(name: "Sparkle", package: "Sparkle"),
+            ],
             path: "Sources/ApfsFastindex",
             linkerSettings: [
                 // Tells the linker where to find
@@ -42,7 +64,19 @@ let package = Package(
                 // the package root (`app/`).
                 .unsafeFlags([
                     "-L", "Sources/CApfsFastindex",
-                ])
+                ]),
+                // Embed an rpath pointing at the .app bundle's
+                // Contents/Frameworks/ so dyld can find
+                // Sparkle.framework at runtime. SwiftPM doesn't
+                // add this by default for executable products,
+                // and without it the @rpath in Sparkle's
+                // install_name resolves to nowhere when launched
+                // from a .app bundle. The matching framework
+                // copy happens in make-release.sh.
+                .unsafeFlags([
+                    "-Xlinker", "-rpath",
+                    "-Xlinker", "@executable_path/../Frameworks",
+                ]),
             ]
         ),
         // Swift-side FFI test runner. A `.executableTarget`
