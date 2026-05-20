@@ -73,7 +73,7 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Worker threads")
                             .font(AppFont.ui(13, weight: .semibold))
-                        Text("Parallel-walker thread count. 0 (auto) picks min(hw.physicalcpu, 4). Capped at \(AppPrefs.maxWorkerThreads) — your machine's physical-core count; SMT-doubled logical counts regress under APFS container-lock contention (EX-25).")
+                        Text("Parallel-walker thread count. 0 (auto) picks min(hw.physicalcpu, 4). Capped at \(AppPrefs.maxWorkerThreads).")
                             .font(AppFont.ui(11))
                             .foregroundStyle(.secondary)
                             .lineLimit(3)
@@ -105,7 +105,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 460, height: 280)
+        .frame(width: 600, height: 280)
         .font(AppFont.ui(12))
     }
 }

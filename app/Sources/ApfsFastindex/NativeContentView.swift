@@ -811,20 +811,8 @@ struct NativeContentView: View {
                 // press routes through AdminSession's long-lived
                 // privileged helper and the chip stays on.
                 if adminMode {
-                    HStack(spacing: 4) {
-                        Image(systemName: "lock.fill")
-                            .font(.system(size: 10, weight: .semibold))
-                        Text("Admin")
-                            .font(AppFont.ui(11, weight: .semibold))
-                    }
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 1)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 4)
-                            .stroke(VizPalette.warning.opacity(0.65), lineWidth: 1)
-                    )
-                    .foregroundStyle(VizPalette.warning)
-                    .help("Scan ran with administrator privileges; "
+                    statusPill("Admin", tint: VizPalette.warning) 
+                        .help("Scan ran with administrator privileges; "
                           + "TCC-restricted user-data paths are included.")
                 }
                 Text(totalsText(for: scan))
