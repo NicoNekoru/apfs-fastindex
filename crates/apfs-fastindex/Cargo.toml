@@ -43,3 +43,7 @@ libc = "0.2"
 # extern "C"` surface in `src/ffi.rs`. Runs at every `cargo
 # build`; output lands in `target/include/apfs_fastindex.h`.
 cbindgen = "0.27"
+
+[dev-dependencies]
+# Used by cache.rs's tests for filesystem-isolated cache dirs.
+tempfile = "3"

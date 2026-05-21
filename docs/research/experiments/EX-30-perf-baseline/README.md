@@ -170,3 +170,76 @@ can tell the difference. A future polish would be to switch
 to a `prompt-once-via-osascript` flow, but that's not worth
 the complexity right now — the warm-median is the number
 R4 will be measured against.
+
+## R4 v1 cache: measured on the same target (2026-05-21)
+
+The R4 v1 cache (commit landing with EX-30) was bench-tested
+against `/Users/kai` and a smaller stable tree
+(`/Users/kai/Projects/apfs-fastindex`) immediately after
+landing. Two distinct behaviours emerged:
+
+| Target                                  | Tree size | First scan | Rescan (--cache) | Speedup |
+| --------------------------------------- | --------- | ---------- | ---------------- | ------- |
+| `/Users/kai/Projects/apfs-fastindex/docs` | 441 ent / 3 dirs | 0.33 s | 0.007 s | **47×**  |
+| `/Users/kai/Projects/apfs-fastindex`    | 26k ent / ~3.9k dirs | 0.59 s | 0.12 s   | **4.9×** |
+| `/Users/kai`                            | 1.56M ent / 172k dirs | 46.6 s | 45.4 s    | **1.0×** |
+
+`/Users/kai`-class trees show **no** cache speedup. Two
+compounding reasons:
+
+1. **The signature probe is slower than the scan it should
+   replace.** The probe uses naive `read_dir` +
+   `symlink_metadata` per child; the walker uses
+   `getattrlistbulk` which batches dozens of metadata reads
+   into one syscall. On 172k dirs the probe pays ~37 s vs
+   the walker's ~9 s. So even a true cache hit costs more
+   than no cache at all.
+2. **mtime churn.** `/Users/kai` has dozens of subdirs whose
+   mtimes change every few minutes (browser caches, Spotlight,
+   log rotation, Xcode derived data). The signature is
+   recomputed at probe time; it almost never matches the
+   cached signature → miss → full scan + cache write. So
+   every cache write is wasted.
+
+For stable trees (project directories, `/Applications`,
+read-only system paths) the cache delivers the expected
+5-50× speedup; the probe is cheap because the tree is small
+and the signature is stable because nothing changes.
+
+### What v1 ships
+
+The v1 cache lives behind `--cache` (off by default) so users
+opt in per invocation. The CLI prints a "cache: hit" line to
+stderr on hits so consumers can tell what happened. No GUI
+plumbing yet — the cache integration is CLI-only this turn.
+
+### Follow-up work (R4 v2)
+
+To make the cache valuable on `/Users/kai`-class trees, two
+pieces are required and neither belongs in this commit:
+
+1. **Walker-emitted signature.** Have the parallel walker
+   accumulate the directory signature inline while it's
+   already calling `getattrlistbulk` for the scan. Eliminates
+   the separate dir-only probe. Cost moves from ~37 s extra
+   to ~0 s extra.
+2. **Per-subtree caching.** Store one signature per
+   directory, not one per scan. On rescan: walk the tree
+   incrementally — when a directory's signature matches the
+   cached one, skip its subtree entirely and reuse the
+   cached entries + aggregates for that subtree. A few
+   churning subdirs invalidate themselves; the other ~99%
+   of the tree stays cached.
+
+Together they turn a 45 s rescan-on-/Users/kai into ~1 s
+when ~10% of subdirs have changed. That's the R4 v2 promise
+and what the next EX-* will validate. Sketch:
+
+- EX-31: walker-emitted signature, FFI changes
+- EX-32: per-subtree cache + subtree-reuse-on-rescan, with
+  parity oracle against a forced full rescan
+
+Until those land, document `--cache` as "useful for stable
+trees; not recommended for active home directories." The
+release notes for the GUI surface will say so explicitly
+when the toggle ships.

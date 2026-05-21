@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 mod block_io;
 mod btree;
+pub mod cache;
 mod container;
 /// Diagnostic helpers — panic hook writing to
 /// `~/Library/Logs/apfs-fastindex.log` and the thread-local

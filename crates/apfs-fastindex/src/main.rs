@@ -101,6 +101,13 @@ fn main() -> ExitCode {
     let mut cross_mounts = false;
     let mut progress = false;
     let mut threads_arg: Option<usize> = None;
+    // R4 / EX-30 cache. Off by default (opt-in via --cache) until
+    // we've validated cache identity + invalidation against a few
+    // more real-world traces. The flag enables both read and write
+    // paths; --no-cache forces a fresh scan but still writes
+    // (useful for refreshing a stale entry).
+    let mut cache_enabled = false;
+    let mut cache_force_refresh = false;
     for arg in args {
         if pending_mode_value {
             mode = match arg.as_str() {
@@ -161,6 +168,13 @@ fn main() -> ExitCode {
             }
             "--progress" => {
                 progress = true;
+            }
+            "--cache" => {
+                cache_enabled = true;
+            }
+            "--no-cache" => {
+                cache_force_refresh = true;
+                cache_enabled = true;
             }
             "--threads" => {
                 pending_threads_value = true;
@@ -268,6 +282,8 @@ fn main() -> ExitCode {
                 progress,
                 threads,
                 format,
+                cache_enabled,
+                cache_force_refresh,
             )
         }
         Mode::Auto => unreachable!("auto resolves to Raw or Fallback above"),
@@ -409,7 +425,47 @@ fn run_fallback(
     progress: bool,
     threads: usize,
     format: OutputFormat,
+    cache_enabled: bool,
+    cache_force_refresh: bool,
 ) -> ExitCode {
+    // R4 cache hot-path. When `--cache` is on, compute the
+    // directory signature first and consult the cache. On hit:
+    // stream the cached msgpack straight to stdout. On miss:
+    // fall through to the fresh walker + write the cache after.
+    //
+    // `--no-cache` forces a fresh scan but still updates the
+    // cache; that's the "refresh" gesture.
+    //
+    // Cache is fallback-only and msgpack-only (the JSON path
+    // sees no benefit because most callers using it are
+    // dev/debug). The cache_emit_msgpack helper below validates
+    // both preconditions before serving from cache.
+    let cache_state = if cache_enabled {
+        match cache_check(std::path::Path::new(path), cache_force_refresh) {
+            Ok(state) => state,
+            Err(err) => {
+                eprintln!(
+                    "apfs-fastindex-scan: cache: probe failed: {err} (falling through to fresh scan)"
+                );
+                CacheState::Miss(None)
+            }
+        }
+    } else {
+        CacheState::Disabled
+    };
+    if let CacheState::Hit { ref scan_blob_path, ref manifest } = cache_state {
+        if let Some(exit) = cache_emit_msgpack(
+            scan_blob_path,
+            manifest,
+            summary_only,
+            format,
+        ) {
+            return exit;
+        }
+        // Format wasn't msgpack-stream-compatible, or the blob
+        // failed to read. Fall through to the fresh walk.
+    }
+
     let mut progress_writer = |event: ProgressEvent| {
         let mut stderr = std::io::stderr().lock();
         let _ = writeln!(
@@ -448,7 +504,26 @@ fn run_fallback(
                 );
                 return ExitCode::SUCCESS;
             }
-            emit_fallback_output(output, pretty, slim, format)
+            // Stash for cache write (after emission, so we don't
+            // delay stdout for cache I/O — the cache write is
+            // fire-and-forget for the next run's benefit).
+            let cache_key_sig = match cache_state {
+                CacheState::Miss(probe) => probe,
+                _ => None,
+            };
+            let entry_count = output.parser_output.entries.len();
+            let agg_count = output.parser_output.aggregates.len();
+            let exit = emit_fallback_output(&output, pretty, slim, format);
+            if cache_enabled && exit == ExitCode::SUCCESS {
+                if let Some((key, sig)) = cache_key_sig {
+                    if let Err(err) =
+                        cache_write_msgpack(&key, sig, entry_count, agg_count, &output)
+                    {
+                        eprintln!("apfs-fastindex-scan: cache: write failed: {err}");
+                    }
+                }
+            }
+            exit
         }
         Err(err) => {
             eprintln!("apfs-fastindex-scan: fallback: {err}");
@@ -457,8 +532,134 @@ fn run_fallback(
     }
 }
 
+enum CacheState {
+    Disabled,
+    /// No usable cache entry. The `Option` carries the computed
+    /// `(key, signature)` so a subsequent successful scan can
+    /// write it back without recomputing.
+    Miss(Option<(apfs_fastindex::cache::CacheKey, u64)>),
+    Hit {
+        scan_blob_path: std::path::PathBuf,
+        manifest: apfs_fastindex::cache::CacheManifest,
+    },
+}
+
+/// Compute the cache identity, probe the directory signature,
+/// and look up the cache. Returns the resulting state.
+///
+/// **Known v1 cost.** The probe (dir-only walk of the scan
+/// root) is naive `read_dir` + `symlink_metadata`. On stable
+/// trees up to ~10k dirs it's effectively free (< 50 ms); on
+/// the 172k-dir `/Users/kai` tree it's ~37 s — slower than
+/// the full `getattrlistbulk`-based scan that would otherwise
+/// run, and the signature changes between consecutive runs
+/// because of background mtime churn (browser caches, Spotlight,
+/// log rotation) so the cache never actually hits on that
+/// tree. Net effect on `/Users/kai`-class scans: the cache
+/// makes things slower.
+///
+/// The fix is a follow-up: have the walker emit its own
+/// per-directory signature inline (cheap getattrlistbulk
+/// already knows the dir mtime/ctime), then store per-subtree
+/// signatures in the manifest so a partial change invalidates
+/// only one subtree. That's a meaningful refactor — out of
+/// scope for the v1 commit. Documented in
+/// `docs/research/experiments/EX-30-perf-baseline/README.md`.
+///
+/// `force_refresh` skips the lookup step (treats every hit as
+/// stale) but still probes so the recomputed signature lands
+/// in the refreshed manifest.
+fn cache_check(
+    path: &std::path::Path,
+    force_refresh: bool,
+) -> Result<CacheState, apfs_fastindex::cache::CacheError> {
+    use apfs_fastindex::cache;
+    let key = cache::CacheKey::for_path(path)?;
+    let (sig, _) = cache::compute_directory_signature(path)?;
+    if !force_refresh {
+        if let Some((manifest, blob)) = cache::cache_lookup(&key, sig)? {
+            eprintln!(
+                "apfs-fastindex-scan: cache: hit ({} entries, {} dir aggregates, msgpack {} bytes)",
+                manifest.entry_count, manifest.aggregate_count, manifest.scan_msgpack_bytes
+            );
+            return Ok(CacheState::Hit {
+                scan_blob_path: blob,
+                manifest,
+            });
+        }
+    }
+    Ok(CacheState::Miss(Some((key, sig))))
+}
+
+/// Stream the cached msgpack blob to stdout. Returns
+/// `Some(ExitCode)` if the cache served the request, `None` if
+/// the format is incompatible and the caller should fall
+/// through. Currently the cache only serves
+/// `--format msgpack`; JSON and msgpack-stream go through the
+/// walker.
+fn cache_emit_msgpack(
+    scan_blob_path: &std::path::Path,
+    manifest: &apfs_fastindex::cache::CacheManifest,
+    summary_only: bool,
+    format: OutputFormat,
+) -> Option<ExitCode> {
+    if summary_only {
+        // Synthesize a summary from the manifest — entries +
+        // aggregates are recorded there, the correctness_claim
+        // is fixed-text. Cheaper than reading the msgpack.
+        print_summary_with_skips(
+            "fallback",
+            "(cache hit; correctness_claim deferred to next refresh)",
+            manifest.entry_count,
+            manifest.aggregate_count,
+            0,
+            &[],
+        );
+        return Some(ExitCode::SUCCESS);
+    }
+    if format != OutputFormat::Msgpack {
+        return None;
+    }
+    let bytes = match std::fs::read(scan_blob_path) {
+        Ok(b) => b,
+        Err(err) => {
+            eprintln!(
+                "apfs-fastindex-scan: cache: read {scan_blob_path:?} failed: {err}; refreshing"
+            );
+            return None;
+        }
+    };
+    let mut stdout = std::io::stdout().lock();
+    if stdout.write_all(&bytes).is_err() {
+        return Some(ExitCode::from(1));
+    }
+    Some(ExitCode::SUCCESS)
+}
+
+/// Serialise the fresh scan to msgpack (envelope-shaped, same
+/// as the live emission produces) and persist via
+/// `cache_save`. Errors propagate so the caller can log; cache
+/// failures must never bring down the scan.
+fn cache_write_msgpack(
+    key: &apfs_fastindex::cache::CacheKey,
+    signature: u64,
+    entry_count: usize,
+    aggregate_count: usize,
+    output: &FallbackScanOutput,
+) -> Result<(), apfs_fastindex::cache::CacheError> {
+    // Cache the envelope shape (not the raw FallbackScanOutput)
+    // so a cache-hit byte-for-byte matches what the live path
+    // would have written to stdout. Cache currently only serves
+    // non-slim msgpack; slim is rarely used outside the viz
+    // dev loop and not worth caching separately.
+    let envelope = fallback_envelope(output, false);
+    let bytes = rmp_serde::to_vec_named(&envelope)
+        .map_err(|e| apfs_fastindex::cache::CacheError::Serialize(e.to_string()))?;
+    apfs_fastindex::cache::cache_save(key, signature, entry_count, aggregate_count, &bytes)
+}
+
 fn emit_fallback_output(
-    output: FallbackScanOutput,
+    output: &FallbackScanOutput,
     pretty: bool,
     slim: bool,
     format: OutputFormat,
@@ -470,10 +671,22 @@ fn emit_fallback_output(
     // file_id / aggregate / walk_skips noise the streaming
     // consumer doesn't need anyway.
     if format == OutputFormat::MsgpackStream {
-        return emit_msgpack_stream(&output, slim);
+        return emit_msgpack_stream(output, slim);
     }
-    let envelope = if slim {
-        slim_fallback_envelope(&output)
+    let envelope = fallback_envelope(output, slim);
+    emit_output(&envelope, pretty, format)
+}
+
+/// Construct the wire-shape envelope a downstream consumer
+/// (viz, Swift app, cache reader) expects. Split out of
+/// `emit_fallback_output` so the cache write path produces a
+/// byte-for-byte match with the live emission — the cache hit
+/// must serve the same bytes the fresh scan would, otherwise
+/// a refresh-vs-cache-hit cycle subtly changes downstream
+/// behaviour.
+fn fallback_envelope(output: &FallbackScanOutput, slim: bool) -> serde_json::Value {
+    if slim {
+        slim_fallback_envelope(output)
     } else {
         // Wrap the fallback output so consumers can read `mode` first
         // and pick the right schema. Raw output stays in its existing
@@ -484,8 +697,7 @@ fn emit_fallback_output(
             "correctness_claim": output.correctness_claim,
             "not_claimed": output.not_claimed,
         })
-    };
-    emit_output(&envelope, pretty, format)
+    }
 }
 
 /// Stream the fallback scan output as a sequence of msgpack
