@@ -1,0 +1,348 @@
+{
+  "experiment": "EX-31",
+  "title": "Boot-root oracle: Finder-visible namespace layout",
+  "date": "2026-05-20",
+  "host": {
+    "platform": "macOS-26.3.1-arm64-arm-64bit-Mach-O",
+    "kernel": "25.3.0"
+  },
+  "verdict": "api_only_already_correct",
+  "boot_snapshot": {
+    "device_id": "disk3s1s1",
+    "mount_point": "/",
+    "volume_name": "Macintosh HD",
+    "snapshot_name": "com.apple.os.update-5514FF97DEE9C60C7FBF462B06A418D5FC4A882D5AF41D2BAF0A1419FB9B9F86",
+    "snapshot_uuid": "3E1AC922-F4EC-433E-B4D0-0052ADD81E03",
+    "is_snapshot": true,
+    "writable": false,
+    "container_reference": "disk3"
+  },
+  "apfs_volumes": [
+    {
+      "device_id": "disk1s1",
+      "volume_uuid": "8D721355-AB5D-4EA0-877B-DBA214BD2DA2",
+      "volume_name": "iSCPreboot",
+      "role": [
+        "Preboot"
+      ],
+      "mount_point": "",
+      "container_uuid": "3387C3A2-6E9B-467B-8AAF-437AF3B8CFD7",
+      "container_reference": "disk1",
+      "capacity_in_use": 5918720,
+      "capacity_quota": 0
+    },
+    {
+      "device_id": "disk1s2",
+      "volume_uuid": "1F4F9C24-F965-4B23-A3A1-7681DBDDBABB",
+      "volume_name": "xART",
+      "role": [
+        "xART"
+      ],
+      "mount_point": "",
+      "container_uuid": "3387C3A2-6E9B-467B-8AAF-437AF3B8CFD7",
+      "container_reference": "disk1",
+      "capacity_in_use": 6311936,
+      "capacity_quota": 0
+    },
+    {
+      "device_id": "disk1s3",
+      "volume_uuid": "1613327F-A81E-4ACA-91A5-E496A0DE4834",
+      "volume_name": "Hardware",
+      "role": [
+        "Hardware"
+      ],
+      "mount_point": "",
+      "container_uuid": "3387C3A2-6E9B-467B-8AAF-437AF3B8CFD7",
+      "container_reference": "disk1",
+      "capacity_in_use": 2838528,
+      "capacity_quota": 0
+    },
+    {
+      "device_id": "disk1s4",
+      "volume_uuid": "1A5EC81E-BF88-45F8-B791-AF6EB202F000",
+      "volume_name": "Recovery",
+      "role": [
+        "Recovery"
+      ],
+      "mount_point": "",
+      "container_uuid": "3387C3A2-6E9B-467B-8AAF-437AF3B8CFD7",
+      "container_reference": "disk1",
+      "capacity_in_use": 20480,
+      "capacity_quota": 0
+    },
+    {
+      "device_id": "disk2s1",
+      "volume_uuid": "8E7A6C77-7397-4AAB-901A-61CE8BE850C0",
+      "volume_name": "Recovery",
+      "role": [
+        "Recovery"
+      ],
+      "mount_point": "",
+      "container_uuid": "D36EDCBD-DBA8-4878-A7C6-7625724FA881",
+      "container_reference": "disk2",
+      "capacity_in_use": 2108944384,
+      "capacity_quota": 0
+    },
+    {
+      "device_id": "disk2s2",
+      "volume_uuid": "6845F3F0-7DED-4904-9DCE-57692770030D",
+      "volume_name": "Update",
+      "role": [
+        "Update"
+      ],
+      "mount_point": "",
+      "container_uuid": "D36EDCBD-DBA8-4878-A7C6-7625724FA881",
+      "container_reference": "disk2",
+      "capacity_in_use": 1208320,
+      "capacity_quota": 0
+    },
+    {
+      "device_id": "disk3s1",
+      "volume_uuid": "6CBF0324-4E27-4AD6-BB70-375E403282E7",
+      "volume_name": "Macintosh HD",
+      "role": [
+        "System"
+      ],
+      "mount_point": "",
+      "container_uuid": "64FA8341-D30E-46FE-8534-6A05944414DF",
+      "container_reference": "disk3",
+      "capacity_in_use": 12455788544,
+      "capacity_quota": 0
+    },
+    {
+      "device_id": "disk3s2",
+      "volume_uuid": "EC8A5BEA-0B1B-43E5-86F6-3089DE73E847",
+      "volume_name": "Preboot",
+      "role": [
+        "Preboot"
+      ],
+      "mount_point": "",
+      "container_uuid": "64FA8341-D30E-46FE-8534-6A05944414DF",
+      "container_reference": "disk3",
+      "capacity_in_use": 8776839168,
+      "capacity_quota": 0
+    },
+    {
+      "device_id": "disk3s3",
+      "volume_uuid": "D314D03A-3E1A-4A31-A9A8-DD9B9E7BE104",
+      "volume_name": "Recovery",
+      "role": [
+        "Recovery"
+      ],
+      "mount_point": "",
+      "container_uuid": "64FA8341-D30E-46FE-8534-6A05944414DF",
+      "container_reference": "disk3",
+      "capacity_in_use": 1292111872,
+      "capacity_quota": 0
+    },
+    {
+      "device_id": "disk3s4",
+      "volume_uuid": "4FF2C0C2-EEC6-461D-8CDD-65D7F1E7C068",
+      "volume_name": "Update",
+      "role": [
+        "Update"
+      ],
+      "mount_point": "",
+      "container_uuid": "64FA8341-D30E-46FE-8534-6A05944414DF",
+      "container_reference": "disk3",
+      "capacity_in_use": 10354688,
+      "capacity_quota": 0
+    },
+    {
+      "device_id": "disk3s5",
+      "volume_uuid": "53C3C11B-267E-44AA-ADCF-6934D89D8654",
+      "volume_name": "Data",
+      "role": [
+        "Data"
+      ],
+      "mount_point": "",
+      "container_uuid": "64FA8341-D30E-46FE-8534-6A05944414DF",
+      "container_reference": "disk3",
+      "capacity_in_use": 235901497344,
+      "capacity_quota": 0
+    },
+    {
+      "device_id": "disk3s6",
+      "volume_uuid": "442A8BA2-B475-47C0-98B8-2494012FA239",
+      "volume_name": "VM",
+      "role": [
+        "VM"
+      ],
+      "mount_point": "",
+      "container_uuid": "64FA8341-D30E-46FE-8534-6A05944414DF",
+      "container_reference": "disk3",
+      "capacity_in_use": 20480,
+      "capacity_quota": 0
+    }
+  ],
+  "firmlinks": [
+    {
+      "system_path": "/AppleInternal",
+      "data_path": "AppleInternal"
+    },
+    {
+      "system_path": "/Applications",
+      "data_path": "Applications"
+    },
+    {
+      "system_path": "/Library",
+      "data_path": "Library"
+    },
+    {
+      "system_path": "/System/Library/Caches",
+      "data_path": "System/Library/Caches"
+    },
+    {
+      "system_path": "/System/Library/Assets",
+      "data_path": "System/Library/Assets"
+    },
+    {
+      "system_path": "/System/Library/PreinstalledAssets",
+      "data_path": "System/Library/PreinstalledAssets"
+    },
+    {
+      "system_path": "/System/Library/AssetsV2",
+      "data_path": "System/Library/AssetsV2"
+    },
+    {
+      "system_path": "/System/Library/PreinstalledAssetsV2",
+      "data_path": "System/Library/PreinstalledAssetsV2"
+    },
+    {
+      "system_path": "/System/Library/CoreServices/CoreTypes.bundle/Contents/Library",
+      "data_path": "System/Library/CoreServices/CoreTypes.bundle/Contents/Library"
+    },
+    {
+      "system_path": "/System/Library/Speech",
+      "data_path": "System/Library/Speech"
+    },
+    {
+      "system_path": "/Users",
+      "data_path": "Users"
+    },
+    {
+      "system_path": "/Volumes",
+      "data_path": "Volumes"
+    },
+    {
+      "system_path": "/cores",
+      "data_path": "cores"
+    },
+    {
+      "system_path": "/opt",
+      "data_path": "opt"
+    },
+    {
+      "system_path": "/private",
+      "data_path": "private"
+    },
+    {
+      "system_path": "/usr/local",
+      "data_path": "usr/local"
+    },
+    {
+      "system_path": "/usr/libexec/cups",
+      "data_path": "usr/libexec/cups"
+    },
+    {
+      "system_path": "/usr/share/snmp",
+      "data_path": "usr/share/snmp"
+    }
+  ],
+  "finder_top_level_path_map": [
+    {
+      "path": "/Applications",
+      "device": "1:13",
+      "is_firmlink": true,
+      "firmlink_target": "Applications",
+      "different_device_from_root": false,
+      "exists": true
+    },
+    {
+      "path": "/Library",
+      "device": "1:13",
+      "is_firmlink": true,
+      "firmlink_target": "Library",
+      "different_device_from_root": false,
+      "exists": true
+    },
+    {
+      "path": "/System",
+      "device": "1:13",
+      "is_firmlink": false,
+      "firmlink_target": null,
+      "different_device_from_root": false,
+      "exists": true
+    },
+    {
+      "path": "/Users",
+      "device": "1:13",
+      "is_firmlink": true,
+      "firmlink_target": "Users",
+      "different_device_from_root": false,
+      "exists": true
+    },
+    {
+      "path": "/Volumes",
+      "device": "1:13",
+      "is_firmlink": true,
+      "firmlink_target": "Volumes",
+      "different_device_from_root": false,
+      "exists": true
+    },
+    {
+      "path": "/private",
+      "device": "1:13",
+      "is_firmlink": true,
+      "firmlink_target": "private",
+      "different_device_from_root": false,
+      "exists": true
+    },
+    {
+      "path": "/usr",
+      "device": "1:13",
+      "is_firmlink": false,
+      "firmlink_target": null,
+      "different_device_from_root": false,
+      "exists": true
+    },
+    {
+      "path": "/etc",
+      "device": "1:13",
+      "is_firmlink": false,
+      "firmlink_target": null,
+      "different_device_from_root": false,
+      "exists": true
+    },
+    {
+      "path": "/var",
+      "device": "1:13",
+      "is_firmlink": false,
+      "firmlink_target": null,
+      "different_device_from_root": false,
+      "exists": true
+    },
+    {
+      "path": "/tmp",
+      "device": "1:13",
+      "is_firmlink": false,
+      "firmlink_target": null,
+      "different_device_from_root": false,
+      "exists": true
+    },
+    {
+      "path": "/opt",
+      "device": "1:13",
+      "is_firmlink": true,
+      "firmlink_target": "opt",
+      "different_device_from_root": false,
+      "exists": true
+    }
+  ],
+  "notes": [
+    "POSIX traversal already follows firmlinks transparently.",
+    "Live raw mode is EX-28-blocked (kernel rejects /dev/disk3s* reads).",
+    "Snapshot contents are EX-29-blocked (SIP-protected even with FDA).",
+    "API-only via the fallback walker is the only available production path for live boot-volume scans."
+  ]
+}
