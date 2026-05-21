@@ -46,6 +46,7 @@ const MOUNT_POINT_ENV: &str = "APFS_FASTINDEX_EX28_MOUNT_POINT";
 
 /// Classifies why a `checkpoint_scan_source` call against a live
 /// device failed, so the test surfaces the right EX-28 verdict.
+#[allow(clippy::large_enum_variant)] // test-only; not on a hot path
 enum LiveScanOutcome {
     /// Scan completed; the parity assertions can run.
     Ok(CheckpointScanOutput),

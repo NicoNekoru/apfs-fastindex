@@ -1,14 +1,19 @@
 name: release
 
-# Fires on annotated tag pushes that look like a release version
-# (`v0.1.0`, `v1.2.3-rc1`, …). The workflow builds the .app bundle
-# the same way local `make-release.sh` does and publishes it as a
-# GitHub release asset; the publish step is delegated to the
-# script so local and CI publishing stay in lockstep.
+# Manual-only. The release flow needs the EdDSA private key that
+# signs update zips for Sparkle, and that key lives in the
+# maintainer's macOS Keychain — there's no way to feed it to a
+# fresh `macos-14` runner without either committing the secret
+# to a CI vault (security trade-off the maintainer hasn't made
+# yet) or skipping signing (which leaves auto-update broken).
+# So the canonical release flow is `./make-release.sh --publish
+# --tag vX.Y.Z` run locally; the tag-push trigger used to fire
+# this workflow and exit non-zero at the sign step on every
+# release. `workflow_dispatch` keeps the workflow available for
+# the "I deliberately want to test a CI build" case without
+# spamming Actions with red ✗ entries.
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
 
 # `gh release create` needs `contents: write`. Everything else
 # stays at the read-only default.

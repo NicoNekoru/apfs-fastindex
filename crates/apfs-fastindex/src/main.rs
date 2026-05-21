@@ -1306,8 +1306,7 @@ fn merge_snapshot_into(
 mod tests {
     use super::*;
     use apfs_fastindex::{
-        DirectoryAggregate, EntryKind, NamespaceEntry, ParserOutput, ScanState,
-        SourceDescriptor, WalkSkip,
+        EntryKind, NamespaceEntry, ParserOutput, ScanState, SourceDescriptor,
     };
     use std::path::PathBuf;
 

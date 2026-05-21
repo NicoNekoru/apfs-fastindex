@@ -259,23 +259,6 @@ struct ApfsScan *apfs_scan_directory_with_progress(const char *path,
                                                    void *userdata);
 
 /**
- * Load an ApfsScan from a previously-emitted msgpack file.
- *
- * The privileged-subprocess "Scan as Administrator…" flow spawns
- * `apfs-fastindex-scan --format msgpack ...` via osascript with
- * administrator privileges. The subprocess writes its
- * `FallbackScanOutput` as a msgpack blob to a temp file the parent
- * app picks; on subprocess exit, the parent calls this FFI to
- * rehydrate an `ApfsScan` from that file — identical to the
- * in-process scan handle the Swift renderer normally reads.
- *
- * Returns `NULL` on:
- * - `path` is NULL or not valid UTF-8
- * - the file can't be opened or read
- * - the msgpack blob fails to decode as `FallbackScanOutput`
- *
- * On any of those, the caller can read `apfs_last_error` for a
- * human-readable diagnostic.
  * True iff `path` resolves to a filesystem mounted as a
  * snapshot (statfs.f_flags & MNT_SNAPSHOT). Returns 0 for any
  * error (path NULL, not UTF-8, statfs failed) so the caller
@@ -288,6 +271,26 @@ struct ApfsScan *apfs_scan_directory_with_progress(const char *path,
  */
 int32_t apfs_is_snapshot_path(const char *path);
 
+/**
+ * Load an ApfsScan from a previously-emitted msgpack file.
+ *
+ * The privileged-subprocess "Scan as Administrator…" flow
+ * spawns `apfs-fastindex-scan --format msgpack ...` via
+ * osascript with administrator privileges. The subprocess
+ * writes its `FallbackScanOutput` as a msgpack blob to a temp
+ * file the parent app picks; on subprocess exit, the parent
+ * calls this FFI to rehydrate an `ApfsScan` from that file —
+ * identical to the in-process scan handle the Swift renderer
+ * normally reads.
+ *
+ * Returns `NULL` on:
+ * - `path` is NULL or not valid UTF-8
+ * - the file can't be opened or read
+ * - the msgpack blob fails to decode as `FallbackScanOutput`
+ *
+ * On any of those, the caller can read `apfs_last_error` for a
+ * human-readable diagnostic.
+ */
 struct ApfsScan *apfs_scan_from_msgpack_file(const char *path);
 
 /**

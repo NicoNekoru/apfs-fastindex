@@ -503,8 +503,15 @@ fi
 
 RELEASE_TAG="v$APP_VERSION"
 ARCH="$(uname -m)"
+# Sparkle update channel: the .zip stays the canonical update
+# artifact (Sparkle has the best-tested zip extractor and our
+# Tier-B test runs against zip). The .dmg is shipped alongside
+# for *human* downloaders — drag-to-Applications is the
+# standard macOS install UX and what Homebrew Cask expects.
 ASSET_NAME="ApfsFastindex-$RELEASE_TAG-macos-$ARCH.zip"
 ASSET_PATH="$REPO_ROOT/app/$ASSET_NAME"
+DMG_NAME="ApfsFastindex-$RELEASE_TAG-macos-$ARCH.dmg"
+DMG_PATH="$REPO_ROOT/app/$DMG_NAME"
 
 # Make sure the only files dirty in the working tree are ones
 # we know how to handle (Cargo.toml from our pre-build bump
@@ -545,14 +552,28 @@ ASSET_URL="https://github.com/$REPO_FULL_NAME/releases/download/$RELEASE_TAG/$AS
 echo "==> [6/6] release $RELEASE_TAG"
 
 # 1. Zip.
-rm -f "$ASSET_PATH"
+rm -f "$ASSET_PATH" "$DMG_PATH"
 # `ditto -c -k --sequesterRsrc --keepParent` is Apple's
 # recommended way to zip a .app: preserves resource forks,
 # symlinks, and the codesignature; plain `zip -r` mangles all
 # three.
 ditto -c -k --sequesterRsrc --keepParent "$BUNDLE" "$ASSET_PATH"
 
-# 2. Sign the zip. sign_update prints one line in the shape
+# 1b. Build the .dmg. `hdiutil create -srcfolder` with a
+# single .app as the source produces a UDZO-compressed image
+# with the .app at the root — drag-to-Applications is the
+# downloader's first move. `-volname` controls the mounted
+# volume's name in Finder. UDZO is the default compressed
+# format and is what every other Mac app ships.
+hdiutil create \
+    -volname "ApfsFastindex" \
+    -srcfolder "$BUNDLE" \
+    -ov \
+    -format UDZO \
+    "$DMG_PATH" >/dev/null
+
+# 2. Sign the zip (Sparkle's update artifact). sign_update
+#    prints one line in the shape
 #    `sparkle:edSignature="..." length="..."`.
 SIGN_OUTPUT="$("$SIGN_UPDATE_BIN" "$ASSET_PATH")"
 ED_SIG="$(echo "$SIGN_OUTPUT" | sed -n 's/.*sparkle:edSignature="\([^"]*\)".*/\1/p')"
@@ -643,10 +664,10 @@ echo "    git: pushed $BRANCH + $RELEASE_TAG to origin"
 #    release creation. `gh release create` accepts the tag
 #    we just pushed and refuses if the tag doesn't exist on
 #    the remote, which we just handled.
-gh release create "$RELEASE_TAG" "$ASSET_PATH" \
+gh release create "$RELEASE_TAG" "$ASSET_PATH" "$DMG_PATH" \
     --title "$RELEASE_TAG" \
     --generate-notes
-echo "    gh: created release $RELEASE_TAG with $ASSET_NAME"
+echo "    gh: created release $RELEASE_TAG with $ASSET_NAME + $DMG_NAME"
 
 echo
 echo "✅ Released $RELEASE_TAG."

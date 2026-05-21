@@ -610,9 +610,11 @@ fn hex_nibble(byte: u8) -> Option<u8> {
 fn build_aggregates(entries: &[NamespaceEntry]) -> Vec<DirectoryAggregate> {
     // Per-directory contributor map: dir_path -> {file_id -> (logical,
     // allocated, real)}. Each inode contributes once per ancestor
-    // directory regardless of hard-link count (SR-009).
-    let mut contributors: HashMap<&str, HashMap<u64, (u64, Option<u64>, Option<u64>)>> =
-        HashMap::new();
+    // directory regardless of hard-link count (SR-009). The nested
+    // map type is aliased for clippy's `type_complexity` lint.
+    type InodeContribution = (u64, Option<u64>, Option<u64>);
+    type DirContributors<'a> = HashMap<&'a str, HashMap<u64, InodeContribution>>;
+    let mut contributors: DirContributors = HashMap::new();
     contributors.insert(".", HashMap::new());
     for entry in entries {
         if matches!(entry.entry_kind, EntryKind::Dir) {
