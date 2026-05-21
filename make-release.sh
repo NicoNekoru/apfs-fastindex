@@ -104,13 +104,32 @@ if [ "$PUBLISH" = "1" ] && [ -n "$RELEASE_TAG" ]; then
     if [ "$CURRENT_VERSION" != "$TARGET_VERSION" ]; then
         echo "==> [0/6] bump Cargo.toml: $CURRENT_VERSION -> $TARGET_VERSION"
         # Targeted sed: only the first `version = "..."` line
-        # (the `[package].version` field). `-i.bak` is required
-        # for BSD sed compatibility; the .bak file is removed
-        # immediately after.
+        # (the `[package].version` field at the top of the
+        # file). BSD sed (macOS) doesn't support the
+        # `0,/regex/s//replacement/` GNU shorthand — the
+        # back-reference `//` is rejected with "first RE may
+        # not be empty" inside an address range. Spell the
+        # pattern out twice instead: `1,/regex/` as the
+        # address and the same pattern in the s command so the
+        # substitution fires on (and only on) the first match.
+        # `-i.bak` is required for BSD sed compatibility; the
+        # .bak file is removed immediately after.
         sed -i.bak \
-            "0,/^version = \"$CURRENT_VERSION\"/s//version = \"$TARGET_VERSION\"/" \
+            "1,/^version = \"$CURRENT_VERSION\"/s/^version = \"$CURRENT_VERSION\"/version = \"$TARGET_VERSION\"/" \
             "$CRATE_TOML"
         rm -f "$CRATE_TOML.bak"
+        # Sanity-check: the sed must have actually rewritten
+        # the file. A silent no-op (e.g. if the pattern format
+        # ever drifts) would otherwise leave the bundle on the
+        # old version and produce a "phantom" release where
+        # the appcast advertises vX.Y.Z but the zip inside
+        # says something else.
+        NEW_VERSION="$(awk -F'"' '/^version[[:space:]]*=/ { print $2; exit }' "$CRATE_TOML")"
+        if [ "$NEW_VERSION" != "$TARGET_VERSION" ]; then
+            echo "make-release.sh: Cargo.toml bump failed." >&2
+            echo "  Wanted $TARGET_VERSION, file still reports $NEW_VERSION." >&2
+            exit 1
+        fi
         # Refresh Cargo.lock so its `apfs-fastindex` entry
         # matches the new manifest version. `cargo update -p`
         # is the minimum-impact way to do this; it touches
@@ -536,8 +555,18 @@ fi
 
 # 3. Append <item> to appcast.xml. Inserted right after
 #    </language> so the newest entry is first under <channel>.
+#
+# The item is written to a temp file and `getline`-read inside
+# awk because awk's `-v var=value` rejects newlines with
+# "newline in string" — the previous flow tried that and
+# crashed the splice, which (under set -e) silently aborted
+# the publish before the commit.
+APPCAST="$REPO_ROOT/appcast.xml"
+APPCAST_TMP="$APPCAST.tmp"
+ITEM_TMP="$(mktemp)"
+trap 'rm -f "$ITEM_TMP" "$APPCAST_TMP"' EXIT
 PUB_DATE="$(date -u +'%a, %d %b %Y %H:%M:%S +0000')"
-NEW_ITEM=$(cat <<XML
+cat > "$ITEM_TMP" <<XML
         <item>
             <title>$RELEASE_TAG</title>
             <pubDate>$PUB_DATE</pubDate>
@@ -552,19 +581,27 @@ NEW_ITEM=$(cat <<XML
             />
         </item>
 XML
-)
-APPCAST="$REPO_ROOT/appcast.xml"
-APPCAST_TMP="$APPCAST.tmp"
-awk -v item="$NEW_ITEM" '
+
+awk -v item_file="$ITEM_TMP" '
     /<\/language>/ {
         print
         print ""
-        print item
+        while ((getline line < item_file) > 0) print line
+        close(item_file)
         next
     }
     { print }
 ' "$APPCAST" > "$APPCAST_TMP"
 mv "$APPCAST_TMP" "$APPCAST"
+
+# Sanity check: the splice must have produced a file that
+# actually contains the new <item>. A silent failure here
+# would otherwise commit a no-op appcast.xml and ship a
+# release the auto-updater can't see.
+if ! grep -q "<title>$RELEASE_TAG</title>" "$APPCAST"; then
+    echo "make-release.sh: appcast.xml splice failed — file has no <item> for $RELEASE_TAG." >&2
+    exit 1
+fi
 echo "    appcast.xml: prepended <item> for $RELEASE_TAG"
 
 # 4. Commit Cargo.toml (already bumped above) + appcast.xml.
