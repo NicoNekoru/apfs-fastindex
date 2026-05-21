@@ -1664,6 +1664,68 @@ struct NativeContentView: View {
         return url == volumeURL.standardizedFileURL
     }
 
+    /// Well-known TCC-gated subpaths relative to a user home
+    /// directory. macOS pops a permission dialog the first
+    /// time an app touches any of these — but only the first
+    /// time. By probing each upfront we get all the prompts
+    /// out of the way before the walker starts; subsequent
+    /// scans see them already-resolved.
+    ///
+    /// Conservative list — the canonical user-data dirs the
+    /// system gates by default. Skipped on purpose:
+    ///
+    /// - `Library/Containers/*` — each app's container is
+    ///   gated independently. Pre-flighting would mean one
+    ///   prompt per app, often 50+ entries. Noisy.
+    /// - `Library/CloudStorage/*` — same one-per-provider
+    ///   noise (Dropbox / Google Drive / OneDrive / iCloud).
+    /// - `Library/Group Containers/*` — same shape.
+    ///
+    /// Those still trigger mid-scan if the user's scan walks
+    /// into them, but the bulk of "prompt floods" happen on
+    /// the top-level dirs we cover here.
+    private static let tccProtectedSubdirs: [String] = [
+        "Desktop",
+        "Documents",
+        "Downloads",
+        "Pictures",
+        "Movies",
+        "Music",
+        "Library/Calendars",
+        "Library/Mail",
+        "Library/Messages",
+        "Library/Reminders",
+        "Library/Suggestions",
+        "Library/Application Support/AddressBook",
+        "Library/Mobile Documents", // iCloud Drive
+    ]
+
+    /// Walk a curated list of TCC-gated dirs under the scan
+    /// target and attempt to read each. macOS triggers its
+    /// permission dialog on the first read; the call blocks
+    /// until the user resolves the prompt, then we move on.
+    /// Errors (denied, missing) are swallowed — the walker
+    /// will hit them again and surface a `walk_skips` entry
+    /// the status bar already renders.
+    ///
+    /// Called only on the non-admin path (root bypasses TCC
+    /// so the privileged-helper flow doesn't need this).
+    private func preflightTCCAccess(scanRoot: String) {
+        let fm = FileManager.default
+        let rootURL = URL(fileURLWithPath: scanRoot).standardizedFileURL
+        for subdir in Self.tccProtectedSubdirs {
+            let candidate = rootURL.appendingPathComponent(subdir).path
+            // Skip non-existent paths (most scan targets are
+            // a home dir, so a few subdirs may not exist).
+            // `fileExists` here is itself a stat call but it
+            // doesn't trigger TCC — only opendir / readdir do.
+            // Once we know it exists, the contentsOfDirectory
+            // call is what surfaces the prompt.
+            guard fm.fileExists(atPath: candidate) else { continue }
+            _ = try? fm.contentsOfDirectory(atPath: candidate)
+        }
+    }
+
     @ViewBuilder
     private func metricCell(label: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 1) {
@@ -1868,7 +1930,17 @@ struct NativeContentView: View {
         } else {
             scanProgressBytesTotal = 0
         }
+        // TCC pre-flight (user request): pop all the macOS
+        // permission prompts upfront instead of mid-walk.
+        // Phase advances from "Preparing access" → "Scanning"
+        // after the preflight returns (the user has resolved
+        // every prompt by then).
+        scanPhaseLabel = "Preparing access"
         DispatchQueue.global(qos: .userInitiated).async {
+            preflightTCCAccess(scanRoot: path)
+            DispatchQueue.main.async {
+                scanPhaseLabel = "Scanning"
+            }
             let result = Scan.fallbackWithProgress(
                 path: path,
                 threads: UInt32(threads),
