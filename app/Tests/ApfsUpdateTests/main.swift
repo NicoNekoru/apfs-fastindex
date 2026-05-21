@@ -444,11 +444,133 @@ func main() {
         if version != "9.9.9" {
             fail("SPUUserDriver received version \(version), expected 9.9.9")
         }
-        print("✅ Tier B: SPUUpdater discovered v9.9.9 from fixture appcast (host=0.0.0).")
+        print("✅ Tier B fixture: SPUUpdater discovered v9.9.9 from synthetic appcast.")
     case .updateNotFound(let error):
         fail("SPUUserDriver received updateNotFound: \(error)")
     case .error(let error):
         fail("SPUUserDriver received updater error: \(error)")
+    }
+
+    // 7. Production-appcast regression test.
+    //
+    // The fixture above writes its own appcast XML, so it
+    // can't catch a class of bug where the *shipped*
+    // appcast.xml at the repo root is malformed (e.g. XML
+    // comments containing the double-hyphen sequence, which
+    // the XML 1.0 spec forbids — exact bug Sparkle's parser
+    // bailed on in production with "could not parse update
+    // feed"). This second scenario loads the real
+    // appcast.xml, serves it via the same TinyHTTPServer,
+    // and runs SPUUpdater against it.
+    //
+    // We use the project's real SUPublicEDKey from
+    // app/sparkle-public-key.txt so signature verification
+    // *could* succeed if Sparkle ran the install — but we
+    // dismiss at showUpdateFound, so we never reach that
+    // stage. What matters is that Sparkle gets *to*
+    // showUpdateFound, which means it parsed the feed and
+    // ran the version comparison.
+    runProductionAppcastScenario(in: tmpRoot)
+}
+
+func runProductionAppcastScenario(in tmpRoot: URL) {
+    // Locate the repo root + the production artifacts via
+    // #filePath, which is the absolute path of *this* source
+    // file. From app/Tests/ApfsUpdateTests/main.swift, the
+    // repo root is four levels up.
+    let thisFile = URL(fileURLWithPath: #filePath)
+    let repoRoot = thisFile
+        .deletingLastPathComponent()  // ApfsUpdateTests/
+        .deletingLastPathComponent()  // Tests/
+        .deletingLastPathComponent()  // app/
+        .deletingLastPathComponent()  // <repo>
+    let appcastURL = repoRoot.appendingPathComponent("appcast.xml")
+    let keyFileURL = repoRoot.appendingPathComponent("app/sparkle-public-key.txt")
+
+    let appcastBytes: Data
+    do {
+        appcastBytes = try Data(contentsOf: appcastURL)
+    } catch {
+        fail("could not read production appcast at \(appcastURL.path): \(error)")
+    }
+    let publicKey: String
+    do {
+        let raw = try String(contentsOf: keyFileURL, encoding: .utf8)
+        publicKey = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    } catch {
+        fail("could not read public key at \(keyFileURL.path): \(error)")
+    }
+
+    let server = TinyHTTPServer()
+    do {
+        try server.start()
+    } catch {
+        fail("production-appcast server start failed: \(error)")
+    }
+    defer { server.stop() }
+    server.setRoute("/appcast.xml", body: appcastBytes)
+    let feedURL = "http://127.0.0.1:\(server.port)/appcast.xml"
+
+    let appURL: URL
+    do {
+        appURL = try buildFakeBundle(
+            version: "0.0.0",
+            publicKey: publicKey,
+            feedURL: feedURL,
+            in: tmpRoot.appendingPathComponent("prod-test")
+        )
+    } catch {
+        fail("production fake bundle build failed: \(error)")
+    }
+    guard let bundle = Bundle(url: appURL) else {
+        fail("could not open production fake bundle at \(appURL.path)")
+    }
+
+    var completed = false
+    let driver = CapturingUserDriver(onComplete: { completed = true })
+    let delegate = FixtureUpdaterDelegate(feedURL: feedURL)
+    let updater = SPUUpdater(
+        hostBundle: bundle,
+        applicationBundle: bundle,
+        userDriver: driver,
+        delegate: delegate
+    )
+    do {
+        try updater.start()
+    } catch {
+        fail("production updater.start() failed: \(error)")
+    }
+    updater.checkForUpdates()
+
+    let deadline = Date().addingTimeInterval(20.0)
+    while !completed && Date() < deadline {
+        RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.1))
+    }
+    guard let outcome = driver.outcome else {
+        fail("production appcast: timed out waiting for SPUUserDriver (20 s)")
+    }
+    switch outcome {
+    case .foundUpdate(let version):
+        // Any non-empty semver-shaped version is a pass —
+        // the assertion is that parse + version compare
+        // both worked. The exact latest version drifts with
+        // every release.
+        if version.isEmpty || version == "0.0.0" {
+            fail("production appcast: showUpdateFound received empty/0.0.0 version")
+        }
+        print("✅ Tier B prod: SPUUpdater parsed real appcast.xml, offered v\(version).")
+    case .updateNotFound(let error):
+        // No items > 0.0.0? Either the appcast genuinely
+        // has no entries (initial state) or something is
+        // wrong. Treat as a soft pass with a warning so the
+        // test still validates parse-doesn't-crash without
+        // requiring a populated appcast.
+        print("⚠️  Tier B prod: parse OK but no updates above v0.0.0 (\(error))")
+    case .error(let error):
+        // This is the bug class we care most about:
+        // Sparkle parser rejected the appcast. The error
+        // message will name the parse failure.
+        fail("production appcast rejected by Sparkle: \(error)")
     }
 }
 
