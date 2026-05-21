@@ -7,6 +7,12 @@ https://github.com/user-attachments/assets/3ca0c987-0ea7-4c57-8902-1c3a0008f5f7
 
 APFS indexing backend in Rust, rendered in a Native SwiftUI app frontend using Rust-generated graphics drawn by Core Graphics. Rust backend can also be used as a standalone headless CLI.
 
+## Installation
+
+```sh
+$ brew install --cask apfs-fastindex
+```
+
 ## Motivations
 
 The blazingly-fast speed of WizTree's drive indexing relies on the convenience of NTFS metadata, i.e. that NTFS keeps a Master File Table (MFT). The MFT is a single, flat structure in which each file on the drive is stored as a record in the table. As a result, we can sequentially scan this table directly, and don't need to traverse the drive or get stuck recursively searching subdirectories.
@@ -26,9 +32,9 @@ The manual is organised as a textbook on APFS, with this project as the worked e
 | The Problem | 1–2 | Why APFS resists MFT-style indexing; the discipline of evidence and oracles. |
 | The Container and the Object Map | 3–4 | How to find the authoritative container superblock and how virtual object IDs resolve to physical addresses. |
 | The File-System Tree | 5–7 | How directory records, inodes, and extended fields are stored; the fail-closed cases. |
-| Names and Sizes | 8–9 | The size precedence rule (logical, allocated, the failure modes); name preservation across case-insensitive volumes. |
-| Boundaries | 10–11 | Identity and incremental caching; the support matrix; the POSIX-traversal fallback. |
-| Engineering | 12–13 | Performance measurement, the native renderer, the FFI boundary. |
+| Names and Sizes | 8–9 | Logical, allocated, and clone-deduplicated ("real") size precedence; name preservation across case-insensitive volumes. |
+| Boundaries | 10–11 | Identity, the shipping persistent cache, the support matrix, the POSIX-traversal fallback. |
+| Engineering | 12–13 | Performance measurement; the native renderer, the FFI boundary, and the remaining open questions. |
 
 Two appendices follow: a glossary of every term the manual uses, and an experiment register that lists each controlled probe the manual cites.
 
