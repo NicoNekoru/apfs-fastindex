@@ -33,6 +33,7 @@ final class TreemapView: NSView {
     var layout: Scan.Layout? {
         didSet {
             hoveredIndex = nil
+            invalidateStaticCache()
             needsDisplay = true
         }
     }
@@ -44,13 +45,40 @@ final class TreemapView: NSView {
     /// also keeps the `Layout` alive, so by the time the view
     /// would dereference a freed scan the layout is gone too.
     var scan: Scan? {
-        didSet { needsDisplay = true }
+        didSet {
+            invalidateStaticCache()
+            needsDisplay = true
+        }
     }
 
     /// Active size metric. Drives whether the dir-label suffix
     /// renders the logical or allocated total.
     var metric: Scan.Metric = .logical {
-        didSet { needsDisplay = true }
+        didSet {
+            invalidateStaticCache()
+            needsDisplay = true
+        }
+    }
+
+    /// Cached render of the "static" treemap content — every
+    /// pass that doesn't depend on the hover state: background
+    /// fill, dir backgrounds, dir strokes, leaf fills, labels.
+    /// On a `/`-scan that draw runs over hundreds of thousands
+    /// of cells plus a per-label NSAttributedString round-trip;
+    /// re-running it for every mouse-move tick is what made
+    /// the hover laggy on full-screen treemaps.
+    ///
+    /// We render the static content into an `NSImage` once per
+    /// layout change (or window resize / metric flip), then
+    /// blit the image into the dirty rect and draw only the
+    /// hover overlay + tooltip on top per paint. Mouse-moves
+    /// become essentially free: one image draw + one rect
+    /// stroke + a tiny text draw.
+    private var cachedStatic: NSImage?
+    private var cachedStaticBoundsSize: CGSize = .zero
+
+    private func invalidateStaticCache() {
+        cachedStatic = nil
     }
 
     /// Cell currently under the cursor (or nil). Used to draw the
@@ -81,11 +109,84 @@ final class TreemapView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
 
+        // Re-render the static cache on first paint, after a
+        // layout/scan/metric change, or on a window resize.
+        if cachedStatic == nil || cachedStaticBoundsSize != bounds.size {
+            rebuildStaticCache()
+        }
+
+        // Blit the cached static treemap. `compositingOperation`
+        // = `.copy` overwrites any previous frame pixels — the
+        // image is opaque (bg fill in phase 1) so this is
+        // equivalent to filling+drawing in one step.
+        if let img = cachedStatic {
+            img.draw(
+                in: bounds,
+                from: NSRect(origin: .zero, size: bounds.size),
+                operation: .copy,
+                fraction: 1.0
+            )
+        } else {
+            // No layout yet — paint the bg colour so the view
+            // isn't black/transparent.
+            ctx.setFillColor(red: 0x0f / 255.0, green: 0x11 / 255.0, blue: 0x15 / 255.0, alpha: 1.0)
+            ctx.fill(bounds)
+        }
+
+        // Hover overlay + tooltip. Drawn fresh per paint over
+        // the cached static layer — that's the only part of the
+        // canvas that changes between mouse-move events.
+        if let layout, let hovered = hoveredIndex,
+           Int(hovered) < layout.count, let scan
+        {
+            let c = layout.cells[Int(hovered)]
+            ctx.setStrokeColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 0.55)
+            ctx.setLineWidth(1.5)
+            ctx.stroke(CGRect(
+                x: CGFloat(c.x0) + 0.75, y: CGFloat(c.y0) + 0.75,
+                width: CGFloat(c.x1 - c.x0) - 1.5,
+                height: CGFloat(c.y1 - c.y0) - 1.5
+            ))
+            drawTooltip(ctx: ctx, cell: c, scan: scan)
+        }
+    }
+
+    /// Render every layer that doesn't depend on hover state
+    /// (bg, dir fills + strokes, leaves, labels) into an
+    /// offscreen `NSImage`. Called once per layout/scan/metric
+    /// change or window resize; mouse-move ticks reuse the
+    /// cached image.
+    private func rebuildStaticCache() {
+        let size = bounds.size
+        guard size.width > 0, size.height > 0 else {
+            cachedStatic = nil
+            cachedStaticBoundsSize = .zero
+            return
+        }
+
+        let img = NSImage(size: size)
+        // `lockFocusFlipped(true)` makes the offscreen context
+        // y-flipped to match our view's `isFlipped = true`, so
+        // the same cell coords from Rust draw the same shape
+        // here as they would on-screen.
+        img.lockFocusFlipped(true)
+        defer { img.unlockFocus() }
+
+        guard let ctx = NSGraphicsContext.current?.cgContext else {
+            cachedStatic = nil
+            cachedStaticBoundsSize = .zero
+            return
+        }
+
         // Phase 1: bg fill. Matches `VizPalette.bg` (#0f1115).
         ctx.setFillColor(red: 0x0f / 255.0, green: 0x11 / 255.0, blue: 0x15 / 255.0, alpha: 1.0)
-        ctx.fill(bounds)
+        ctx.fill(CGRect(origin: .zero, size: size))
 
-        guard let layout, layout.count > 0 else { return }
+        guard let layout, layout.count > 0 else {
+            cachedStatic = img
+            cachedStaticBoundsSize = size
+            return
+        }
         let cells = layout.cells
 
         // Phase 2: dir backgrounds. One fillStyle for all of them
@@ -168,21 +269,8 @@ final class TreemapView: NSView {
             drawLabels(cells: cells, scan: scan)
         }
 
-        // Phase 6: hover overlay + tooltip. Single stroked rect
-        // around the hovered cell, then a small floating panel
-        // near the cursor showing "name · size" (and the full
-        // path if it's a non-root cell).
-        if let hovered = hoveredIndex, Int(hovered) < cells.count, let scan {
-            let c = cells[Int(hovered)]
-            ctx.setStrokeColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 0.55)
-            ctx.setLineWidth(1.5)
-            ctx.stroke(CGRect(
-                x: CGFloat(c.x0) + 0.75, y: CGFloat(c.y0) + 0.75,
-                width: CGFloat(c.x1 - c.x0) - 1.5,
-                height: CGFloat(c.y1 - c.y0) - 1.5
-            ))
-            drawTooltip(ctx: ctx, cell: c, scan: scan)
-        }
+        cachedStatic = img
+        cachedStaticBoundsSize = size
     }
 
     // MARK: - Label drawing

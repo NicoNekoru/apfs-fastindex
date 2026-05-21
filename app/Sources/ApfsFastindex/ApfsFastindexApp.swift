@@ -153,16 +153,33 @@ struct ApfsFastindexApp: App {
                 }
                 .keyboardShortcut("A", modifiers: [.command, .shift])
             }
-            // Edit menu: replace the standard system "Find"
-            // command (CommandGroup.textEditing.find) with our
-            // own ⌘F that focuses the tree-list search field
-            // — Apple's default Find is geared at NSTextView
-            // and does nothing useful in this app. Posting via
-            // NotificationCenter matches the
-            // scanAsAdministratorRequested pattern: the active
-            // `NativeContentView` listens, the menu command
-            // stays neutral on whether a view exists yet.
-            CommandGroup(replacing: .textEditing) {
+            // Strip Apple's default text-editing block from
+            // the Edit menu — "Find > Find" / "Find Next" etc
+            // act on NSTextView, which we don't host. Leaving
+            // them in lets the user invoke a non-functional
+            // command. Our own Find (which focuses the
+            // tree-list search field) lives in View instead;
+            // see ShowPanelCommands below. Result: Edit menu
+            // reverts to the standard Undo/Redo +
+            // Cut/Copy/Paste shape that every Mac app has.
+            CommandGroup(replacing: .textEditing) { }
+
+            // Merge our view-panel toggles into the *existing*
+            // View menu via `CommandGroup(after: .sidebar)`
+            // rather than `CommandMenu("View")`. The latter
+            // created a sibling menu — the user saw two "View"
+            // entries in the menu bar. `after: .sidebar` is the
+            // canonical placement for app-specific view
+            // toggles; SwiftUI puts the system "Enter Full
+            // Screen" items before ours.
+            //
+            // `Find` lives here too: it's a view-related
+            // operation (focuses the tree-list search field
+            // that filters the visible panel) and grouping it
+            // with the panel toggles is more discoverable than
+            // tucking it under Edit.
+            CommandGroup(after: .sidebar) {
+                Divider()
                 Button("Find") {
                     NotificationCenter.default.post(
                         name: .findRequested,
@@ -170,14 +187,7 @@ struct ApfsFastindexApp: App {
                     )
                 }
                 .keyboardShortcut("f", modifiers: .command)
-            }
-
-            // View menu: per-panel visibility + a "Treemap Only"
-            // convenience that collapses both side panels. State
-            // lives in `@AppStorage` (see `AppPrefs`); the menu
-            // items bind directly to the same keys via the
-            // `ShowPanelCommands` helper below.
-            CommandMenu("View") {
+                Divider()
                 ShowPanelCommands()
             }
             // Help-menu entry → opens the Rust panic-hook log
