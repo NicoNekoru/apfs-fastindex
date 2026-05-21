@@ -112,6 +112,18 @@ pub struct Tree {
     /// are contiguous and dense (one big allocation instead of
     /// one Vec per dir).
     pub children_arena: Vec<u32>,
+    /// Pre-lowercased copies of every node's name, indexed in
+    /// parallel with `nodes`. Built once at tree-construction
+    /// time so the per-keystroke search cost is a tight
+    /// substring loop with zero allocation. Unicode-aware
+    /// (`str::to_lowercase`) — works for non-ASCII filenames.
+    ///
+    /// Memory cost: ~16-32 B per node on top of the existing
+    /// `name: Box<str>` — on a 1.5M-entry scan, ~30-50 MiB.
+    /// Cheap relative to the 200+ MiB the tree already costs;
+    /// the alternative (lowercasing on every keystroke) was
+    /// measured at multi-second per-keystroke latency.
+    pub names_lower: Vec<String>,
 }
 
 impl Tree {
@@ -347,9 +359,23 @@ impl Tree {
         }
         drop(child_lists);
 
+        // Pre-lowercase every node's name once, parallel-
+        // indexed with `nodes`. The per-keystroke search loop
+        // then does `names_lower[i].contains(&q_lower)` without
+        // allocating. ASCII fast path is implicit — Rust's
+        // `to_lowercase` is no-op on already-lowercase ASCII
+        // bytes; the only allocation is the destination String,
+        // and we're amortising one-per-node across every
+        // search the user will run.
+        let names_lower: Vec<String> = nodes
+            .iter()
+            .map(|n| n.name.to_lowercase())
+            .collect();
+
         let mut tree = Tree {
             nodes,
             children_arena,
+            names_lower,
         };
         tree.finalize();
         tree

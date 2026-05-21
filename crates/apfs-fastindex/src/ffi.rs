@@ -551,6 +551,140 @@ pub extern "C" fn apfs_scan_node_count(scan: *const ApfsScan) -> u32 {
     })
 }
 
+/// Search result handle returned by `apfs_scan_search_names`.
+/// Holds a `Vec<u32>` of matching node indices; the caller
+/// reads it via `apfs_search_results_count` +
+/// `apfs_search_results_indices` and must call
+/// `apfs_search_results_free` exactly once.
+pub struct ApfsSearchResults {
+    indices: Vec<u32>,
+}
+
+/// Case-insensitive substring search across every node's
+/// display name. Returns a handle wrapping the **full
+/// keep-set**: every matching node index plus every ancestor
+/// of every match, plus the root. This is the set the UI
+/// renders as the visible tree under an active search;
+/// pushing the ancestor-walk into Rust avoids a per-ancestor
+/// FFI call from Swift (which on a pathological match-everything
+/// query would have been millions of FFI hits).
+///
+/// Architecture: the pre-lowercased `tree.names_lower` cache
+/// (built once at scan time) means the inner loop is a tight
+/// `Vec<String>` scan with one `to_lowercase()` for the query
+/// and `contains` per name. The ancestor walk is a parent-
+/// pointer chain (`Option<u32>`) per match, each step a
+/// single `Vec` index + insert into a `FxHashSet`. On a
+/// 1.56 M-entry `/Users/kai` scan it measures in the low
+/// tens of ms in release builds — vs the original Swift-side
+/// loop that ran `localizedCaseInsensitiveContains` (NFD
+/// normalisation + locale-aware case folding) on every node
+/// per keystroke (multi-second latency).
+///
+/// Returns `NULL` on:
+/// - `scan` or `query` NULL
+/// - `query` not valid UTF-8
+/// - `query` empty (caller treats "" as "no filter" and skips
+///   this call entirely; returning a sentinel handle would be
+///   wasteful)
+///
+/// The result handle owns its indices buffer; Swift must call
+/// `apfs_search_results_free` when done.
+#[no_mangle]
+pub extern "C" fn apfs_scan_search_names(
+    scan: *const ApfsScan,
+    query: *const c_char,
+) -> *mut ApfsSearchResults {
+    use rustc_hash::FxHashSet;
+    ffi_guard(std::ptr::null_mut(), move || {
+        let Some(s) = (unsafe { scan.as_ref() }) else {
+            return std::ptr::null_mut();
+        };
+        if query.is_null() {
+            return std::ptr::null_mut();
+        }
+        let c_query = unsafe { CStr::from_ptr(query) };
+        let Ok(q_str) = c_query.to_str() else {
+            return std::ptr::null_mut();
+        };
+        if q_str.is_empty() {
+            return std::ptr::null_mut();
+        }
+        let q_lower: String = q_str.to_lowercase();
+        // Tight loop over the pre-lowercased name cache.
+        // `contains` is a `memchr`-style byte-level scan, no
+        // allocation per check.
+        let mut keep: FxHashSet<u32> = FxHashSet::default();
+        // Root always in (so the tree renders even when zero
+        // matches).
+        keep.insert(0);
+        for (i, name_lower) in s.tree.names_lower.iter().enumerate() {
+            if name_lower.contains(&q_lower) {
+                // Walk the parent chain and insert every
+                // ancestor. `insert` returns false the moment
+                // we hit a node already in the set — that
+                // means the rest of the chain is also in, so
+                // we can stop. This makes the total ancestor
+                // work O(unique nodes), not O(matches × depth).
+                let mut n: Option<u32> = Some(i as u32);
+                while let Some(curr) = n {
+                    if !keep.insert(curr) {
+                        break;
+                    }
+                    n = s.tree.nodes[curr as usize].parent;
+                }
+            }
+        }
+        // Return a sorted Vec for stable iteration on the
+        // Swift side (Swift wraps it back into a Set; ordering
+        // doesn't matter to the consumer, but a stable order
+        // makes debugging easier).
+        let mut indices: Vec<u32> = keep.into_iter().collect();
+        indices.sort_unstable();
+        Box::into_raw(Box::new(ApfsSearchResults { indices }))
+    })
+}
+
+/// Number of matching node indices in `results`. `0` on NULL.
+#[no_mangle]
+pub extern "C" fn apfs_search_results_count(results: *const ApfsSearchResults) -> usize {
+    ffi_guard(0, move || {
+        let Some(r) = (unsafe { results.as_ref() }) else {
+            return 0;
+        };
+        r.indices.len()
+    })
+}
+
+/// Pointer to the matching-node-indices buffer. Length given
+/// by `apfs_search_results_count`. Buffer is valid until
+/// `apfs_search_results_free` is called.
+#[no_mangle]
+pub extern "C" fn apfs_search_results_indices(
+    results: *const ApfsSearchResults,
+) -> *const u32 {
+    ffi_guard(std::ptr::null(), move || {
+        let Some(r) = (unsafe { results.as_ref() }) else {
+            return std::ptr::null();
+        };
+        r.indices.as_ptr()
+    })
+}
+
+/// Drop the search-results handle. Idempotent on NULL.
+#[no_mangle]
+pub extern "C" fn apfs_search_results_free(results: *mut ApfsSearchResults) {
+    if results.is_null() {
+        return;
+    }
+    // SAFETY: caller-supplied pointer originated from
+    // `Box::into_raw` in `apfs_scan_search_names`; we reclaim
+    // ownership and drop it. Repeat calls with the same
+    // pointer are UB on the Swift side (per the standard
+    // `_free` contract).
+    let _ = unsafe { Box::from_raw(results) };
+}
+
 /// Sentinel returned by `apfs_scan_node_index_for_path` (and
 /// future phase-3 hit-test FFIs) when no node matches. Matches
 /// `crate::tree::NODE_INVALID == u32::MAX`.

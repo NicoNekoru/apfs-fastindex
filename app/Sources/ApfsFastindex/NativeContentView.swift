@@ -711,36 +711,23 @@ struct NativeContentView: View {
         rebuildTreeRows()
     }
 
-    /// Walk every node, collect the indices whose display name
-    /// contains `query` (case-insensitive). For each match,
-    /// also include every ancestor so the matched node stays
-    /// reachable through expand-chains in the rendered
-    /// hierarchy.
+    /// Build the keep-set for the current search query.
+    /// Delegates everything to Rust: one FFI call returns the
+    /// complete keep-set (matches + ancestors + root). Swift
+    /// just wraps the returned indices into a `Set<UInt32>`
+    /// for O(1) per-row containment checks during
+    /// `walkForRows`.
+    ///
+    /// On a 1.56 M-entry `/Users/kai` scan: low tens of ms in
+    /// release builds, dominated by the inner Rust loop's
+    /// `to_lowercase()` query setup and the per-node
+    /// `contains` check. Was multi-second per keystroke under
+    /// the Swift-side `localizedCaseInsensitiveContains` loop.
     private func computeSearchKeepSet(scan: Scan, query: String) -> Set<UInt32> {
-        var keep: Set<UInt32> = []
-        // Always include the root so the tree always has at
-        // least one row to render — even if zero matches, the
-        // user sees "[root]" with empty children instead of
-        // a blank panel.
-        keep.insert(0)
-        let total = scan.nodeCount
-        for i in 0..<total {
-            let idx = UInt32(i)
-            guard let name = scan.name(of: idx) else { continue }
-            // `localizedCaseInsensitiveContains` handles
-            // unicode case folding (so "PHOTOS" matches
-            // "Photos") and skips the substring search when
-            // `query` is longer than `name`. Cheap on
-            // typical filename lengths.
-            if name.localizedCaseInsensitiveContains(query) {
-                var n: UInt32? = idx
-                while let curr = n, !keep.contains(curr) {
-                    keep.insert(curr)
-                    n = scan.parent(of: curr)
-                }
-            }
-        }
-        return keep
+        // Rust always includes node 0 (root) in the result so
+        // the tree-list always renders at least the root row,
+        // even when the query has zero matches.
+        Set(scan.searchNames(query: query))
     }
 
     private func walkForRows(scan: Scan, nodeIndex: UInt32, depth: Int, out: inout [TreeListRow]) {

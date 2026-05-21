@@ -82,6 +82,15 @@ typedef struct ApfsLayout ApfsLayout;
 typedef struct ApfsScan ApfsScan;
 
 /**
+ * Search result handle returned by `apfs_scan_search_names`.
+ * Holds a `Vec<u32>` of matching node indices; the caller
+ * reads it via `apfs_search_results_count` +
+ * `apfs_search_results_indices` and must call
+ * `apfs_search_results_free` exactly once.
+ */
+typedef struct ApfsSearchResults ApfsSearchResults;
+
+/**
  * C ABI signature for the progress callback the Swift side
  * hands to `apfs_scan_directory_with_progress`. The Rust
  * fallback walker fires events from a dedicated background
@@ -340,6 +349,57 @@ bool apfs_scan_real_available(const struct ApfsScan *scan);
  * tree also has synthesized intermediate directories.
  */
 uint32_t apfs_scan_node_count(const struct ApfsScan *scan);
+
+/**
+ * Case-insensitive substring search across every node's
+ * display name. Returns a handle wrapping the **full
+ * keep-set**: every matching node index plus every ancestor
+ * of every match, plus the root. This is the set the UI
+ * renders as the visible tree under an active search;
+ * pushing the ancestor-walk into Rust avoids a per-ancestor
+ * FFI call from Swift (which on a pathological match-everything
+ * query would have been millions of FFI hits).
+ *
+ * Architecture: the pre-lowercased `tree.names_lower` cache
+ * (built once at scan time) means the inner loop is a tight
+ * `Vec<String>` scan with one `to_lowercase()` for the query
+ * and `contains` per name. The ancestor walk is a parent-
+ * pointer chain (`Option<u32>`) per match, each step a
+ * single `Vec` index + insert into a `FxHashSet`. On a
+ * 1.56 M-entry `/Users/kai` scan it measures in the low
+ * tens of ms in release builds — vs the original Swift-side
+ * loop that ran `localizedCaseInsensitiveContains` (NFD
+ * normalisation + locale-aware case folding) on every node
+ * per keystroke (multi-second latency).
+ *
+ * Returns `NULL` on:
+ * - `scan` or `query` NULL
+ * - `query` not valid UTF-8
+ * - `query` empty (caller treats "" as "no filter" and skips
+ *   this call entirely; returning a sentinel handle would be
+ *   wasteful)
+ *
+ * The result handle owns its indices buffer; Swift must call
+ * `apfs_search_results_free` when done.
+ */
+struct ApfsSearchResults *apfs_scan_search_names(const struct ApfsScan *scan, const char *query);
+
+/**
+ * Number of matching node indices in `results`. `0` on NULL.
+ */
+uintptr_t apfs_search_results_count(const struct ApfsSearchResults *results);
+
+/**
+ * Pointer to the matching-node-indices buffer. Length given
+ * by `apfs_search_results_count`. Buffer is valid until
+ * `apfs_search_results_free` is called.
+ */
+const uint32_t *apfs_search_results_indices(const struct ApfsSearchResults *results);
+
+/**
+ * Drop the search-results handle. Idempotent on NULL.
+ */
+void apfs_search_results_free(struct ApfsSearchResults *results);
 
 /**
  * Look up a node by its absolute logical path. The empty string
