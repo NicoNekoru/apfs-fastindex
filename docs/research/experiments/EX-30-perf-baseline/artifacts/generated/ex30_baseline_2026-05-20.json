@@ -1,0 +1,73 @@
+{
+  "experiment": "EX-30",
+  "title": "Production fallback-walker performance baseline",
+  "date": "2026-05-20",
+  "host": {
+    "platform": "macOS-26.3.1-arm64-arm-64bit-Mach-O",
+    "kernel": "25.3.0",
+    "physical_cpus": 14,
+    "python": "3.13.9"
+  },
+  "target": "/Users/kai",
+  "cli": "/Users/kai/Projects/apfs-fastindex/target/release/apfs-fastindex-scan",
+  "verdict": "production_baseline_recorded",
+  "purge_succeeded": false,
+  "cold": {
+    "wall_s": 9.868090166943148,
+    "exit": 0,
+    "stdout_bytes": 391910883,
+    "entries": 1556792,
+    "aggregates": 172505,
+    "entries_per_sec": 157760.21232710825,
+    "stderr_tail": ""
+  },
+  "warm": {
+    "runs": [
+      {
+        "wall_s": 10.891309958184138,
+        "exit": 0,
+        "stdout_bytes": 391912503,
+        "entries": 1556800,
+        "aggregates": 172505,
+        "entries_per_sec": 142939.64692742605,
+        "stderr_tail": ""
+      },
+      {
+        "wall_s": 9.622389542171732,
+        "exit": 0,
+        "stdout_bytes": 391912502,
+        "entries": 1556800,
+        "aggregates": 172505,
+        "entries_per_sec": 161789.3344659415,
+        "stderr_tail": ""
+      },
+      {
+        "wall_s": 9.594571332912892,
+        "exit": 0,
+        "stdout_bytes": 391912503,
+        "entries": 1556800,
+        "aggregates": 172505,
+        "entries_per_sec": 162258.42155757456,
+        "stderr_tail": ""
+      },
+      {
+        "wall_s": 9.623804125003517,
+        "exit": 0,
+        "stdout_bytes": 391912497,
+        "entries": 1556800,
+        "aggregates": 172505,
+        "entries_per_sec": 161765.55339019134,
+        "stderr_tail": ""
+      }
+    ],
+    "summary": {
+      "wall_s_median": 9.623096833587624,
+      "wall_s_min": 9.594571332912892,
+      "wall_s_max": 10.891309958184138,
+      "wall_s_stdev": 0.6390025776900754,
+      "entries_per_sec_median": 161777.4439280664,
+      "iterations": 4
+    }
+  },
+  "cold_over_warm_ratio": 1.0254588868419592
+}
