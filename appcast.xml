@@ -54,6 +54,20 @@
         <language>en</language>
 
         <item>
+            <title>v0.2.4</title>
+            <pubDate>Thu, 21 May 2026 02:47:53 +0000</pubDate>
+            <sparkle:version>0.2.4</sparkle:version>
+            <sparkle:shortVersionString>0.2.4</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <enclosure
+                url="https://github.com/NicoNekoru/apfs-fastindex/releases/download/v0.2.4/ApfsFastindex-v0.2.4-macos-arm64.zip"
+                length="2397850"
+                type="application/octet-stream"
+                sparkle:edSignature="oyuv3a+zx255lGyNu+ZtJVXsrHmFE9DlCHSoltkezfuP3ox4c/MoDGvewVvSYQsK6L+KhdtKL7k1ZdaIoUHICA=="
+            />
+        </item>
+
+        <item>
             <title>v0.2.3</title>
             <pubDate>Thu, 21 May 2026 02:07:50 +0000</pubDate>
             <sparkle:version>0.2.3</sparkle:version>
