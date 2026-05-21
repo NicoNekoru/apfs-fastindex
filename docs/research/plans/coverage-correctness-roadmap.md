@@ -176,11 +176,46 @@ validate cleanly. The fallback for each:
   future hosts. "Scan as administrator…" stays on the fallback
   walker even with root.
 - EX-29: **Closed** (2026-05-20). Verdict
-  `blocked_no_user_snapshots`. Host has 0 user-visible TM
+  `blocked_no_user_snapshots`. Host had 0 user-visible TM
   local snapshots; 1 sealed-system snapshot SR-020-excluded.
   Enumeration module + classifier + gated harness landed; bytes
   oracle deferred (no public read-only API; EX-28 Hypothesis C
   blocks the raw-extent-diff alternative).
+
+  **EX-29 follow-up (2026-05-21).** Retested against a freshly
+  created user-visible TM local snapshot
+  (`com.apple.TimeMachine.2026-05-20-202629.local` on `/`).
+  Three independent paths were probed for snapshot-content
+  access, all under root via the AuthorizationServices helper
+  the GUI uses for `Scan as Administrator…`:
+
+  1. `mount_apfs -s <snap> /dev/disk3s5 <temp-mount>` — EPERM
+     (mount_apfs exit 77 = EX_NOPERM). Identical behaviour
+     against `/var/folders/...` and `/Volumes/...` mount-point
+     locations.
+  2. `tmutil mountlocalsnapshots /` — succeeds (system tool has
+     the entitlement), mount appears in `mount(8)` output at
+     `/Volumes/com.apple.TimeMachine.localsnapshots/.../Data`.
+     But every POSIX traversal of that path (`ls`, `find`,
+     `opendir`) returns EPERM even from a process with Full
+     Disk Access. The directory tree under
+     `/Volumes/com.apple.TimeMachine.localsnapshots` is
+     SIP-protected.
+  3. `umount` of the tmutil-mounted snapshot — also EPERM.
+     `/dev/disk3s5` raw read — EPERM (same boundary EX-28
+     hit on `/dev/disk3s1`).
+
+  Conclusion: snapshot contents are unreachable to an
+  ad-hoc-signed application on macOS, independent of root and
+  FDA. The entitled tools (`tmutil`, `Time Machine.app`,
+  Finder's Time Machine browser) cross this boundary via a
+  private TCC right that's not available to third-party apps
+  without DTS approval. The "Expand local snapshots" Settings
+  toggle that briefly shipped (commit 62b989e) was reverted
+  because the toggle could not deliver its promise on any
+  standard macOS install. Snapshot **enumeration** (names +
+  dates + presence) remains supported via the existing
+  `snapshots` module; snapshot **content traversal** does not.
 
 **R5 complete.** Three of four experiments produced positive
 correctness lifts (EX-26 sparse + decmpfs; EX-27 clone-dedup);

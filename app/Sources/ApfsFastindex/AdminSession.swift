@@ -97,7 +97,6 @@ final class AdminSession {
     /// the main queue if you touch SwiftUI state.
     func requestScan(
         path: String,
-        includeSnapshots: Bool = false,
         onSessionReady: (() -> Void)? = nil,
         onProgress: ((Scan.ProgressSnapshot) -> Void)? = nil
     ) -> Outcome {
@@ -106,14 +105,6 @@ final class AdminSession {
         // future SMAppService helper), so the in-process walker
         // already sees every TCC-restricted path. No subprocess,
         // no auth prompt.
-        //
-        // includeSnapshots is not honoured here — the in-process
-        // walker doesn't have the mount/walk/merge orchestration
-        // baked in. If the user wants snapshot expansion in this
-        // mode, they need to go through the long-lived helper
-        // (which runs the CLI's scan-with-snapshots command). For
-        // a sudo-launched build, snapshots aren't yet supported;
-        // the UI can call this out via a settings note if needed.
         if PrivilegedScan.alreadyRoot {
             onSessionReady?()
             DispatchQueue.main.async { self.active = true }
@@ -202,8 +193,7 @@ final class AdminSession {
                     stderr: ""
                 )
             }
-            let verb = includeSnapshots ? "scan-with-snapshots" : "scan"
-            let command = "\(verb)\t\(path)\t\(outPath)\t\(progressPath)\n"
+            let command = "scan\t\(path)\t\(outPath)\t\(progressPath)\n"
             guard let bytes = command.data(using: .utf8) else {
                 return .failed(message: "Path is not valid UTF-8.", stderr: "")
             }
