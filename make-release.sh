@@ -509,9 +509,18 @@ ASSET_PATH="$REPO_ROOT/app/$ASSET_NAME"
 # Make sure the only files dirty in the working tree are ones
 # we know how to handle (Cargo.toml from our pre-build bump
 # and any earlier-staged but unrelated changes are blocked).
+#
+# The `|| true` trail is required because grep returns exit 1
+# when *no* lines pass the filter — which is the common case
+# (clean working tree) — and pipefail + set -e would otherwise
+# kill the script silently right here. The previous flow had
+# exactly this bug; the only visible symptom was that the
+# script exited after the build with no error message and no
+# appcast/commit/tag/release work done.
 DIRTY="$(
     git -C "$REPO_ROOT" status --porcelain \
-        | grep -vE '(^.. Cargo\.lock|^.. crates/apfs-fastindex/Cargo\.toml|^.. appcast\.xml|^\?\?)'
+        | grep -vE '(^.. Cargo\.lock|^.. crates/apfs-fastindex/Cargo\.toml|^.. appcast\.xml|^\?\?)' \
+        || true
 )"
 if [ -n "$DIRTY" ]; then
     echo "make-release.sh: working tree has unrelated changes; commit or stash first:" >&2
