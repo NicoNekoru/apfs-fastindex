@@ -167,7 +167,47 @@ fi
 echo "==> [4/4] assemble app/ApfsFastindex.app"
 BUNDLE="$REPO_ROOT/app/ApfsFastindex.app"
 BUNDLE_ID="com.apfsfastindex.app"
-APP_VERSION="0.1.0"
+
+# APP_VERSION resolution (canonical source: the crate version
+# in `crates/apfs-fastindex/Cargo.toml`).
+#
+# Why this matters: APP_VERSION ends up in CFBundleShortVersionString
+# AND in `<sparkle:version>` in the appcast item. Sparkle compares
+# the running app's CFBundleShortVersionString against the
+# appcast item's <sparkle:version> to decide if an update is
+# available. If APP_VERSION lies (e.g. hardcoded "0.1.0" while
+# we cut a `v0.2.1` tag), every release ships a bundle that
+# reports the wrong version, no user ever sees an update offer,
+# and auto-update is silently broken.
+#
+# Three precedence tiers, highest first:
+#
+#   1. `--tag vX.Y.Z` strips the leading `v` and uses X.Y.Z.
+#      Lets a re-tagged build override the crate manifest.
+#   2. `$GITHUB_REF_NAME` for CI tag-pushed workflows (same
+#      strip rule).
+#   3. `version =` line in `crates/apfs-fastindex/Cargo.toml`.
+#      The single-source-of-truth fallback for dev builds.
+#
+# A missing version is a hard error rather than a silent
+# default — the previous bug (hardcoded "0.1.0") was caused by
+# exactly that kind of stand-in.
+APP_VERSION=""
+if [ -n "$RELEASE_TAG" ]; then
+    APP_VERSION="${RELEASE_TAG#v}"
+elif [ -n "$GITHUB_REF_NAME" ] && [[ "$GITHUB_REF_NAME" =~ ^v[0-9] ]]; then
+    APP_VERSION="${GITHUB_REF_NAME#v}"
+fi
+if [ -z "$APP_VERSION" ]; then
+    APP_VERSION="$(awk -F'"' '/^version[[:space:]]*=/ { print $2; exit }' \
+        "$REPO_ROOT/crates/apfs-fastindex/Cargo.toml")"
+fi
+if [ -z "$APP_VERSION" ]; then
+    echo "make-release.sh: could not determine APP_VERSION." >&2
+    echo "  pass --tag vX.Y.Z or set the version in Cargo.toml." >&2
+    exit 1
+fi
+echo "    APP_VERSION=$APP_VERSION"
 
 # Find the SwiftPM-generated resource bundle (named
 # `<Package>_<Target>.bundle` — usually
@@ -365,22 +405,13 @@ fi
 # to `gh release upload --clobber` so a re-run replaces the asset.
 # ---------------------------------------------------------------
 if [ -z "$RELEASE_TAG" ]; then
-    if [ -n "${GITHUB_REF_NAME:-}" ] && [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
-        RELEASE_TAG="$GITHUB_REF_NAME"
-    else
-        # Fall back to the crate version. `cargo pkgid` would be more
-        # robust, but it requires a clean lockfile and network access
-        # in some configurations; a grep keeps the publish path free
-        # of cargo-side preconditions.
-        CRATE_VERSION="$(awk -F'"' '/^version[[:space:]]*=/ { print $2; exit }' \
-            "$REPO_ROOT/crates/apfs-fastindex/Cargo.toml")"
-        if [ -z "$CRATE_VERSION" ]; then
-            echo "make-release.sh: could not determine release tag." >&2
-            echo "  pass --tag vX.Y.Z or set GITHUB_REF_NAME." >&2
-            exit 1
-        fi
-        RELEASE_TAG="v$CRATE_VERSION"
-    fi
+    # APP_VERSION was already resolved above (CLI tag, then
+    # GITHUB_REF_NAME, then Cargo.toml). Reuse it so the tag the
+    # release lands under matches the version baked into the
+    # bundle's Info.plist — without that match, Sparkle's version
+    # comparison would treat the new release as the same as the
+    # currently-running app and never offer the update.
+    RELEASE_TAG="v$APP_VERSION"
 fi
 
 if ! command -v gh >/dev/null 2>&1; then
