@@ -112,6 +112,47 @@ pub struct Tree {
     /// are contiguous and dense (one big allocation instead of
     /// one Vec per dir).
     pub children_arena: Vec<u32>,
+    /// Flat lowercased-name buffer. All node names lowercased
+    /// and concatenated into one contiguous `Vec<u8>`; per-node
+    /// slices are recovered via `names_lower_offsets`.
+    ///
+    /// Why flat: the obvious shape `Vec<String>` puts each
+    /// name on the heap behind a separate allocation. The
+    /// search loop's hot path is "scan every name with the
+    /// same needle"; 1.5 M random-pointer reads (one per name
+    /// header) is ~10-20× slower than 1.5 M sequential bytes,
+    /// because the CPU can prefetch the contiguous buffer but
+    /// not the heap-scattered Strings. EX-33 measured search
+    /// latency dropping from ~30-55 ms to ~3-6 ms after this
+    /// refactor on a 1.5 M-entry `/Users/kai` scan.
+    ///
+    /// Memory cost: same byte volume as the `Vec<String>`
+    /// shape (the lowercased bytes themselves are the same),
+    /// minus 24 B/node of String header overhead = ~36 MiB
+    /// saved on a 1.5 M-node tree. Plus 4 B/node for the
+    /// offsets table (~6 MiB) — net win of ~30 MiB.
+    pub names_lower_buf: Vec<u8>,
+    /// Cumulative byte-offsets into `names_lower_buf`. Name
+    /// for node `i` lives at `[offsets[i]..offsets[i+1]]`.
+    /// Length = `nodes.len() + 1` — the trailing offset is
+    /// the buffer's total length, used as the upper bound
+    /// for the last node's slice without a special case.
+    pub names_lower_offsets: Vec<u32>,
+}
+
+impl Tree {
+    /// Borrow the lowercased name bytes for node `idx`. O(1).
+    /// Returns an empty slice for out-of-range indices.
+    #[inline]
+    pub fn name_lower_bytes(&self, idx: u32) -> &[u8] {
+        let i = idx as usize;
+        if i + 1 >= self.names_lower_offsets.len() {
+            return &[];
+        }
+        let start = self.names_lower_offsets[i] as usize;
+        let end = self.names_lower_offsets[i + 1] as usize;
+        &self.names_lower_buf[start..end]
+    }
 }
 
 impl Tree {
@@ -203,9 +244,15 @@ impl Tree {
                     continue;
                 }
                 let is_last = at_end;
-                // SAFETY: `path` is UTF-8; segment boundaries are
-                // ASCII `/`, so slicing on byte indices is safe.
-                let name = unsafe { std::str::from_utf8_unchecked(&bytes[seg_start..i]) };
+                // Audit M3: was `from_utf8_unchecked`. Sound at
+                // every current call site (`path` is `&str`,
+                // segments split on ASCII `/`) but the checked
+                // variant costs ~nothing on a UTF-8-validated
+                // input and removes the foot-gun for future
+                // refactors. `expect` is fine here — a non-UTF-8
+                // sub-slice of a `&str` is impossible.
+                let name = std::str::from_utf8(&bytes[seg_start..i])
+                    .expect("segment of &str is UTF-8");
 
                 if is_last {
                     match entry.entry_kind {
@@ -347,9 +394,47 @@ impl Tree {
         }
         drop(child_lists);
 
+        // Pre-lowercase every node's name once, into a flat
+        // byte buffer with cumulative-offset boundaries. The
+        // search loop scans this contiguously — the CPU can
+        // prefetch sequential bytes, which a `Vec<String>`
+        // would defeat by scattering each name on the heap.
+        // See `names_lower_buf` docs for the trade-off.
+        //
+        // Pre-size the buffer: sum of name lengths gives the
+        // exact byte volume. Saves the doubling allocs that
+        // `Vec::extend_from_slice` would otherwise do on a
+        // 1.5 M-node tree.
+        let total_name_bytes: usize = nodes.iter().map(|n| n.name.len()).sum();
+        let mut names_lower_buf: Vec<u8> = Vec::with_capacity(total_name_bytes);
+        let mut names_lower_offsets: Vec<u32> = Vec::with_capacity(nodes.len() + 1);
+        names_lower_offsets.push(0);
+        // Scratch String reused across iterations — `to_lowercase`
+        // allocates fresh each call, so we copy into a scratch
+        // and then extend the flat buffer. For typical filenames
+        // (≤ 64 B) the scratch never grows after the first few
+        // entries.
+        let mut scratch = String::new();
+        for node in &nodes {
+            scratch.clear();
+            // `chars().flat_map(|c| c.to_lowercase())` is the
+            // same machinery `str::to_lowercase` uses but
+            // writes into our scratch instead of allocating
+            // a new String. Saves one allocation per node.
+            for ch in node.name.chars() {
+                for lo in ch.to_lowercase() {
+                    scratch.push(lo);
+                }
+            }
+            names_lower_buf.extend_from_slice(scratch.as_bytes());
+            names_lower_offsets.push(names_lower_buf.len() as u32);
+        }
+
         let mut tree = Tree {
             nodes,
             children_arena,
+            names_lower_buf,
+            names_lower_offsets,
         };
         tree.finalize();
         tree
@@ -484,9 +569,12 @@ impl Tree {
                 i += 1;
                 continue;
             }
-            // SAFETY: caller passes a UTF-8 path; ASCII '/'
-            // boundaries leave each segment UTF-8-valid.
-            let name = unsafe { std::str::from_utf8_unchecked(&bytes[seg_start..i]) };
+            // Audit M3: see the matching note in `build`. Checked
+            // variant — never fails on `&str` sub-slices, but
+            // catches any future refactor that introduces an
+            // unchecked input path.
+            let name = std::str::from_utf8(&bytes[seg_start..i])
+                .expect("segment of &str is UTF-8");
             let mut found: Option<u32> = None;
             for &child_idx in self.children_of(cursor) {
                 if &*self.nodes[child_idx as usize].name == name {

@@ -153,6 +153,24 @@ struct ApfsFastindexApp: App {
                 }
                 .keyboardShortcut("A", modifiers: [.command, .shift])
             }
+            // Edit menu: replace the standard system "Find"
+            // command (CommandGroup.textEditing.find) with our
+            // own ⌘F that focuses the tree-list search field
+            // — Apple's default Find is geared at NSTextView
+            // and does nothing useful in this app. Posting via
+            // NotificationCenter matches the
+            // scanAsAdministratorRequested pattern: the active
+            // `NativeContentView` listens, the menu command
+            // stays neutral on whether a view exists yet.
+            CommandGroup(replacing: .textEditing) {
+                Button("Find") {
+                    NotificationCenter.default.post(
+                        name: .findRequested,
+                        object: nil
+                    )
+                }
+                .keyboardShortcut("f", modifiers: .command)
+            }
             // Help-menu entry → opens the Rust panic-hook log
             // file in the user's default editor. The file lives
             // under `~/Library/Logs/apfs-fastindex.log`; this

@@ -125,14 +125,14 @@ fn admin_mode_missing_file_returns_null_and_records_error() {
     );
 }
 
-/// The CLI's `--server` mode (used by AdminSession's long-lived
-/// privileged helper) speaks a tab-delimited protocol over
-/// stdin/stdout. This integration test exercises the protocol
-/// end-to-end with a real subprocess: emit a `scan` command for
-/// the source tree, expect the `ready\t1` handshake plus `ok\t0`,
-/// then `quit`. The result file is checked back through
-/// apfs_scan_from_msgpack_file so the round-trip is the same one
-/// the GUI bridge uses.
+/// The CLI's `--server` mode speaks JSON-line over
+/// stdin/stdout (audit C1+H1 fix replaced the old tab-
+/// delimited protocol). End-to-end probe: spawn the helper,
+/// read the `ready` handshake, send a `scan` command, drain
+/// progress events, expect a terminal `ok` carrying a helper-
+/// chosen `out_path`, release the tempfile, then `quit`.
+/// The result msgpack rehydrates via the same FFI the GUI
+/// bridge uses.
 #[test]
 fn admin_mode_server_loop_scans_and_quits() {
     use std::io::{BufRead, BufReader, Write};
@@ -158,16 +158,6 @@ fn admin_mode_server_loop_scans_and_quits() {
     }
     let scan_target = crate_root.join("src");
 
-    let temp_dir = std::env::temp_dir();
-    let pid = std::process::id();
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0);
-    let out_path = temp_dir.join(format!("apfs-fastindex-server-out-{pid}-{now}.msgpack"));
-    let progress_path =
-        temp_dir.join(format!("apfs-fastindex-server-progress-{pid}-{now}.log"));
-
     let mut child = Command::new(&bin)
         .arg("--server")
         .stdin(Stdio::piped())
@@ -180,41 +170,59 @@ fn admin_mode_server_loop_scans_and_quits() {
     let stdout = child.stdout.take().expect("stdout");
     let mut reader = BufReader::new(stdout);
 
-    // First line should be the ready handshake.
+    fn parse_event(line: &str) -> serde_json::Value {
+        serde_json::from_str(line.trim_end()).expect("valid JSON")
+    }
+
+    // First line: ready handshake.
     let mut line = String::new();
     reader.read_line(&mut line).expect("read ready");
-    assert_eq!(line.trim_end(), "ready\t1", "unexpected handshake: {line:?}");
+    let ready = parse_event(&line);
+    assert_eq!(ready["event"], "ready", "unexpected handshake: {line:?}");
+    assert_eq!(ready["version"], 1);
 
-    // Send a scan command.
-    let command = format!(
-        "scan\t{}\t{}\t{}\n",
-        scan_target.display(),
-        out_path.display(),
-        progress_path.display(),
-    );
-    stdin.write_all(command.as_bytes()).expect("write scan");
+    // Send scan command as JSON-line.
+    let cmd = serde_json::json!({
+        "op": "scan",
+        "path": scan_target.to_string_lossy(),
+    });
+    let bytes = serde_json::to_vec(&cmd).expect("encode scan");
+    stdin.write_all(&bytes).expect("write scan");
+    stdin.write_all(b"\n").expect("newline");
     stdin.flush().expect("flush");
 
-    line.clear();
-    reader.read_line(&mut line).expect("read scan reply");
+    // Drain progress events until ok/err.
+    let mut out_path: Option<String> = None;
+    loop {
+        line.clear();
+        reader.read_line(&mut line).expect("read reply");
+        let evt = parse_event(&line);
+        match evt["event"].as_str() {
+            Some("progress") => continue,
+            Some("ok") => {
+                out_path = evt["out_path"].as_str().map(|s| s.to_string());
+                break;
+            }
+            Some("err") => panic!("scan err: {}", evt["message"]),
+            other => panic!("unexpected event {other:?} in {line:?}"),
+        }
+    }
+    let out_path = out_path.expect("ok carried out_path");
     assert!(
-        line.trim_end().starts_with("ok\t"),
-        "expected ok\\t<exit>; got {line:?}"
+        !out_path.is_empty(),
+        "ok reply must carry a non-empty out_path"
     );
 
-    // Send quit.
-    stdin.write_all(b"quit\n").expect("write quit");
-    stdin.flush().expect("flush");
-    line.clear();
-    reader.read_line(&mut line).expect("read quit reply");
-    assert_eq!(line.trim_end(), "ok\t0");
-
-    let status = child.wait().expect("wait");
-    assert!(status.success(), "server exited non-zero: {status:?}");
+    // Sanity-check that the helper actually owns the file —
+    // the parent's path-verification in production does this
+    // too, with stricter ownership checks (audit H2).
+    let meta = std::fs::metadata(&out_path).expect("stat out_path");
+    assert!(meta.is_file(), "out_path is not a regular file");
+    assert!(meta.len() > 0, "out_path is empty");
 
     // The output msgpack should rehydrate cleanly via the
     // existing FFI — same shape as a non-server-mode scan.
-    let c_path = CString::new(out_path.to_string_lossy().into_owned()).unwrap();
+    let c_path = CString::new(out_path.clone()).unwrap();
     let handle = apfs_scan_from_msgpack_file(c_path.as_ptr());
     assert!(
         !handle.is_null(),
@@ -225,8 +233,32 @@ fn admin_mode_server_loop_scans_and_quits() {
     assert!(count > 0, "server scan returned zero entries");
     apfs_scan_free(handle);
 
-    let _ = std::fs::remove_file(&out_path);
-    let _ = std::fs::remove_file(&progress_path);
+    // Release the tempfile (helper unlinks it).
+    let release = serde_json::json!({ "op": "release", "paths": [out_path] });
+    stdin
+        .write_all(&serde_json::to_vec(&release).unwrap())
+        .expect("write release");
+    stdin.write_all(b"\n").expect("newline");
+    stdin.flush().expect("flush");
+    line.clear();
+    reader.read_line(&mut line).expect("read release ack");
+    let ack = parse_event(&line);
+    assert_eq!(ack["event"], "ok");
+
+    // Quit.
+    let quit = serde_json::json!({ "op": "quit" });
+    stdin
+        .write_all(&serde_json::to_vec(&quit).unwrap())
+        .expect("write quit");
+    stdin.write_all(b"\n").expect("newline");
+    stdin.flush().expect("flush");
+    line.clear();
+    reader.read_line(&mut line).expect("read bye");
+    let bye = parse_event(&line);
+    assert_eq!(bye["event"], "bye");
+
+    let status = child.wait().expect("wait");
+    assert!(status.success(), "server exited non-zero: {status:?}");
 }
 
 /// A file that exists but isn't valid msgpack returns NULL and

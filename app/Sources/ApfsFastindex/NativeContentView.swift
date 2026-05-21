@@ -43,6 +43,61 @@ struct NativeContentView: View {
     /// SwiftUI list view doesn't re-walk the tree on every
     /// view body re-evaluation.
     @State private var treeRows: [TreeListRow] = []
+    /// Search query as typed. The debounced + cancellable
+    /// Task chain in `onSearchQueryChanged` converts this into
+    /// `searchMatches` after the user pauses; intermediate
+    /// keystrokes are discarded so a fast typer doesn't pile
+    /// up backed-up walks.
+    @State private var searchQuery: String = ""
+    /// Sorted matching-node indices for the **flat search-
+    /// results list**. `nil` = no active search → render the
+    /// full hierarchical tree with normal expand/collapse.
+    /// Non-nil → render a flat list of matches (cap applied
+    /// to the visible row count; see `searchMatchCap`).
+    ///
+    /// Flat list (not hierarchical) is deliberate: the old
+    /// "auto-expand every ancestor of every match" behaviour
+    /// blew up on pathological short queries like "n" — the
+    /// keep-set hit 1 M+ ancestors and the tree-walk had to
+    /// make ~5 FFI calls per ancestor, totalling seconds of
+    /// main-thread blocking. Flat list visits matches and
+    /// nothing else; matches per typical query are in the
+    /// thousands at most.
+    @State private var searchMatches: [UInt32]? = nil
+    /// Total match count before the cap, for status display
+    /// ("Showing 500 of 14 762"). 0 when no search active.
+    @State private var searchTotalMatches: Int = 0
+    /// Last query the matches array was computed against —
+    /// short-circuits redundant rebuilds when the trimmed
+    /// query didn't change (e.g. spurious .onChange firing).
+    @State private var searchMatchesQuery: String = ""
+    /// "I'm searching now" indicator for the UI. Toggled by
+    /// the search Task across its async boundaries.
+    @State private var searchInFlight: Bool = false
+    /// Most-recent in-flight search Task. Stored so a new
+    /// keystroke can cancel the prior one before scheduling
+    /// the next debounced run.
+    @State private var searchTask: Task<Void, Never>? = nil
+    @FocusState private var searchFieldFocused: Bool
+
+    /// Debounce window. Keystrokes within this interval
+    /// collapse into one search. 200 ms is the
+    /// "feels-responsive" threshold (the user perceives the
+    /// filter as following their typing) without being so
+    /// short that "node_modules" still fires 12 searches.
+    private static let searchDebounceNs: UInt64 = 200_000_000
+    /// Minimum query length before we actually search. Single
+    /// characters match millions of names ("e" matches ~70 %
+    /// of `/Users/kai`); the flat-list cap saves the render
+    /// but the FFI still does the work. Two characters is the
+    /// shortest query that meaningfully narrows the result
+    /// set on a typical home directory.
+    private static let searchMinQueryLength: Int = 2
+    /// Max rows we render in flat search-list mode. Sorted by
+    /// the active metric descending so the user sees the
+    /// biggest hits first; over-cap matches get a "+ N more"
+    /// row.
+    private static let searchMatchCap: Int = 500
     /// Per-(node, metric) ext-list summary for the right-hand
     /// side panel. Computed in Rust via `Scan.extSummary` and
     /// rebuilt whenever `currentNode` or `metric` changes; on a
@@ -142,6 +197,14 @@ struct NativeContentView: View {
             // matching the regular Scan button's flow.
             startPrivilegedScan()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .findRequested)) { _ in
+            // Edit > Find (⌘F) → focus the tree-list search
+            // field. If a scan hasn't run yet there's nothing to
+            // search, but focusing the field is still fine —
+            // the placeholder explains what it does and the
+            // typing won't filter anything until rows exist.
+            searchFieldFocused = true
+        }
         .onChange(of: adminMode) { _ in
             // adminMode flips the moment auth completes
             // (AdminSession's ready handshake); refresh the
@@ -152,6 +215,16 @@ struct NativeContentView: View {
         }
         .onAppear { applyWindowTitle() }
         .onChange(of: scan?.entryCount) { _ in
+            // New scan = node indices in any cached search
+            // results are stale (they belonged to the previous
+            // scan). Cancel any in-flight search, drop the
+            // cache, and rebuild against the new tree.
+            searchTask?.cancel()
+            searchTask = nil
+            searchMatches = nil
+            searchTotalMatches = 0
+            searchMatchesQuery = ""
+            searchInFlight = false
             rebuildTreeRows()
             rebuildExtSummary()
         }
@@ -199,6 +272,10 @@ struct NativeContentView: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
                 .background(VizPalette.bg)
+            searchField
+                .padding(.horizontal, 10)
+                .padding(.bottom, 6)
+                .background(VizPalette.bg)
             colHeader
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)
@@ -235,6 +312,98 @@ struct NativeContentView: View {
             }
         }
         .background(VizPalette.panel)
+    }
+
+    /// Search-by-name input. ⌘F focuses it (handled in
+    /// `ApfsFastindexApp` via the standard `.find` command
+    /// notification → `.findRequested` listener below).
+    /// Case-insensitive substring match on each node's display
+    /// name (the last path component). Empty = no filter.
+    private var searchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(AppFont.ui(11))
+                .foregroundStyle(VizPalette.muted)
+            TextField("Filter names (⌘F)", text: $searchQuery)
+                .textFieldStyle(.plain)
+                .font(AppFont.ui(12))
+                .focused($searchFieldFocused)
+                .onChange(of: searchQuery) { newValue in
+                    onSearchQueryChanged(newValue)
+                }
+                .onChange(of: metric) { _ in
+                    // Re-sort search results when the user
+                    // flips logical/allocated. Otherwise the
+                    // top-N picked by the old metric stays
+                    // stuck even though the user clearly
+                    // wants the new metric's biggest hits.
+                    if searchMatches != nil {
+                        // Force re-run; clear cache key so the
+                        // same query triggers fresh work.
+                        searchMatchesQuery = ""
+                        onSearchQueryChanged(searchQuery)
+                    }
+                }
+            // Status text. Three states:
+            //  - Searching → "Searching…" while the Task is
+            //    debouncing + computing off-main.
+            //  - Has matches → "M / N matches" (or just "N")
+            //  - Sub-min-length → "Type 2+ chars" hint.
+            if searchInFlight {
+                Text("Searching…")
+                    .font(AppFont.ui(10))
+                    .foregroundStyle(VizPalette.muted)
+            } else if let matches = searchMatches {
+                let shown = matches.count
+                let total = searchTotalMatches
+                if total > shown {
+                    Text("\(shown) of \(total)")
+                        .font(AppFont.ui(10)).monospacedDigit()
+                        .foregroundStyle(VizPalette.muted)
+                        .help("Showing the \(shown) largest matches (sorted by the active metric). Use a longer query to narrow.")
+                } else if total > 0 {
+                    Text("\(total)")
+                        .font(AppFont.ui(10)).monospacedDigit()
+                        .foregroundStyle(VizPalette.muted)
+                        .help("\(total) matches.")
+                } else {
+                    Text("0")
+                        .font(AppFont.ui(10)).monospacedDigit()
+                        .foregroundStyle(VizPalette.warning)
+                        .help("No matches.")
+                }
+            } else if !searchQuery.isEmpty
+                && searchQuery.trimmingCharacters(in: .whitespaces).count
+                    < NativeContentView.searchMinQueryLength
+            {
+                Text("Type 2+")
+                    .font(AppFont.ui(10))
+                    .foregroundStyle(VizPalette.muted)
+                    .help("Single-character queries match too much; type at least 2 characters to filter.")
+            }
+            if !searchQuery.isEmpty {
+                Button {
+                    searchQuery = ""
+                    searchFieldFocused = false
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(AppFont.ui(12))
+                        .foregroundStyle(VizPalette.muted)
+                }
+                .buttonStyle(.plain)
+                .help("Clear search")
+                .keyboardShortcut(.cancelAction)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(VizPalette.panel)
+        .overlay(
+            RoundedRectangle(cornerRadius: 5)
+                .stroke(searchFieldFocused
+                        ? VizPalette.accent.opacity(0.6)
+                        : VizPalette.border, lineWidth: 1)
+        )
     }
 
     @ViewBuilder
@@ -316,8 +485,20 @@ struct NativeContentView: View {
                 } label: {
                     // Sanitise parser-supplied names before
                     // they hit the tree-list row (audit #App-2).
+                    //
+                    // Search mode shows the full path so the
+                    // user can tell `Cache/Foo.txt` apart from
+                    // `Cache/Bar/Foo.txt` — the flat list
+                    // collapses hierarchy so just the leaf
+                    // name would be ambiguous.
                     let name: String = {
                         if row.nodeIndex == 0 { return "/" }
+                        if searchMatches != nil {
+                            let raw = scan?.path(of: row.nodeIndex) ?? "?"
+                            return DisplaySanitizer.sanitiseDisplay(
+                                raw.isEmpty ? "/" : raw
+                            )
+                        }
                         let raw = scan?.name(of: row.nodeIndex) ?? "?"
                         return DisplaySanitizer.sanitiseDisplay(raw)
                     }()
@@ -417,6 +598,23 @@ struct NativeContentView: View {
         while let cur = c {
             expandedNodes.insert(cur)
             c = scan.parent(of: cur)
+        }
+        // Clicking a search result means "go to that file."
+        // Exit search mode so the user lands in the regular
+        // hierarchical view with their target highlighted.
+        if searchMatches != nil {
+            searchTask?.cancel()
+            searchTask = nil
+            searchMatches = nil
+            searchTotalMatches = 0
+            searchMatchesQuery = ""
+            searchInFlight = false
+            searchQuery = ""
+            // Force a tree-rows rebuild *before* updateLayout
+            // so the row corresponding to `nodeIndex` exists in
+            // `treeRows` when the ScrollViewReader tries to
+            // bring it into view.
+            rebuildTreeRows()
         }
         updateLayout()
     }
@@ -600,7 +798,143 @@ struct NativeContentView: View {
         treeRows = out
     }
 
+    /// Called on every keystroke in the search field.
+    ///
+    /// Schedules a debounced + cancellable search Task:
+    /// - Empty / sub-min-length query: clears search state
+    ///   synchronously (the user just hit Backspace; no
+    ///   reason to make them wait).
+    /// - Otherwise: cancels any prior in-flight Task, sleeps
+    ///   `searchDebounceNs`, runs the FFI on a background
+    ///   `DispatchQueue.global(qos: .userInitiated)`, then
+    ///   sorts + caps the results and publishes back to
+    ///   `@State` on the main actor.
+    ///
+    /// Why background dispatch: the Rust FFI itself runs in
+    /// the low tens of ms on a 1.5 M-entry scan, but the
+    /// post-FFI work in Swift (allocating the `[UInt32]`,
+    /// sorting it by metric value via more FFI calls,
+    /// re-rendering the LazyVStack) historically blocked the
+    /// main thread for ~5+ s on single-letter queries because
+    /// every per-node sort triggered another FFI hop. Off-
+    /// main keeps the input field responsive.
+    ///
+    /// Cancellation makes "node_modules" produce one search
+    /// run instead of twelve: each keystroke cancels the
+    /// pending Task, the next keystroke's sleep starts fresh,
+    /// only the user's last pause-of-200ms-or-more wins.
+    private func onSearchQueryChanged(_ newValue: String) {
+        // Always cancel the prior task. Even if the new query
+        // is empty (so we won't schedule a new one), an
+        // in-flight one needs to stop publishing.
+        searchTask?.cancel()
+        searchTask = nil
+
+        let trimmed = newValue.trimmingCharacters(in: .whitespaces)
+        // Empty or too-short query: clear search state
+        // immediately and rebuild the regular tree. Don't
+        // wait for the debounce — Backspace should feel
+        // instant.
+        if trimmed.count < NativeContentView.searchMinQueryLength {
+            if searchMatches != nil || !searchMatchesQuery.isEmpty {
+                searchMatches = nil
+                searchTotalMatches = 0
+                searchMatchesQuery = ""
+                searchInFlight = false
+                rebuildTreeRows()
+            } else {
+                // No prior state to clear; just make sure the
+                // flight indicator is off.
+                searchInFlight = false
+            }
+            return
+        }
+
+        // Skip work if the trimmed query matches the one
+        // we last computed against (e.g. user deleted a
+        // trailing space).
+        if trimmed == searchMatchesQuery, searchMatches != nil {
+            return
+        }
+
+        guard let scan else { return }
+        // Capture by value so the detached task doesn't pin
+        // SwiftUI state.
+        let metricSnapshot = self.metric
+        let cap = NativeContentView.searchMatchCap
+
+        searchInFlight = true
+        searchTask = Task { @MainActor in
+            // Debounce: a fresh keystroke comes through and
+            // cancels us; the next one schedules its own
+            // sleep. Try/catch swallows the cancellation
+            // CancellationError.
+            do {
+                try await Task.sleep(nanoseconds: NativeContentView.searchDebounceNs)
+            } catch {
+                return
+            }
+            if Task.isCancelled { return }
+
+            // Heavy work off the main thread. Scan is a
+            // reference; the FFI it forwards into is
+            // thread-safe (see `apfs_scan_search_names`).
+            // Sorting calls `valueLogical`/`valueAllocated`
+            // FFIs which read pre-computed subtree totals —
+            // also thread-safe.
+            let sortedCapped: (rows: [(UInt32, UInt64)], total: Int) = await Task.detached(
+                priority: .userInitiated
+            ) {
+                let matches = scan.searchMatches(query: trimmed)
+                let total = matches.count
+                if matches.isEmpty {
+                    return ([], 0)
+                }
+                // Score every match by the active metric. One
+                // FFI hop per match — for the worst-case
+                // single-letter query that's ~1 M hops; the
+                // background-thread placement keeps the UI
+                // alive while it runs.
+                let scored: [(UInt32, UInt64)] = matches.map { idx -> (UInt32, UInt64) in
+                    let v: UInt64 = (metricSnapshot == .allocated)
+                        ? (scan.valueAllocated(of: idx) ?? 0)
+                        : scan.valueLogical(of: idx)
+                    return (idx, v)
+                }
+                // Sort by metric desc, cap. `sorted` is
+                // ~O(N log N); for 1 M elements that's ~20 M
+                // comparisons. Still under a second off-main.
+                let sortedAll = scored.sorted { $0.1 > $1.1 }
+                let visible = Array(sortedAll.prefix(cap))
+                return (visible, total)
+            }.value
+
+            if Task.isCancelled { return }
+
+            // Publish back to the main actor.
+            searchMatches = sortedCapped.rows.map { $0.0 }
+            searchTotalMatches = sortedCapped.total
+            searchMatchesQuery = trimmed
+            searchInFlight = false
+            rebuildTreeRows()
+        }
+    }
+
     private func walkForRows(scan: Scan, nodeIndex: UInt32, depth: Int, out: inout [TreeListRow]) {
+        // Search mode is rendered as a flat results list, not
+        // a hierarchical tree (see comments on `searchMatches`
+        // for the rationale). When `searchMatches` is set
+        // we delegate the entire row build to a sibling
+        // function and short-circuit the recursive walk.
+        if let matches = searchMatches {
+            // Only the top-level call should render the flat
+            // list; recursive descendents return immediately.
+            if nodeIndex == 0, depth == 0 {
+                walkFlatSearchResults(scan: scan, matches: matches, out: &out)
+            }
+            return
+        }
+
         let kind = scan.kind(of: nodeIndex)
         let childCount = scan.childCount(of: nodeIndex)
         let isDir = kind == .dir
@@ -631,6 +965,52 @@ struct NativeContentView: View {
                 id: id, nodeIndex: Scan.nodeInvalid, depth: depth,
                 hasChildren: false, isExpanded: false, isCurrent: false,
                 isOverflow: true, overflowCount: sorted.count - visible.count
+            ))
+        }
+    }
+
+    /// Emit one `TreeListRow` per match. The matches list was
+    /// already sorted + capped on the background thread (see
+    /// `onSearchQueryChanged`); we just translate each
+    /// node index into a row. All rows render at `depth = 0`
+    /// (the search-list is flat); the existing
+    /// `treeListRowView` displays the node's name plus its
+    /// parent path inferred via `Scan.path(of:)`.
+    ///
+    /// Overflow row at the end when `searchTotalMatches`
+    /// exceeded the cap — surfaces "+ N more matches" so
+    /// the user knows they're seeing a partial view.
+    private func walkFlatSearchResults(
+        scan: Scan,
+        matches: [UInt32],
+        out: inout [TreeListRow]
+    ) {
+        for nodeIndex in matches {
+            // `id` collisions can't happen because every
+            // match is a unique tree node and `depth` is 0
+            // for all of them.
+            let id = UInt64(nodeIndex) << 8
+            let kind = scan.kind(of: nodeIndex)
+            let isDir = kind == .dir
+            // In search mode, a dir is shown as a row but
+            // not "expanded" — clicking it navigates rather
+            // than expanding in place. Disclosure triangle
+            // suppressed.
+            out.append(TreeListRow(
+                id: id, nodeIndex: nodeIndex, depth: 0,
+                hasChildren: false, isExpanded: false,
+                isCurrent: nodeIndex == currentNode,
+                isOverflow: false, overflowCount: 0
+            ))
+            _ = isDir
+        }
+        let overflow = searchTotalMatches - matches.count
+        if overflow > 0 {
+            let id: UInt64 = (UInt64.max / 2)
+            out.append(TreeListRow(
+                id: id, nodeIndex: Scan.nodeInvalid, depth: 0,
+                hasChildren: false, isExpanded: false, isCurrent: false,
+                isOverflow: true, overflowCount: overflow
             ))
         }
     }

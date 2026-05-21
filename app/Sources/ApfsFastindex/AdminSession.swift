@@ -149,43 +149,26 @@ final class AdminSession {
             DispatchQueue.main.async { self.active = true }
         }
 
-        // Each request gets its own pair of temp files. The
-        // server protocol lets the parent name them, which means
-        // we never see a stale msgpack from a previous request.
-        let runId = "\(ProcessInfo.processInfo.processIdentifier)-\(UInt64(Date().timeIntervalSince1970 * 1000))"
-        let tempDir = NSTemporaryDirectory()
-        let outPath = (tempDir as NSString)
-            .appendingPathComponent("apfs-fastindex-admin-out-\(runId).msgpack")
-        let progressPath = (tempDir as NSString)
-            .appendingPathComponent("apfs-fastindex-admin-progress-\(runId).log")
-        defer {
-            try? FileManager.default.removeItem(atPath: outPath)
-            try? FileManager.default.removeItem(atPath: progressPath)
-        }
-        // Ensure the progress file exists so the poller's first
-        // open() call doesn't no-op. The helper truncates on its
-        // own write so a pre-existing empty file is fine.
-        FileManager.default.createFile(atPath: progressPath, contents: nil)
-
-        let pollStop = DispatchSemaphore(value: 0)
-        let pollGroup = DispatchGroup()
-        if let onProgress {
-            pollGroup.enter()
-            DispatchQueue.global(qos: .userInitiated).async {
-                defer { pollGroup.leave() }
-                PrivilegedScan.pollProgress(
-                    file: progressPath,
-                    stop: pollStop,
-                    onProgress: onProgress
-                )
-            }
+        // Defence in depth: refuse control bytes in the path.
+        // JSON serialisation handles them fine, but the helper
+        // historically split on TAB and a user-influenced path
+        // with embedded TAB shifted the parser (audit H1). The
+        // protocol is JSON-line now so this is belt-and-suspenders;
+        // we keep it because any path the user typed should be
+        // a "normal" filesystem path with no control bytes.
+        if path.contains(where: { $0 == "\0" || $0 == "\n" || $0 == "\r" || $0 == "\t" }) {
+            return .failed(
+                message: "Path contains a control character; refusing to send to helper.",
+                stderr: ""
+            )
         }
 
         // Serialise the stdin write + reply read against any
         // concurrent caller. There is only one helper, one
         // stdin, one stdout — concurrent requests must take
         // turns. Each `requestScan` call gets one full round-trip
-        // before the next can proceed.
+        // (including all interleaved progress events) before
+        // the next can proceed.
         let result = requestQueue.sync(execute: { () -> Outcome in
             guard let pipe = pipeHandle else {
                 return .failed(
@@ -193,12 +176,20 @@ final class AdminSession {
                     stderr: ""
                 )
             }
-            let command = "scan\t\(path)\t\(outPath)\t\(progressPath)\n"
-            guard let bytes = command.data(using: .utf8) else {
-                return .failed(message: "Path is not valid UTF-8.", stderr: "")
+
+            // JSON-line protocol (audit C1+H1 fix). Helper
+            // picks its own tempfile path via mkstemp and
+            // reports it back in the `ok` reply; we never
+            // tell the helper where to write.
+            let scanCmd: [String: Any] = ["op": "scan", "path": path]
+            guard let scanBytes = try? JSONSerialization.data(
+                withJSONObject: scanCmd, options: []
+            ) else {
+                return .failed(message: "Could not encode scan command.", stderr: "")
             }
             do {
-                try pipe.write(contentsOf: bytes)
+                try pipe.write(contentsOf: scanBytes)
+                try pipe.write(contentsOf: Data([0x0a]))
             } catch {
                 self.invalidate()
                 return .failed(
@@ -208,19 +199,106 @@ final class AdminSession {
                 )
             }
 
-            // Read one line of response. The protocol guarantees
-            // exactly one line per scan; read until the first
-            // newline.
-            let line = AdminSession.readLine(from: pipe)
-            return AdminSession.consumeOk(
-                line: line,
-                outPath: outPath,
-                sourcePath: path
-            )
+            // Read replies until we hit a terminal event
+            // (`ok` or `err`). Progress events flow inline on
+            // the same stdout stream — no separate progress
+            // file (audit C1: the old progress file lived at a
+            // parent-supplied path and was the same LPE primitive
+            // as the output file).
+            var terminalOutPath: String? = nil
+            var terminalErr: String? = nil
+            readLoop: while true {
+                let line = AdminSession.readLine(from: pipe)
+                if line.isEmpty {
+                    return .failed(
+                        message: "Administrator helper closed the connection unexpectedly.",
+                        stderr: ""
+                    )
+                }
+                guard let lineData = line.data(using: .utf8),
+                      let json = try? JSONSerialization.jsonObject(
+                        with: lineData, options: []
+                      ) as? [String: Any],
+                      let event = json["event"] as? String
+                else {
+                    return .failed(
+                        message: "Helper reply was not a JSON object: \(line.prefix(200))",
+                        stderr: ""
+                    )
+                }
+                switch event {
+                case "progress":
+                    if let onProgress = onProgress {
+                        onProgress(Scan.ProgressSnapshot(
+                            scanned: AdminSession.uint(json["scanned"]),
+                            skipped: AdminSession.uint(json["skipped"]),
+                            bytes: AdminSession.uint(json["bytes"]),
+                            elapsedMs: AdminSession.uint(json["elapsed_ms"]),
+                            terminal: (json["terminal"] as? Bool) ?? false
+                        ))
+                    }
+                case "ok":
+                    terminalOutPath = json["out_path"] as? String
+                    break readLoop
+                case "err":
+                    terminalErr = (json["message"] as? String) ?? "unknown helper error"
+                    break readLoop
+                default:
+                    // Forward-compat: ignore unknown event
+                    // shapes so a future helper version can
+                    // add events (e.g. "warning") without
+                    // breaking this parent.
+                    break
+                }
+            }
+
+            if let err = terminalErr {
+                return .failed(message: err, stderr: "")
+            }
+            guard let outPath = terminalOutPath, !outPath.isEmpty else {
+                return .failed(
+                    message: "Helper finished without an output path.",
+                    stderr: ""
+                )
+            }
+
+            // Audit H2: stat-verify the path is a root-owned
+            // regular file (mode <= 0600) before reading. The
+            // helper created it via mkstemp under sticky /tmp,
+            // so a user-attacker can neither pre-place a
+            // symlink at that exact random name nor swap the
+            // file (sticky + root-owned blocks both). The
+            // explicit check is defence-in-depth.
+            if !AdminSession.verifyHelperOutputPath(outPath) {
+                // Ask the helper to clean up before we bail;
+                // best-effort.
+                _ = AdminSession.sendRelease(pipe: pipe, paths: [outPath])
+                return .failed(
+                    message: "Helper output file failed ownership check; refusing to read.",
+                    stderr: ""
+                )
+            }
+
+            guard let scan = Scan.fromPrivilegedMsgpack(
+                path: outPath, sourcePath: path
+            ) else {
+                let cause = PrivilegedScan.lastFfiError()
+                _ = AdminSession.sendRelease(pipe: pipe, paths: [outPath])
+                return .failed(
+                    message: "Privileged scan finished but the result file "
+                        + "couldn't be loaded: \(cause).",
+                    stderr: ""
+                )
+            }
+
+            // Tell the helper to unlink the tempfile. We can't
+            // unlink it ourselves (sticky /tmp + root-owned).
+            // Best-effort: if the helper hung up between scan-
+            // and-release, the file leaks until the next quit.
+            _ = AdminSession.sendRelease(pipe: pipe, paths: [outPath])
+            return .ok(scan)
         })
 
-        pollStop.signal()
-        pollGroup.wait()
         return result
     }
 
@@ -232,14 +310,18 @@ final class AdminSession {
         guard let pipe = pipeHandle else {
             return
         }
-        // Send `quit\n`; the helper writes `ok\t0\n` and exits.
-        // We don't read the reply — by the time shutdown is
-        // called we don't care about the response value, and a
-        // hung helper shouldn't block app termination. fclose
-        // below flushes our side and tears down the socket; the
-        // helper EOFs on read and exits within milliseconds.
-        let quit = "quit\n".data(using: .utf8)!
-        try? pipe.write(contentsOf: quit)
+        // JSON-line protocol: `{"op":"quit"}`. The helper
+        // unlinks its remaining tempfiles, writes a `bye` reply,
+        // and exits. We don't read the reply — a hung helper
+        // shouldn't block app termination, and fclose below
+        // tears down the socket so the helper EOFs on its
+        // next read.
+        if let quit = try? JSONSerialization.data(
+            withJSONObject: ["op": "quit"], options: []
+        ) {
+            try? pipe.write(contentsOf: quit)
+            try? pipe.write(contentsOf: Data([0x0a]))
+        }
         invalidateLocked()
     }
 
@@ -371,10 +453,11 @@ final class AdminSession {
         self.pipeFilePtr = pipe
         self.pipeHandle = handle
 
-        // 5. Wait for the helper's `ready\t1` handshake. The
-        //    helper writes this and flushes immediately on
-        //    startup. If we see EOF instead (empty line), the
-        //    child crashed before the handshake.
+        // 5. Wait for the helper's ready handshake. The
+        //    helper writes a JSON-line `{"event":"ready",
+        //    "version":1}` on startup (audit C1+H1 fix
+        //    changed the protocol). EOF here means the child
+        //    crashed before the handshake.
         let firstLine = AdminSession.readLine(from: handle)
         if firstLine.isEmpty {
             invalidateLocked()
@@ -382,10 +465,13 @@ final class AdminSession {
                 "Privileged helper exited before the ready handshake."
             )
         }
-        if !firstLine.hasPrefix("ready") {
+        let parsed: [String: Any]? = firstLine.data(using: .utf8).flatMap {
+            try? JSONSerialization.jsonObject(with: $0, options: []) as? [String: Any]
+        }
+        guard let json = parsed, (json["event"] as? String) == "ready" else {
             invalidateLocked()
             return .failedToStart(
-                "Privileged helper sent unexpected handshake: \(firstLine)"
+                "Privileged helper sent unexpected handshake: \(firstLine.prefix(200))"
             )
         }
 
@@ -420,6 +506,14 @@ final class AdminSession {
     /// Read bytes from `handle` until `\n` or EOF. Returns the
     /// line without the trailing newline. Empty string on EOF
     /// before any bytes — a signal that the helper died.
+    ///
+    /// **Cap at 64 KiB** (audit M5). A buggy/hostile helper
+    /// emitting megabytes without a newline would otherwise
+    /// OOM the parent. JSON-line replies are < 1 KiB in
+    /// normal operation; 64 KiB is room enough for an
+    /// extremely verbose `err.message` while still bounded.
+    fileprivate static let readLineCapBytes = 64 * 1024
+
     fileprivate static func readLine(from handle: FileHandle) -> String {
         var buf = Data()
         while true {
@@ -431,6 +525,13 @@ final class AdminSession {
             if buf.contains(0x0A) {
                 break
             }
+            if buf.count > AdminSession.readLineCapBytes {
+                // Hostile / buggy helper. Drop the buffer
+                // (don't return arbitrary helper bytes) and
+                // return empty so the caller treats this as
+                // a closed connection.
+                return ""
+            }
         }
         if let nlIndex = buf.firstIndex(of: 0x0A) {
             let line = buf.subdata(in: 0..<nlIndex)
@@ -439,37 +540,68 @@ final class AdminSession {
         return String(data: buf, encoding: .utf8) ?? ""
     }
 
-    /// Parse the helper's per-scan reply line and turn it into
-    /// an `Outcome`. The protocol's only success shape is
-    /// `ok\t<exit>`; anything else is treated as a helper error.
-    private static func consumeOk(line: String, outPath: String, sourcePath: String) -> Outcome {
-        if line.isEmpty {
-            return .failed(
-                message: "Administrator helper closed the connection unexpectedly.",
-                stderr: ""
-            )
+    /// Coerce a JSON value (Any?) to a UInt64. JSONSerialization
+    /// returns NSNumber for integers; we widen via int64Value
+    /// when possible, fall back to 0 on type mismatch.
+    fileprivate static func uint(_ value: Any?) -> UInt64 {
+        if let n = value as? NSNumber {
+            // Negative values clamp to 0; the helper only
+            // emits unsigned counts.
+            return n.int64Value >= 0 ? UInt64(n.int64Value) : 0
         }
-        let parts = line.split(separator: "\t", maxSplits: 1, omittingEmptySubsequences: false)
-        guard parts.count == 2, parts[0] == "ok" else {
-            return .failed(
-                message: "Administrator helper returned an error: \(line)",
-                stderr: ""
-            )
+        if let s = value as? String, let parsed = UInt64(s) {
+            return parsed
         }
-        if let exit = Int(parts[1]), exit != 0 {
-            return .failed(
-                message: "Administrator scan exited with status \(exit).",
-                stderr: ""
-            )
+        return 0
+    }
+
+    /// Audit H2 defence-in-depth: verify the helper's output
+    /// path is a regular file owned by root with no other-
+    /// write bits set, BEFORE we hand the path to the FFI for
+    /// reading. The mkstemp-created file should always pass;
+    /// any failure means either the helper misbehaved or an
+    /// attacker swapped the file (very unlikely under sticky
+    /// /tmp + root ownership, but cheap to verify).
+    fileprivate static func verifyHelperOutputPath(_ path: String) -> Bool {
+        var st = stat()
+        // lstat — refuse symlinks outright. The helper used
+        // mkstemp, which never creates a symlink, so this
+        // also catches "user swapped the file for a symlink
+        // between create and read" though that swap shouldn't
+        // be possible (sticky /tmp).
+        let rc = path.withCString { cPath in lstat(cPath, &st) }
+        guard rc == 0 else { return false }
+        // Regular file (not symlink, not dir, not device).
+        guard (st.st_mode & S_IFMT) == S_IFREG else { return false }
+        // Root-owned. The helper runs as uid 0 under
+        // AuthorizationExecuteWithPrivileges; any mkstemp it
+        // does should land with uid == 0.
+        guard st.st_uid == 0 else { return false }
+        // No world or group write. mkstemp creates mode 0600
+        // (owner rw), so anything looser is suspicious.
+        let badBits = mode_t(S_IWGRP | S_IWOTH)
+        guard (st.st_mode & badBits) == 0 else { return false }
+        return true
+    }
+
+    /// Best-effort: ask the helper to unlink one or more
+    /// tempfiles it owns. Failures are silent — the helper
+    /// also unlinks everything on `quit`, so a missed
+    /// `release` just delays the cleanup to app exit.
+    @discardableResult
+    fileprivate static func sendRelease(pipe: FileHandle, paths: [String]) -> Bool {
+        guard let cmd = try? JSONSerialization.data(
+            withJSONObject: ["op": "release", "paths": paths], options: []
+        ) else { return false }
+        do {
+            try pipe.write(contentsOf: cmd)
+            try pipe.write(contentsOf: Data([0x0a]))
+            // Drain the helper's ack so the next request
+            // doesn't read a stale reply.
+            _ = readLine(from: pipe)
+            return true
+        } catch {
+            return false
         }
-        guard let scan = Scan.fromPrivilegedMsgpack(path: outPath, sourcePath: sourcePath) else {
-            let cause = PrivilegedScan.lastFfiError()
-            return .failed(
-                message: "Privileged scan finished but the result file "
-                    + "couldn't be loaded: \(cause).",
-                stderr: ""
-            )
-        }
-        return .ok(scan)
     }
 }

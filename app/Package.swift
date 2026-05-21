@@ -26,12 +26,16 @@ let package = Package(
         // Developer ID — Sparkle does the verification itself
         // against a public key embedded in Info.plist.
         //
-        // Pinned to 2.x minor-version-tracking. 2.6.0+ has the
-        // SwiftPM-native module the SwiftUI app can `import`
-        // directly.
+        // Audit H5: tighten from `from:` (which admitted any
+        // 2.x release) to a minor-tracking range. `from: "2.6.0"`
+        // would auto-accept e.g. 2.99.0 — a future Sparkle patch
+        // (or a typosquatted release) would land without
+        // review. `upToNextMinor` caps at the next minor bump
+        // (any 2.6.x patch is fine; 2.7.0 needs an explicit
+        // audit + bump).
         .package(
             url: "https://github.com/sparkle-project/Sparkle",
-            from: "2.6.0"
+            .upToNextMinor(from: "2.6.0")
         ),
     ],
     targets: [
