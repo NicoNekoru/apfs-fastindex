@@ -17,12 +17,26 @@
 #   ./make-release.sh --no-bundle           # stop after `swift build`; skip .app
 #   ./make-release.sh --publish             # build, then publish a GitHub release
 #   ./make-release.sh --publish --tag vX.Y.Z
+#   ./make-release.sh --publish --patch     # bump current Cargo.toml ver, publish
+#   ./make-release.sh --publish --minor
+#   ./make-release.sh --publish --major
 #
 # `--publish` zips app/ApfsFastindex.app and uploads it to a GitHub
-# release via the `gh` CLI. Tag resolution order:
-#   1. --tag <vX.Y.Z> on the command line
-#   2. $GITHUB_REF_NAME (set by GitHub Actions on tag-push events)
-#   3. v<crate version> from crates/apfs-fastindex/Cargo.toml
+# release via the `gh` CLI.
+#
+# Tag/version resolution order (highest precedence first):
+#   1. --tag <vX.Y.Z> on the command line (explicit override)
+#   2. --patch / --minor / --major (auto-bump from Cargo.toml)
+#   3. $GITHUB_REF_NAME (set by GitHub Actions on tag-push events)
+#   4. v<crate version> from crates/apfs-fastindex/Cargo.toml
+#
+# The --patch/--minor/--major flags read the current
+# crates/apfs-fastindex/Cargo.toml version, apply semver bump
+# rules (patch: 1.2.3 → 1.2.4; minor: 1.2.3 → 1.3.0; major:
+# 1.2.3 → 2.0.0), and use that as the tag — saves typing
+# the next version each release. Exactly one of the three
+# bump flags may be passed; combining with --tag is an error.
+#
 # The release is created if it doesn't exist; if it does, the asset
 # is uploaded with --clobber so re-running the script after a fix
 # overwrites the previous bundle.
@@ -46,6 +60,7 @@ esac
 BUNDLE_APP=1
 PUBLISH=0
 RELEASE_TAG=""
+BUMP=""   # one of: "", "patch", "minor", "major"
 while [ $# -gt 0 ]; do
     case "$1" in
         --no-bundle) BUNDLE_APP=0 ;;
@@ -59,6 +74,13 @@ while [ $# -gt 0 ]; do
             RELEASE_TAG="$1"
             ;;
         --tag=*) RELEASE_TAG="${1#--tag=}" ;;
+        --patch|--minor|--major)
+            if [ -n "$BUMP" ]; then
+                echo "make-release.sh: --$BUMP and ${1#--} can't be combined" >&2
+                exit 2
+            fi
+            BUMP="${1#--}"
+            ;;
         -h|--help)
             sed -n '1,/^set -euo/p' "$0" | sed 's/^# \?//;$d'
             exit 0
@@ -75,6 +97,49 @@ fi
 if [ "$PUBLISH" = "1" ] && [ "$PROFILE" != "release" ]; then
     echo "make-release.sh: --publish requires PROFILE=release (got $PROFILE)" >&2
     exit 2
+fi
+if [ -n "$BUMP" ] && [ -n "$RELEASE_TAG" ]; then
+    echo "make-release.sh: --tag and --$BUMP are mutually exclusive" >&2
+    exit 2
+fi
+if [ -n "$BUMP" ] && [ "$PUBLISH" = "0" ]; then
+    echo "make-release.sh: --$BUMP only makes sense with --publish" >&2
+    exit 2
+fi
+
+# Resolve --patch / --minor / --major into a concrete tag by
+# reading the current Cargo.toml version and applying semver
+# bump rules. This funnels back into the same RELEASE_TAG
+# path that --tag uses, so downstream code (Cargo.toml
+# rewrite, Info.plist version baking, appcast generation,
+# GitHub release tag) doesn't need a separate branch.
+if [ -n "$BUMP" ]; then
+    CRATE_TOML="$REPO_ROOT/crates/apfs-fastindex/Cargo.toml"
+    CURRENT_VERSION="$(awk -F'"' '/^version[[:space:]]*=/ { print $2; exit }' "$CRATE_TOML")"
+    if [ -z "$CURRENT_VERSION" ]; then
+        echo "make-release.sh: --$BUMP couldn't read current version from $CRATE_TOML" >&2
+        exit 1
+    fi
+    # Strict semver: MAJOR.MINOR.PATCH, integers only. A
+    # pre-release suffix like "0.2.5-alpha" would need a
+    # different rule (Cargo strips pre-release in the tag);
+    # explicit reject so the bump produces an unambiguous
+    # number rather than a surprise.
+    if ! [[ "$CURRENT_VERSION" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+        echo "make-release.sh: --$BUMP requires a strict MAJOR.MINOR.PATCH version" >&2
+        echo "  got '$CURRENT_VERSION' from Cargo.toml" >&2
+        exit 1
+    fi
+    BMAJ="${BASH_REMATCH[1]}"
+    BMIN="${BASH_REMATCH[2]}"
+    BPAT="${BASH_REMATCH[3]}"
+    case "$BUMP" in
+        patch) BPAT=$((BPAT + 1)) ;;
+        minor) BMIN=$((BMIN + 1)); BPAT=0 ;;
+        major) BMAJ=$((BMAJ + 1)); BMIN=0; BPAT=0 ;;
+    esac
+    RELEASE_TAG="v$BMAJ.$BMIN.$BPAT"
+    echo "==> --$BUMP bump: $CURRENT_VERSION -> ${RELEASE_TAG#v}"
 fi
 
 # ---------------------------------------------------------------
