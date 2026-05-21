@@ -210,6 +210,79 @@ of N tells you N distinct directory entries point at one
 key. Useful as an independent oracle if we ever want to
 cross-check the EX-27 clone-dedup math.
 
+#### `apfs_kb_locker_t` + `apfs_keybag_entry_t` (keybag framing)
+
+The structure pointed at by `nx_mkb_locker` (container-level)
+or `apfs_keybag_loc` (volume-level). Contains the encrypted
+unlock records — what `diskutil apfs listCryptoUsers`
+enumerates on the user-facing side.
+
+**Decryption caveat**: on a typical encrypted volume the
+locker block is wrapped by the container's effective
+wrapping key (the one stored at `nx_keylocker`). Our
+parser doesn't decrypt; this decoder runs on
+already-decrypted blobs only (legacy unencrypted volumes,
+synthetic research images, or a hypothetical future where
+we get an entitlement that unwraps for us).
+
+`apfs_kb_locker_t` outer header (16 bytes):
+
+| Offset | Size | Field         | Notes                                                          |
+| ------ | ---- | ------------- | -------------------------------------------------------------- |
+| 0x00   | 2    | `kl_version`  | Currently 2 on macOS ≥ 10.13. Bump signals a format change.    |
+| 0x02   | 2    | `kl_nkeys`    | Number of `apfs_keybag_entry_t` records that follow.           |
+| 0x04   | 4    | `kl_nbytes`   | Total size in bytes of all entries (after this 16-byte header). |
+| 0x08   | 8    | `kl_padding`  | Zeros (alignment).                                             |
+| 0x10   | N    | `kl_entries[]` | Variable-length entry array, each entry 8-byte-aligned.        |
+
+`apfs_keybag_entry_t` (per record):
+
+| Offset | Size | Field        | Notes                                                                                              |
+| ------ | ---- | ------------ | -------------------------------------------------------------------------------------------------- |
+| 0x00   | 16   | `ke_uuid`    | UUID identifying the slot. Apple uses well-known constants for the two recovery slots (see below). |
+| 0x10   | 2    | `ke_tag`     | `BAG_TYPE_*` (see table below).                                                                    |
+| 0x12   | 2    | `ke_keylen`  | Length in bytes of `ke_keydata`.                                                                   |
+| 0x14   | 4    | `ke_padding` | Zeros.                                                                                             |
+| 0x18   | N    | `ke_keydata` | Opaque payload. Wrapped key, password hint, etc.                                                   |
+
+Entries are 8-byte-aligned: a record with `ke_keylen=5`
+takes `24 + 5 = 29` bytes raw, but the next entry starts
+at offset `(29 + 7) & ~7 = 32`. Our parser handles the
+padding.
+
+Tag values:
+
+| Raw | Name                       | Used by                                                                |
+| --- | -------------------------- | ---------------------------------------------------------------------- |
+| 2   | `BAG_TYPE_VOL_KEY`         | Volume's wrapped master key (single record per volume keybag).         |
+| 3   | `BAG_TYPE_UNLOCK_RECORDS`  | Per-user unlock records. Most entries on a typical FileVault keybag.   |
+| 4   | `BAG_TYPE_PASSPHRASE_HINT` | The plaintext password hint shown at unlock time.                      |
+| 5   | `BAG_TYPE_WRAPPING_M_KEY`  | Container's effective wrapping key (in the media keybag).              |
+| 6   | `BAG_TYPE_VOLUME_M_KEY`    | Sealed-volume integrity metadata (newer).                              |
+
+Well-known UUID constants (cross-referenced with our
+EX-32 Phase B probe — these appeared verbatim in
+`diskutil apfs listCryptoUsers` output on the host):
+
+| UUID                                   | Role                                                                            |
+| -------------------------------------- | ------------------------------------------------------------------------------- |
+| `EBC6C064-0000-11AA-AA11-00306543ECAC` | Personal Recovery User — the recovery key shown during FileVault setup.         |
+| `64C0C6EB-0000-11AA-AA11-00306543ECAC` | iCloud Recovery External Key — Apple's iCloud-escrow recovery slot.             |
+
+(Note the pretty UUID-byte-swap pattern between the two
+constants: `EBC6C064` ↔ `64C0C6EB`. Apple's reuse of the
+trailing 8 bytes is a giveaway that these are slot IDs,
+not random UUIDs.)
+
+Per-host (non-constant) UUIDs you'll see:
+
+- Local Open Directory User — derived from the user's
+  password at FileVault-enable time. Different on every
+  Mac. Used as the wrapping key for the volume key.
+- iCloud Recovery User — escrow slot if "Allow my Apple
+  ID to reset this disk's password" is enabled. Different
+  per Mac.
+
 #### `cp_key_class_t` decoder
 
 Defined in Apple's `cprotect.h`; values stable across macOS

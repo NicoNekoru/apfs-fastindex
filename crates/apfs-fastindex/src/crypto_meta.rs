@@ -253,6 +253,160 @@ pub struct PerFileCryptoState {
     pub wrapped_key: Vec<u8>,
 }
 
+/// Tag values for `apfs_keybag_entry_t.ke_tag`. Identifies
+/// what kind of unlock record an entry is. Apple's
+/// documentation calls these `BAG_TYPE_*`. Values cross-
+/// referenced with linux-apfs-rw + `diskutil apfs
+/// listCryptoUsers` output.
+pub fn bag_entry_tag_name(tag: u16) -> Option<&'static str> {
+    match tag {
+        // Volume-keybag entry tags.
+        2 => Some("BAG_TYPE_VOL_KEY"),
+        3 => Some("BAG_TYPE_UNLOCK_RECORDS"),
+        4 => Some("BAG_TYPE_PASSPHRASE_HINT"),
+        // Container-/media-keybag entry tag.
+        5 => Some("BAG_TYPE_WRAPPING_M_KEY"),
+        // Sealed-volume + integrity tags (newer).
+        6 => Some("BAG_TYPE_VOLUME_M_KEY"),
+        _ => None,
+    }
+}
+
+/// `apfs_kb_locker_t` — the container-/volume-level keybag
+/// outer framing. Lives at the block address pointed to by
+/// `nx_mkb_locker` (container-level) or `apfs_keybag_loc`
+/// (volume-level). The locker contains N
+/// `apfs_keybag_entry_t` records.
+///
+/// Wire layout:
+///
+/// ```text
+/// offset  size   field
+///   0      2     kl_version    // currently 2; bump = format change
+///   2      2     kl_nkeys      // number of entries
+///   4      4     kl_nbytes     // size in bytes of all entries combined
+///   8      8     kl_padding    // zeros, alignment
+///  16      N    kl_entries[]  // variable
+/// ```
+///
+/// **Important caveat**: on a typical encrypted volume the
+/// locker block is itself encrypted (wrapped by the
+/// `nx_keylocker`'s effective wrapping key). Decoding the
+/// framing requires either an unencrypted volume (legacy
+/// mode, or a synthetic research image) or a decrypted blob.
+/// Our parser doesn't decrypt; this decoder is for the
+/// "given an already-decrypted blob, what's in it" case.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct KeybagLocker {
+    pub version: u16,
+    pub nkeys: u16,
+    pub nbytes: u32,
+    pub entries: Vec<KeybagEntry>,
+}
+
+/// One `apfs_keybag_entry_t` record. The `keydata` payload
+/// is variable-length and **opaque** — we surface it as raw
+/// bytes for callers to fingerprint or pass through.
+///
+/// Wire layout:
+///
+/// ```text
+///   0     16   ke_uuid       // identifier
+///  16      2   ke_tag        // BAG_TYPE_*
+///  18      2   ke_keylen     // length of ke_keydata
+///  20      4   ke_padding    // alignment
+///  24      N   ke_keydata    // opaque, ke_keylen bytes
+/// ```
+///
+/// Each entry is 8-byte-aligned: a record with `ke_keylen=5`
+/// takes 24 + 5 = 29 bytes raw, but the next entry starts at
+/// offset (29 + 7) & ~7 = 32. Our parser handles the padding.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct KeybagEntry {
+    /// `ke_uuid` formatted as the standard 8-4-4-4-12 hex.
+    /// Compare against `WELL_KNOWN_CRYPTO_USER_UUIDS` in the
+    /// EX-32 probe to identify Apple's hardcoded recovery
+    /// slot UUIDs (Personal Recovery, iCloud Recovery External).
+    pub uuid_hex: String,
+    pub tag: u16,
+    pub tag_name: Option<&'static str>,
+    pub keylen: u16,
+    pub keydata: Vec<u8>,
+}
+
+impl KeybagLocker {
+    /// Decode from a block that's been (already) decrypted.
+    /// Fail-closed on truncated headers, entry-length
+    /// overflow, or an entry that runs past the declared
+    /// `kl_nbytes` budget.
+    pub fn from_decrypted_block(block: &[u8]) -> Result<Self, &'static str> {
+        if block.len() < 16 {
+            return Err("keybag locker shorter than 16-byte header");
+        }
+        let version = le_u16(block, 0);
+        let nkeys = le_u16(block, 2);
+        let nbytes = le_u32(block, 4);
+        // Skip kl_padding at 0x08..0x10.
+        let entries_start = 16usize;
+        let entries_end = entries_start
+            .checked_add(nbytes as usize)
+            .ok_or("kl_nbytes arithmetic overflow")?;
+        if entries_end > block.len() {
+            return Err("kl_nbytes exceeds block capacity");
+        }
+
+        let mut entries: Vec<KeybagEntry> = Vec::with_capacity(nkeys as usize);
+        let mut cursor = entries_start;
+        for _ in 0..nkeys {
+            if cursor + 24 > entries_end {
+                return Err("keybag entry header runs past kl_nbytes");
+            }
+            let uuid_hex = format_uuid(&block[cursor..cursor + 16]);
+            let tag = le_u16(block, cursor + 16);
+            let keylen = le_u16(block, cursor + 18);
+            // padding at cursor+20..cursor+24
+            let key_start = cursor + 24;
+            let key_end = key_start
+                .checked_add(keylen as usize)
+                .ok_or("ke_keylen arithmetic overflow")?;
+            if key_end > entries_end {
+                return Err("keybag entry keydata runs past kl_nbytes");
+            }
+            entries.push(KeybagEntry {
+                uuid_hex,
+                tag,
+                tag_name: bag_entry_tag_name(tag),
+                keylen,
+                keydata: block[key_start..key_end].to_vec(),
+            });
+            // 8-byte-align the next entry's start.
+            cursor = (key_end + 7) & !7usize;
+        }
+        Ok(Self {
+            version,
+            nkeys,
+            nbytes,
+            entries,
+        })
+    }
+}
+
+/// Format 16 raw UUID bytes as the canonical 8-4-4-4-12
+/// uppercase hex grouping (matches `diskutil apfs
+/// listCryptoUsers` output).
+fn format_uuid(bytes: &[u8]) -> String {
+    debug_assert_eq!(bytes.len(), 16);
+    format!(
+        "{:02X}{:02X}{:02X}{:02X}-{:02X}{:02X}-{:02X}{:02X}-{:02X}{:02X}-\
+         {:02X}{:02X}{:02X}{:02X}{:02X}{:02X}",
+        bytes[0], bytes[1], bytes[2], bytes[3],
+        bytes[4], bytes[5],
+        bytes[6], bytes[7],
+        bytes[8], bytes[9],
+        bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15],
+    )
+}
+
 impl PerFileCryptoState {
     /// Decode from a raw FS-record body buffer. The first
     /// 4 bytes are the refcount; the next 20 are the
@@ -541,4 +695,153 @@ mod tests {
             .unwrap()
             .starts_with("CPROTECT_CLASS_F"));
     }
+
+    /// Append one `apfs_keybag_entry_t` to a buffer at the
+    /// current 8-byte-aligned cursor. Returns the new cursor
+    /// after the entry + alignment padding. Used by the
+    /// keybag tests to build synthetic lockers.
+    fn append_keybag_entry(
+        buf: &mut Vec<u8>,
+        uuid: &[u8; 16],
+        tag: u16,
+        keydata: &[u8],
+    ) {
+        let start = buf.len();
+        buf.extend_from_slice(uuid);
+        buf.extend_from_slice(&tag.to_le_bytes());
+        buf.extend_from_slice(&(keydata.len() as u16).to_le_bytes());
+        buf.extend_from_slice(&[0u8; 4]); // ke_padding
+        buf.extend_from_slice(keydata);
+        // 8-byte-align the next entry.
+        let used = buf.len() - start;
+        let aligned = (used + 7) & !7;
+        buf.resize(start + aligned, 0);
+    }
+
+    /// Roundtrip one entry: tag = BAG_TYPE_VOL_KEY, 16-byte
+    /// synthetic keydata.
+    #[test]
+    fn keybag_locker_decodes_single_entry() {
+        let mut entries = Vec::new();
+        let uuid = [0x42u8; 16];
+        let key = [0xaau8; 32];
+        append_keybag_entry(&mut entries, &uuid, 2 /* VOL_KEY */, &key);
+        let mut block = Vec::new();
+        block.extend_from_slice(&2u16.to_le_bytes()); // kl_version
+        block.extend_from_slice(&1u16.to_le_bytes()); // kl_nkeys
+        block.extend_from_slice(&(entries.len() as u32).to_le_bytes()); // kl_nbytes
+        block.extend_from_slice(&[0u8; 8]); // kl_padding
+        block.extend_from_slice(&entries);
+        block.resize(block.len() + 64, 0); // tail padding (block
+                                            // can be larger than
+                                            // kl_nbytes)
+        let parsed = KeybagLocker::from_decrypted_block(&block).expect("decode");
+        assert_eq!(parsed.version, 2);
+        assert_eq!(parsed.nkeys, 1);
+        assert_eq!(parsed.entries.len(), 1);
+        let e = &parsed.entries[0];
+        assert_eq!(e.tag, 2);
+        assert_eq!(e.tag_name, Some("BAG_TYPE_VOL_KEY"));
+        assert_eq!(e.keylen, 32);
+        assert_eq!(e.keydata, key.to_vec());
+        // UUID format: hyphenated uppercase hex.
+        assert_eq!(e.uuid_hex, "42424242-4242-4242-4242-424242424242");
+    }
+
+    /// Multi-entry locker with each well-known tag value
+    /// surfaced via tag_name. Mirrors the four-entry shape
+    /// our EX-32 host probe found in `diskutil apfs
+    /// listCryptoUsers` output.
+    #[test]
+    fn keybag_locker_decodes_four_entry_unlock_records_shape() {
+        let mut entries = Vec::new();
+        // Personal Recovery User (well-known UUID).
+        let prk_uuid = [
+            0xEB, 0xC6, 0xC0, 0x64, 0x00, 0x00, 0x11, 0xAA,
+            0xAA, 0x11, 0x00, 0x30, 0x65, 0x43, 0xEC, 0xAC,
+        ];
+        append_keybag_entry(&mut entries, &prk_uuid, 3 /* UNLOCK_RECORDS */, &[0xaa; 64]);
+        // iCloud Recovery External Key (well-known UUID).
+        let icloud_uuid = [
+            0x64, 0xC0, 0xC6, 0xEB, 0x00, 0x00, 0x11, 0xAA,
+            0xAA, 0x11, 0x00, 0x30, 0x65, 0x43, 0xEC, 0xAC,
+        ];
+        append_keybag_entry(&mut entries, &icloud_uuid, 3, &[0xbb; 64]);
+        // Synthetic local Open Directory user UUID.
+        append_keybag_entry(&mut entries, &[0x11; 16], 3, &[0xcc; 64]);
+        // Synthetic iCloud Recovery escrow.
+        append_keybag_entry(&mut entries, &[0x22; 16], 3, &[0xdd; 64]);
+
+        let mut block = Vec::new();
+        block.extend_from_slice(&2u16.to_le_bytes()); // version
+        block.extend_from_slice(&4u16.to_le_bytes()); // nkeys
+        block.extend_from_slice(&(entries.len() as u32).to_le_bytes());
+        block.extend_from_slice(&[0u8; 8]); // padding
+        block.extend_from_slice(&entries);
+        block.resize(block.len() + 128, 0);
+
+        let parsed = KeybagLocker::from_decrypted_block(&block).expect("decode");
+        assert_eq!(parsed.entries.len(), 4);
+        assert_eq!(parsed.entries[0].uuid_hex, "EBC6C064-0000-11AA-AA11-00306543ECAC");
+        assert_eq!(parsed.entries[1].uuid_hex, "64C0C6EB-0000-11AA-AA11-00306543ECAC");
+        for e in &parsed.entries {
+            assert_eq!(e.tag_name, Some("BAG_TYPE_UNLOCK_RECORDS"));
+        }
+    }
+
+    /// Truncated block (shorter than the 16-byte header) must
+    /// fail-closed, not panic.
+    #[test]
+    fn keybag_locker_rejects_truncated_header() {
+        let block = vec![0u8; 15];
+        let err = KeybagLocker::from_decrypted_block(&block).expect_err("must fail");
+        assert!(err.contains("16-byte"), "got: {err}");
+    }
+
+    /// kl_nbytes declares more than block capacity → fail.
+    #[test]
+    fn keybag_locker_rejects_nbytes_overflow() {
+        let mut block = vec![0u8; 32];
+        block[0..2].copy_from_slice(&2u16.to_le_bytes()); // version
+        block[2..4].copy_from_slice(&1u16.to_le_bytes()); // nkeys
+        block[4..8].copy_from_slice(&1_000_000u32.to_le_bytes()); // huge nbytes
+        let err = KeybagLocker::from_decrypted_block(&block).expect_err("must fail");
+        assert!(err.contains("kl_nbytes"), "got: {err}");
+    }
+
+    /// An entry whose keydata claims to extend past nbytes
+    /// also fails-closed. Tests the inner-loop bounds check.
+    #[test]
+    fn keybag_locker_rejects_entry_overflow() {
+        let mut entries = Vec::new();
+        // Single entry, but lie about keylen.
+        entries.extend_from_slice(&[0u8; 16]); // uuid
+        entries.extend_from_slice(&2u16.to_le_bytes()); // tag
+        entries.extend_from_slice(&999u16.to_le_bytes()); // keylen = 999
+        entries.extend_from_slice(&[0u8; 4]); // padding
+        // No keydata follows.
+        let mut block = Vec::new();
+        block.extend_from_slice(&2u16.to_le_bytes());
+        block.extend_from_slice(&1u16.to_le_bytes());
+        block.extend_from_slice(&(entries.len() as u32).to_le_bytes());
+        block.extend_from_slice(&[0u8; 8]);
+        block.extend_from_slice(&entries);
+        block.resize(block.len() + 32, 0);
+        let err = KeybagLocker::from_decrypted_block(&block).expect_err("must fail");
+        assert!(err.contains("keydata"), "got: {err}");
+    }
+
+    /// `bag_entry_tag_name` decodes the documented values.
+    /// Unknown tags return None — keep the door open for
+    /// future Apple-added values without panicking.
+    #[test]
+    fn bag_entry_tag_name_decodes_known_values() {
+        assert_eq!(bag_entry_tag_name(2), Some("BAG_TYPE_VOL_KEY"));
+        assert_eq!(bag_entry_tag_name(3), Some("BAG_TYPE_UNLOCK_RECORDS"));
+        assert_eq!(bag_entry_tag_name(4), Some("BAG_TYPE_PASSPHRASE_HINT"));
+        assert_eq!(bag_entry_tag_name(5), Some("BAG_TYPE_WRAPPING_M_KEY"));
+        assert_eq!(bag_entry_tag_name(6), Some("BAG_TYPE_VOLUME_M_KEY"));
+        assert_eq!(bag_entry_tag_name(999), None);
+    }
+
 }
