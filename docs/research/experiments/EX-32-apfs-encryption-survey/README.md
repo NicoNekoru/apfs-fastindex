@@ -132,6 +132,68 @@ Topics for this phase:
    enabling FileVault. After that, the bit clears and
    encryption is on.
 
+### Phase A.2 — Byte-level layouts (decoders landed)
+
+The fields below are decoded by
+`crates/apfs-fastindex/src/crypto_meta.rs` (added in
+EX-32's second commit). Offsets are relative to the start
+of the parsed block, after the 32-byte `obj_phys` header.
+All multi-byte fields are little-endian (APFS matches
+macOS native byte order).
+
+#### `nx_superblock_t` encryption fields (container)
+
+| Offset | Size | Field                    | Notes                                                        |
+| ------ | ---- | ------------------------ | ------------------------------------------------------------ |
+| 0x510  | 8    | `nx_keylocker.pr_start`  | Block address of the container-level wrapping-key locker.    |
+| 0x518  | 8    | `nx_keylocker.pr_count`  | Block count. `0` on unencrypted containers.                  |
+| 0x570  | 8    | `nx_mkb_locker.pr_start` | Block address of the media keybag locker.                    |
+| 0x578  | 8    | `nx_mkb_locker.pr_count` | Block count. `0` on unencrypted containers.                  |
+
+These offsets are derived from
+`(nx_uuid)+(next_oid/xid)+(xp_*)+(spaceman/omap/reaper_oid)+
+(test_type/max_file_systems)+(fs_oid[100])+(counters[32])+
+(blocked_out_prange)+(evict_mapping/flags/efi_jumpstart)+
+(fusion_uuid)+nx_keylocker+(ephemeral_info[4])+
+(test_oid/fusion_mt_oid/fusion_wbc_oid/fusion_wbc)+
+(newest_mounted_version)+nx_mkb_locker`. Each subterm's
+size is constant; the totals are the canonical offsets.
+
+#### `apfs_superblock_t.apfs_meta_crypto` (volume)
+
+20 bytes at offset 0x60 of the volume superblock block. The
+struct is `apfs_wrapped_crypto_state_t` but the trailing
+`persistent_key[]` is zero-length here (length pinned by
+`key_len`, always 0 for meta_crypto).
+
+| Offset | Size | Field              | Notes                                                                                           |
+| ------ | ---- | ------------------ | ----------------------------------------------------------------------------------------------- |
+| 0x60   | 2    | `major_version`    | Currently 5 on macOS ≥ 10.13. Bump signals format change.                                       |
+| 0x62   | 2    | `minor_version`    | 0 on all observed volumes.                                                                      |
+| 0x64   | 4    | `cpflags`          | Bit field. See `cprotect.h`.                                                                    |
+| 0x68   | 4    | `persistent_class` | `cp_key_class_t`. Low 5 bits = class (CLASS_A/B/C/D/F/DIR_NONE); upper bits = effective flags.  |
+| 0x6c   | 4    | `key_os_version`   | Packed (major, minor, patch) of the macOS version that wrote this descriptor.                   |
+| 0x70   | 2    | `key_revision`     | Bumped on key rotation. Useful for "has this volume been re-keyed since last time I saw it?".   |
+| 0x72   | 2    | `key_len`          | Trailing-key length. **Always 0 for meta_crypto** — distinguishes from per-file `crypto_state`. |
+
+#### `cp_key_class_t` decoder
+
+Defined in Apple's `cprotect.h`; values stable across macOS
+versions. The same enum drives per-file `crypto_state_t`
+classification, so the decoder is shared with the FS-record
+body parser.
+
+| Raw (low 5 bits) | Name                                                                  | Used for                                                                                  |
+| ---------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| 0                | `CPROTECT_CLASS_DIR_NONE`                                             | Directories that haven't been assigned a class. Inherit from parent.                      |
+| 1                | `CPROTECT_CLASS_A` (NSFileProtectionComplete)                         | Available only when device unlocked. Most secure user-data class.                         |
+| 2                | `CPROTECT_CLASS_B` (NSFileProtectionCompleteUnlessOpen)               | Available when device unlocked OR for files already open. Email attachments, etc.         |
+| 3                | `CPROTECT_CLASS_C` (NSFileProtectionCompleteUntilFirstUserAuthentication) | Available after first unlock since boot. **Default** for user data on Apple silicon Macs. |
+| 4                | `CPROTECT_CLASS_D` (NSFileProtectionNone)                             | Available immediately at boot. Default for system files.                                  |
+| 6                | `CPROTECT_CLASS_F` (internal, no protection)                          | Kernel I/O before the user authenticates — including the keybag itself.                   |
+
+Class 5 and 7 are unused / reserved.
+
 ### Phase B — Probe the host
 
 A Python probe (`probe_ex32.py`) enumerates the user's
