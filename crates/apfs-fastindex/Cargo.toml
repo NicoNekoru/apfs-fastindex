@@ -41,6 +41,14 @@ rustc-hash = "2.0"
 # setup. Already in our dependency tree as a transitive dep
 # of quick-xml; promoting to a direct dep adds zero footprint.
 memchr = "2"
+# `tempfile::NamedTempFile` for the privileged helper's
+# `--server` mode: every per-scan output file is created via
+# `mkstemp`-equivalent (atomic O_EXCL + mode 0600 + caller-
+# chosen prefix) so the helper picks its own path rather than
+# accepting one from the caller. Closes the symlink-LPE
+# primitive the audit (C1) identified — the parent can no
+# longer point the root-writing helper at /etc/sudoers.d.
+tempfile = "3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = "0.2"
@@ -51,6 +59,5 @@ libc = "0.2"
 # build`; output lands in `target/include/apfs_fastindex.h`.
 cbindgen = "0.27"
 
-[dev-dependencies]
-# Used by cache.rs's tests for filesystem-isolated cache dirs.
-tempfile = "3"
+# cache.rs's tests reuse the regular `tempfile` dep above; no
+# dev-only declaration needed.
