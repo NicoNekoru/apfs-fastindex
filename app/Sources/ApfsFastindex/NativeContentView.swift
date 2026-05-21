@@ -161,6 +161,23 @@ struct NativeContentView: View {
                     .background(VizPalette.panel)
                 Divider().background(VizPalette.border)
             }
+            // Breadcrumb. Shown only when the user has
+            // navigated *below* the scan root (UX feedback:
+            // the old always-visible bar was redundant —
+            // showed the same path the toolbar already had —
+            // but the navigate-back affordance it provided was
+            // genuinely needed, especially when the
+            // folder-tree panel is hidden and the user clicked
+            // into a deep cell on the treemap). Now: invisible
+            // at root, appears the moment you go in, with
+            // clickable segments + an "Up" button.
+            if scan != nil && currentNode != 0 {
+                breadcrumbBar
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(VizPalette.panel)
+                Divider().background(VizPalette.border)
+            }
             // VSplitView between (optional side panels) and the
             // treemap. When neither side panel is shown the
             // VSplitView has just the treemap and there's no
@@ -202,11 +219,6 @@ struct NativeContentView: View {
         .background(VizPalette.bg)
         .preferredColorScheme(.dark)
         .foregroundStyle(VizPalette.text)
-        // Non-visible carrier for the ⌘↑ Up shortcut. The
-        // breadcrumb bar used to host this Button visibly;
-        // removing the bar (UX-1) cost the shortcut, so it
-        // lives here now as a zero-sized hidden control.
-        .overlay(upShortcutBacking, alignment: .bottomTrailing)
         .onReceive(NotificationCenter.default.publisher(for: .scanAsAdministratorRequested)) { _ in
             // The File > Scan as Administrator… menu item posts
             // this notification; we kick off the privileged scan
@@ -1130,25 +1142,91 @@ struct NativeContentView: View {
         }
     }
 
-    // MARK: - Up-navigation shortcut
+    // MARK: - Breadcrumb (visible only when navigated below root)
     //
-    // UX-1: the original breadcrumb bar was removed (path was
-    // already in the toolbar + status bar; bar was redundant).
-    // The bar's only non-display affordance was the "Up" button
-    // (⌘↑); preserve that shortcut here as an invisible Button
-    // so users keep the keyboard navigation muscle memory.
-    @ViewBuilder
-    private var upShortcutBacking: some View {
-        Button("Up") {
-            guard let scan, currentNode != 0,
-                  let parent = scan.parent(of: currentNode) else { return }
-            currentNode = parent
-            updateLayout()
+    // The original bar was always-visible and the user
+    // (correctly) flagged it as redundant — at root it just
+    // repeated the toolbar's path field. The fix isn't to
+    // delete it: it's the only navigate-back affordance for
+    // the treemap-only view mode where the folder tree is
+    // hidden. Showing it only when `currentNode != 0` keeps
+    // the redundancy gone and the navigation working.
+    private var breadcrumbBar: some View {
+        HStack(spacing: 0) {
+            let chain = breadcrumbChain
+            ForEach(0..<chain.count, id: \.self) { i in
+                let node = chain[i]
+                Button {
+                    guard node.index != currentNode else { return }
+                    currentNode = node.index
+                    updateLayout()
+                } label: {
+                    Text(node.label)
+                        .font(AppFont.ui(12)).monospacedDigit()
+                        .foregroundStyle(
+                            node.index == currentNode
+                                ? VizPalette.text
+                                : VizPalette.accent
+                        )
+                }
+                .buttonStyle(.plain)
+                .disabled(node.index == currentNode)
+                if i < chain.count - 1 {
+                    Text("›")
+                        .foregroundStyle(VizPalette.muted)
+                        .padding(.horizontal, 6)
+                }
+            }
+            Spacer(minLength: 8)
+            // Up to parent (⌘↑). Always present in this bar
+            // because the bar itself is shown only when
+            // `currentNode != 0`, i.e. there *is* a parent.
+            Button {
+                guard let scan, let parent = scan.parent(of: currentNode) else { return }
+                currentNode = parent
+                updateLayout()
+            } label: {
+                Label("Up", systemImage: "chevron.up")
+                    .labelStyle(.iconOnly)
+                    .padding(.horizontal, 4)
+            }
+            .buttonStyle(.borderless)
+            .help("Up to parent directory (⌘↑)")
+            .keyboardShortcut(.upArrow, modifiers: .command)
         }
-        .keyboardShortcut(.upArrow, modifiers: .command)
-        .hidden()
-        .frame(width: 0, height: 0)
-        .accessibilityHidden(true)
+        .frame(height: 22)
+    }
+
+    private struct BreadcrumbNode {
+        let index: UInt32
+        let label: String
+    }
+
+    /// Root → currentNode path chain. Rebuilt each access; the
+    /// breadcrumb only renders when `currentNode != 0` so the
+    /// chain is always ≥ 2 segments.
+    private var breadcrumbChain: [BreadcrumbNode] {
+        guard let scan else { return [] }
+        var chain: [BreadcrumbNode] = []
+        var cursor: UInt32? = currentNode
+        while let c = cursor {
+            let label: String
+            if c == 0 {
+                // Root segment — show the scan's actual
+                // requested path (UX-4 from the previous
+                // round). User-supplied; no sanitisation
+                // needed.
+                let root = scan.sourceRequestedPath
+                label = root.isEmpty ? "/" : root
+            } else {
+                // Parser-supplied name; sanitise before
+                // rendering (audit #App-2).
+                label = DisplaySanitizer.sanitiseDisplay(scan.name(of: c) ?? "?")
+            }
+            chain.append(BreadcrumbNode(index: c, label: label))
+            cursor = scan.parent(of: c)
+        }
+        return chain.reversed()
     }
 
     // MARK: - Status bar
