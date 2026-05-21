@@ -208,6 +208,87 @@ impl VolumeMetaCryptoState {
     }
 }
 
+/// Per-file `crypto_state_t` body — what lives in FS-records
+/// of object type `0x7` (CRYPTO_STATE; see
+/// `fs_record_body.rs:321`). Same wire shape as
+/// `VolumeMetaCryptoState`'s header but with `key_len > 0`
+/// and a trailing wrapped-key blob.
+///
+/// Wire layout (`j_crypto_state_val_t`):
+///
+/// ```text
+/// offset  size  field
+///   0      4    refcnt                  // hard-link / clone refcount
+///   4     20    wrapped_crypto_state_t  // same shape as apfs_meta_crypto
+///  24     N    persistent_key[key_len]  // wrapped key, opaque ciphertext
+/// ```
+///
+/// **The `persistent_key[]` bytes are encrypted.** We never
+/// try to unwrap them. We surface the raw bytes so callers
+/// can fingerprint (SHA256 / equality-check) or log them
+/// without re-implementing the parse.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PerFileCryptoState {
+    /// `j_crypto_state_val_t.refcnt`. Number of distinct file
+    /// records that share this wrapped key — bumped on hard
+    /// link / clone, decremented on unlink.
+    pub refcnt: u32,
+    /// Algorithm + class metadata (the `wrapped_crypto_state_t`
+    /// header). Same field set as `VolumeMetaCryptoState`.
+    pub major_version: u16,
+    pub minor_version: u16,
+    pub cpflags: u32,
+    pub persistent_class: u32,
+    pub persistent_class_name: Option<&'static str>,
+    pub key_os_version: u32,
+    pub key_revision: u16,
+    /// Length in bytes of `wrapped_key`. **Non-zero for
+    /// per-file records** (typically 32 = AES-256-XTS key);
+    /// zero would be the volume-meta_crypto-style descriptor.
+    pub key_len: u16,
+    /// Wrapped persistent key bytes. Opaque ciphertext —
+    /// wrapped by the file's protection-class key, which is
+    /// in turn wrapped by Secure Enclave hardware keys on
+    /// Apple silicon. Length always matches `key_len`.
+    pub wrapped_key: Vec<u8>,
+}
+
+impl PerFileCryptoState {
+    /// Decode from a raw FS-record body buffer. The first
+    /// 4 bytes are the refcount; the next 20 are the
+    /// `wrapped_crypto_state_t` header; the remainder is the
+    /// wrapped key blob of length `key_len`.
+    ///
+    /// Returns `Err` if the body is shorter than the header
+    /// (24 bytes) or shorter than `24 + key_len`. Both
+    /// indicate a malformed record; the caller should
+    /// fail-closed.
+    pub fn from_body(body: &[u8]) -> Result<Self, &'static str> {
+        if body.len() < 24 {
+            return Err("crypto_state body shorter than j_crypto_state_val_t header (24 bytes)");
+        }
+        let refcnt = le_u32(body, 0);
+        let persistent_class = le_u32(body, 12);
+        let key_len = le_u16(body, 22);
+        let key_end = 24usize.saturating_add(key_len as usize);
+        if body.len() < key_end {
+            return Err("crypto_state body shorter than declared key_len");
+        }
+        Ok(Self {
+            refcnt,
+            major_version: le_u16(body, 4),
+            minor_version: le_u16(body, 6),
+            cpflags: le_u32(body, 8),
+            persistent_class,
+            persistent_class_name: cp_key_class_name(persistent_class),
+            key_os_version: le_u32(body, 16),
+            key_revision: le_u16(body, 20),
+            key_len,
+            wrapped_key: body[24..key_end].to_vec(),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -347,5 +428,117 @@ mod tests {
         // 0xc3 = flags 0xc0 + class 3 (Class C).
         let name = cp_key_class_name(0xc3).expect("Class C with flags");
         assert!(name.starts_with("CPROTECT_CLASS_C"));
+    }
+
+    /// Build a synthetic `j_crypto_state_val_t` body: 4-byte
+    /// refcount + 20-byte wrapped_crypto_state_t header +
+    /// `key_len` trailing key bytes. Returns the raw buffer
+    /// the parser would see in an FS-record body slice.
+    fn build_per_file_crypto_body(
+        refcnt: u32,
+        major: u16,
+        cpflags: u32,
+        persistent_class: u32,
+        key_os_version: u32,
+        key_revision: u16,
+        wrapped_key: &[u8],
+    ) -> Vec<u8> {
+        let key_len = wrapped_key.len() as u16;
+        let mut body = vec![0u8; 24 + wrapped_key.len()];
+        body[0..4].copy_from_slice(&refcnt.to_le_bytes());
+        body[4..6].copy_from_slice(&major.to_le_bytes());
+        // minor_version stays 0
+        body[8..12].copy_from_slice(&cpflags.to_le_bytes());
+        body[12..16].copy_from_slice(&persistent_class.to_le_bytes());
+        body[16..20].copy_from_slice(&key_os_version.to_le_bytes());
+        body[20..22].copy_from_slice(&key_revision.to_le_bytes());
+        body[22..24].copy_from_slice(&key_len.to_le_bytes());
+        body[24..].copy_from_slice(wrapped_key);
+        body
+    }
+
+    /// Typical per-file crypto_state record: Class C (default
+    /// for Apple-silicon Data Protection on the data volume),
+    /// 32-byte AES-256-XTS wrapped key, refcount 1.
+    #[test]
+    fn per_file_crypto_state_class_c_aes_256_xts() {
+        let key = [0xa5u8; 32]; // synthetic; real keys are
+                                //  AES-Keywrapped ciphertext.
+        let body = build_per_file_crypto_body(
+            1,                  // refcnt
+            5,                  // major_version
+            0,                  // cpflags
+            3,                  // persistent_class = CLASS_C
+            0x14_04_00_00,      // macOS 20.4
+            2,                  // key_revision
+            &key,
+        );
+        let parsed = PerFileCryptoState::from_body(&body).expect("decode");
+        assert_eq!(parsed.refcnt, 1);
+        assert_eq!(parsed.major_version, 5);
+        assert_eq!(parsed.persistent_class, 3);
+        assert!(parsed
+            .persistent_class_name
+            .unwrap()
+            .starts_with("CPROTECT_CLASS_C"));
+        assert_eq!(parsed.key_revision, 2);
+        assert_eq!(parsed.key_len, 32);
+        assert_eq!(parsed.wrapped_key, key.to_vec());
+    }
+
+    /// Hard-linked files share their crypto_state record;
+    /// refcnt > 1 means N inode records all point to this
+    /// key.
+    #[test]
+    fn per_file_crypto_state_handles_high_refcount() {
+        let body = build_per_file_crypto_body(7, 5, 0, 3, 0, 0, &[0u8; 32]);
+        let parsed = PerFileCryptoState::from_body(&body).expect("decode");
+        assert_eq!(parsed.refcnt, 7);
+    }
+
+    /// Truncated body — shorter than the 24-byte header —
+    /// must fail-closed. A real FS-record with this shape
+    /// would indicate B-tree corruption; the parser's
+    /// fail-closed contract says we surface an error, not
+    /// silently truncate.
+    #[test]
+    fn per_file_crypto_state_rejects_truncated_header() {
+        let body = vec![0u8; 23];
+        let err = PerFileCryptoState::from_body(&body).expect_err("must fail");
+        assert!(err.contains("24 bytes"), "got: {err}");
+    }
+
+    /// Header declares key_len > body capacity. Also a
+    /// fail-closed case — a record that says "32-byte key
+    /// follows" but has only 16 bytes is malformed.
+    #[test]
+    fn per_file_crypto_state_rejects_truncated_key() {
+        let mut body = vec![0u8; 24 + 16]; // says 32-byte key,
+                                           //  but only 16 bytes
+                                           //  follow
+        // refcnt = 1
+        body[0] = 1;
+        // major = 5
+        body[4] = 5;
+        // key_len = 32 at offset 22
+        body[22..24].copy_from_slice(&32u16.to_le_bytes());
+        let err = PerFileCryptoState::from_body(&body).expect_err("must fail");
+        assert!(err.contains("key_len"), "got: {err}");
+    }
+
+    /// Class-F records (the keybag's own protection class)
+    /// are decodable — the kernel reads them before the user
+    /// authenticates, so they're effectively unprotected
+    /// but still routed through the same encryption pipeline
+    /// for shape uniformity.
+    #[test]
+    fn per_file_crypto_state_class_f_keybag_style() {
+        let body = build_per_file_crypto_body(1, 5, 0, 6, 0, 0, &[0x42u8; 16]);
+        let parsed = PerFileCryptoState::from_body(&body).expect("decode");
+        assert_eq!(parsed.persistent_class, 6);
+        assert!(parsed
+            .persistent_class_name
+            .unwrap()
+            .starts_with("CPROTECT_CLASS_F"));
     }
 }

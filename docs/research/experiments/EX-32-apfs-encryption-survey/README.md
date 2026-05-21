@@ -176,6 +176,40 @@ struct is `apfs_wrapped_crypto_state_t` but the trailing
 | 0x70   | 2    | `key_revision`     | Bumped on key rotation. Useful for "has this volume been re-keyed since last time I saw it?".   |
 | 0x72   | 2    | `key_len`          | Trailing-key length. **Always 0 for meta_crypto** — distinguishes from per-file `crypto_state`. |
 
+#### `j_crypto_state_val_t` (per-file FS-record body)
+
+The same `wrapped_crypto_state_t` header (above) wrapped in
+a 4-byte refcount and followed by a `key_len`-byte
+**wrapped key blob**. This is the on-disk body for FS-records
+of object type `0x7` (CRYPTO_STATE).
+
+| Offset | Size | Field                | Notes                                                                                            |
+| ------ | ---- | -------------------- | ------------------------------------------------------------------------------------------------ |
+| 0x00   | 4    | `refcnt`             | Number of inode records sharing this key. Bumped on hard link / clone. Unlink decrements.        |
+| 0x04   | 2    | `major_version`      | Same wrapped_crypto_state_t header as `apfs_meta_crypto`.                                        |
+| 0x06   | 2    | `minor_version`      |                                                                                                  |
+| 0x08   | 4    | `cpflags`            |                                                                                                  |
+| 0x0c   | 4    | `persistent_class`   |                                                                                                  |
+| 0x10   | 4    | `key_os_version`     |                                                                                                  |
+| 0x14   | 2    | `key_revision`       |                                                                                                  |
+| 0x16   | 2    | `key_len`            | **Non-zero here** (typically 32 = AES-256-XTS). Distinguishes from `apfs_meta_crypto` (key_len=0). |
+| 0x18   | N    | `persistent_key[]`   | **Wrapped ciphertext.** Never plain. Length = `key_len`.                                         |
+
+The `persistent_key[]` bytes are wrapped (encrypted) by the
+file's protection-class key, which is in turn wrapped by
+Secure Enclave hardware keys on Apple silicon. Our decoder
+surfaces the raw wrapped bytes so callers can fingerprint
+(SHA256 / equality-check) without re-implementing the
+parser; **we never try to unwrap**.
+
+The `refcnt` field is the cleanest signal of file
+relationships at this layer: hard-linked files (and clones,
+which APFS treats as copy-on-write hard-linked siblings
+metadata-wise) share their crypto_state record. A `refcnt`
+of N tells you N distinct directory entries point at one
+key. Useful as an independent oracle if we ever want to
+cross-check the EX-27 clone-dedup math.
+
 #### `cp_key_class_t` decoder
 
 Defined in Apple's `cprotect.h`; values stable across macOS
