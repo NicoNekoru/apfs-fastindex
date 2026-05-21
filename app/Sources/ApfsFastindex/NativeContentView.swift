@@ -1280,6 +1280,32 @@ struct NativeContentView: View {
                     statusPill("\(walkSkips.count) elided", tint: VizPalette.warning)
                         .help(walkSkipTooltip)
                 }
+                // Sparse-files hint. Surfaces when scanned
+                // content's logical bytes are at least 2×
+                // allocated — the OrbStack-on-laptop case
+                // where a single qcow2 reports an 8 TB
+                // capacity on a 500 GB drive. Clicking flips
+                // the metric picker to Allocated so the
+                // treemap shows real disk usage; the cell
+                // stops dominating its parent. Hidden when
+                // already on Allocated (the user has already
+                // resolved it).
+                if metric == .logical, scan.sparseFilesSuspected {
+                    Button {
+                        metric = .allocated
+                        updateLayout()
+                    } label: {
+                        statusPill("Sparse → Allocated", tint: VizPalette.warning)
+                    }
+                    .buttonStyle(.plain)
+                    .help(
+                        "Logical bytes (\(formattedBytes(scan.logicalTotal))) are much larger "
+                        + "than allocated (\(formattedBytes(scan.allocatedTotal ?? 0))). "
+                        + "Sparse files like OrbStack containers and qcow2 disk images "
+                        + "report nominal capacity, not actual disk usage. Click to switch "
+                        + "the treemap to Allocated for a more honest view."
+                    )
+                }
                 if !lastClickedPath.isEmpty {
                     Spacer()
                     Text(lastClickedPath)
@@ -1365,13 +1391,24 @@ struct NativeContentView: View {
     private static let progressIslandWidth: CGFloat = 380
 
     private var progressOverlay: some View {
-        // Determinate fraction when we have a denominator;
-        // capped at 1.0 because subdir scans can occasionally
-        // overshoot used-bytes (sparse files, hard-linked clones
-        // counted twice — both rare but possible).
+        // Determinate fraction when we have a denominator.
+        //
+        // Fall back to indeterminate when the running tally
+        // overshoots the predicted total by more than ~10 %.
+        // A pegged-at-100 % bar is misleading — the user
+        // can't tell scanning from stalled. The overshoot
+        // case is sparse files (OrbStack qcow2 reporting an
+        // 8 TB capacity on a 500 GB drive is the canonical
+        // hit) or hard-linked clones double-counted at the
+        // logical-bytes layer. Switching to indeterminate
+        // honestly signals "still working; predicted total
+        // was wrong".
         let fraction: Double? = {
             guard scanProgressBytesTotal > 0 else { return nil }
             let f = Double(scanProgressBytes) / Double(scanProgressBytesTotal)
+            if f > 1.10 {
+                return nil
+            }
             return min(max(f, 0), 1)
         }()
 

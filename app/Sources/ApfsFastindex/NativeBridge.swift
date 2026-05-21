@@ -436,6 +436,37 @@ final class Scan {
 
     /// `true` iff at least one entry has a concrete
     /// `allocated_size`. Gates the "Allocated" metric chip.
+    /// True when the scan's logical bytes are at least 2×
+    /// the allocated bytes — the canonical "sparse files
+    /// dominate" signal. OrbStack qcow2 images, Time Machine
+    /// snapshots, deduplicating backup archives all hit this:
+    /// `st_size` reports the nominal capacity (e.g. 8 TB for
+    /// an OrbStack container) while `st_blocks * 512` is the
+    /// actual disk footprint (often a few GB).
+    ///
+    /// The UI uses this to flag the Logical view as
+    /// misleading and offer a one-click switch to Allocated
+    /// (the actual-disk-usage view).
+    ///
+    /// Returns `false` when `allocatedTotal` is unavailable
+    /// (raw-mode scans that didn't compute allocated bytes
+    /// per SR-019 None-collapse) — without it we can't make
+    /// the comparison.
+    var sparseFilesSuspected: Bool {
+        guard let alloc = allocatedTotal, alloc > 0 else { return false }
+        // 2× threshold: typical filesystems show
+        // logical ≈ allocated within a few percent (block-
+        // size rounding); 2× is a confident "something
+        // sparse is in here". A single big-sparse file is
+        // enough to trip it because the sum is dominated.
+        // Saturating multiply guards an absurd alloc value
+        // (close to UInt64.max) from overflowing into
+        // wrap-around math.
+        let (doubled, overflow) = alloc.multipliedReportingOverflow(by: 2)
+        if overflow { return false }
+        return logicalTotal > doubled
+    }
+
     var allocatedAvailable: Bool {
         apfs_scan_allocated_available(handle)
     }
