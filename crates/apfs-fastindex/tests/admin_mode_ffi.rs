@@ -191,22 +191,22 @@ fn admin_mode_server_loop_scans_and_quits() {
     stdin.write_all(b"\n").expect("newline");
     stdin.flush().expect("flush");
 
-    // Drain progress events until ok/err.
-    let mut out_path: Option<String> = None;
-    loop {
+    // Drain progress events until the terminal ok/err event.
+    // `loop { … break value … }` is a Rust expression — the
+    // ok arm's payload becomes the loop's value, dropping
+    // the placeholder-`None` + later-reassign shape that
+    // clippy's `unused_assignments` lint flagged.
+    let out_path: Option<String> = loop {
         line.clear();
         reader.read_line(&mut line).expect("read reply");
         let evt = parse_event(&line);
         match evt["event"].as_str() {
             Some("progress") => continue,
-            Some("ok") => {
-                out_path = evt["out_path"].as_str().map(|s| s.to_string());
-                break;
-            }
+            Some("ok") => break evt["out_path"].as_str().map(|s| s.to_string()),
             Some("err") => panic!("scan err: {}", evt["message"]),
             other => panic!("unexpected event {other:?} in {line:?}"),
         }
-    }
+    };
     let out_path = out_path.expect("ok carried out_path");
     assert!(
         !out_path.is_empty(),

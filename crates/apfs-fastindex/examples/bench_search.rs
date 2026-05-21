@@ -219,7 +219,7 @@ fn days_to_ymd(days: i64) -> (i64, u32, u32) {
     // 400-year-cycle alignment (0000-03-01), then unpack.
     let mut z = days + 719468;
     let era = if z >= 0 { z } else { z - 146096 } / 146097;
-    let doe = (z - era * 146097) as i64; // [0, 146096]
+    let doe = z - era * 146097; // [0, 146096] — already i64
     let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
     let y = yoe + era * 400;
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
