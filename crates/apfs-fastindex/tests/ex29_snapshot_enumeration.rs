@@ -33,6 +33,7 @@ const SNAPSHOT_DEVICE_ENV: &str = "APFS_FASTINDEX_EX29_SNAPSHOT_DEVICE";
 const LIVE_DEVICE_ENV: &str = "APFS_FASTINDEX_EX29_LIVE_DEVICE";
 const RAW_PARITY_BUDGET: usize = 2000;
 
+#[allow(clippy::large_enum_variant)] // test-only; not on a hot path
 enum LiveScanOutcome {
     Ok(CheckpointScanOutput),
     BlockedByKernel,
