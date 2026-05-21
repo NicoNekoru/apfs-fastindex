@@ -10,6 +10,14 @@ extension Notification.Name {
     static let scanAsAdministratorRequested = Notification.Name(
         "apfsfastindex.scanAsAdministratorRequested"
     )
+
+    /// Posted by Edit > Find (⌘F) so the active
+    /// `NativeContentView` can focus its tree-list search
+    /// field. Same notification pattern as
+    /// `scanAsAdministratorRequested`; no payload.
+    static let findRequested = Notification.Name(
+        "apfsfastindex.findRequested"
+    )
 }
 
 /// "Scan as Administrator…" privileged-subprocess flow.

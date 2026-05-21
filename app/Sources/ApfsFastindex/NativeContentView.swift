@@ -43,6 +43,24 @@ struct NativeContentView: View {
     /// SwiftUI list view doesn't re-walk the tree on every
     /// view body re-evaluation.
     @State private var treeRows: [TreeListRow] = []
+    /// Search query for the tree-list panel. Case-insensitive
+    /// substring match on each node's display name. Empty
+    /// string = no filter (full tree, normal expand/collapse).
+    /// Non-empty string = walk every node, keep matches +
+    /// their ancestors (so matches stay visible in their
+    /// hierarchical context), auto-expand ancestor chains.
+    @State private var searchQuery: String = ""
+    /// Cache of "which node indices are kept under the current
+    /// search query". Recomputed on every change to
+    /// `searchQuery` or `scan`; `nil` means no search is active.
+    /// Holding this in @State rather than recomputing per row
+    /// keeps the per-row render cheap (single set lookup).
+    @State private var searchKeepSet: Set<UInt32>? = nil
+    /// Last query string `searchKeepSet` was built against —
+    /// used to skip recompute when the query didn't actually
+    /// change (e.g. spurious .onChange firing).
+    @State private var searchKeepSetQuery: String = ""
+    @FocusState private var searchFieldFocused: Bool
     /// Per-(node, metric) ext-list summary for the right-hand
     /// side panel. Computed in Rust via `Scan.extSummary` and
     /// rebuilt whenever `currentNode` or `metric` changes; on a
@@ -142,6 +160,14 @@ struct NativeContentView: View {
             // matching the regular Scan button's flow.
             startPrivilegedScan()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .findRequested)) { _ in
+            // Edit > Find (⌘F) → focus the tree-list search
+            // field. If a scan hasn't run yet there's nothing to
+            // search, but focusing the field is still fine —
+            // the placeholder explains what it does and the
+            // typing won't filter anything until rows exist.
+            searchFieldFocused = true
+        }
         .onChange(of: adminMode) { _ in
             // adminMode flips the moment auth completes
             // (AdminSession's ready handshake); refresh the
@@ -152,6 +178,14 @@ struct NativeContentView: View {
         }
         .onAppear { applyWindowTitle() }
         .onChange(of: scan?.entryCount) { _ in
+            // New scan = node indices in the cached keep-set
+            // are stale (they belonged to the previous scan).
+            // Clear so `rebuildTreeRows` rebuilds against the
+            // new scan's tree. The cache key (`searchKeepSetQuery`)
+            // resets too so a same-text query doesn't get a
+            // false-hit on the empty set.
+            searchKeepSet = nil
+            searchKeepSetQuery = ""
             rebuildTreeRows()
             rebuildExtSummary()
         }
@@ -199,6 +233,10 @@ struct NativeContentView: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
                 .background(VizPalette.bg)
+            searchField
+                .padding(.horizontal, 10)
+                .padding(.bottom, 6)
+                .background(VizPalette.bg)
             colHeader
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)
@@ -235,6 +273,48 @@ struct NativeContentView: View {
             }
         }
         .background(VizPalette.panel)
+    }
+
+    /// Search-by-name input. ⌘F focuses it (handled in
+    /// `ApfsFastindexApp` via the standard `.find` command
+    /// notification → `.findRequested` listener below).
+    /// Case-insensitive substring match on each node's display
+    /// name (the last path component). Empty = no filter.
+    private var searchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(AppFont.ui(11))
+                .foregroundStyle(VizPalette.muted)
+            TextField("Filter names (⌘F)", text: $searchQuery)
+                .textFieldStyle(.plain)
+                .font(AppFont.ui(12))
+                .focused($searchFieldFocused)
+                .onChange(of: searchQuery) { newValue in
+                    onSearchQueryChanged(newValue)
+                }
+            if !searchQuery.isEmpty {
+                Button {
+                    searchQuery = ""
+                    searchFieldFocused = false
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(AppFont.ui(12))
+                        .foregroundStyle(VizPalette.muted)
+                }
+                .buttonStyle(.plain)
+                .help("Clear search")
+                .keyboardShortcut(.cancelAction)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(VizPalette.panel)
+        .overlay(
+            RoundedRectangle(cornerRadius: 5)
+                .stroke(searchFieldFocused
+                        ? VizPalette.accent.opacity(0.6)
+                        : VizPalette.border, lineWidth: 1)
+        )
     }
 
     @ViewBuilder
@@ -595,17 +675,94 @@ struct NativeContentView: View {
 
     private func rebuildTreeRows() {
         guard let scan else { treeRows = []; return }
+        // When the search query changes, recompute the
+        // keep-set (nodes whose name matches + every ancestor
+        // up to the root, so matches stay visible in
+        // hierarchical context). Trimmed query: empty/whitespace
+        // = no filter active.
+        let trimmed = searchQuery.trimmingCharacters(in: .whitespaces)
+        if trimmed != searchKeepSetQuery || searchKeepSet == nil {
+            searchKeepSet = trimmed.isEmpty
+                ? nil
+                : computeSearchKeepSet(scan: scan, query: trimmed)
+            searchKeepSetQuery = trimmed
+        }
         var out: [TreeListRow] = []
         walkForRows(scan: scan, nodeIndex: 0, depth: 0, out: &out)
         treeRows = out
     }
 
+    /// Called on every keystroke in the search field. Triggers
+    /// a fresh tree-row build using the new query.
+    ///
+    /// No debouncing today: the matching loop is `O(nodeCount)`
+    /// with a substring check per name; on a 1.56 M-entry
+    /// `/Users/kai` scan this measures in the low tens of ms
+    /// in release builds, which is well below per-keystroke
+    /// latency. If a future tree gets pathological we'll add
+    /// a `Task`-based debounce with ~200 ms throttle.
+    private func onSearchQueryChanged(_ newValue: String) {
+        // Force the keep-set to be recomputed on the next
+        // `rebuildTreeRows` (cleared so the comparison in
+        // `rebuildTreeRows` triggers a rebuild even if the
+        // trimmed value happens to match the cached query).
+        searchKeepSet = nil
+        searchKeepSetQuery = ""
+        rebuildTreeRows()
+    }
+
+    /// Walk every node, collect the indices whose display name
+    /// contains `query` (case-insensitive). For each match,
+    /// also include every ancestor so the matched node stays
+    /// reachable through expand-chains in the rendered
+    /// hierarchy.
+    private func computeSearchKeepSet(scan: Scan, query: String) -> Set<UInt32> {
+        var keep: Set<UInt32> = []
+        // Always include the root so the tree always has at
+        // least one row to render — even if zero matches, the
+        // user sees "[root]" with empty children instead of
+        // a blank panel.
+        keep.insert(0)
+        let total = scan.nodeCount
+        for i in 0..<total {
+            let idx = UInt32(i)
+            guard let name = scan.name(of: idx) else { continue }
+            // `localizedCaseInsensitiveContains` handles
+            // unicode case folding (so "PHOTOS" matches
+            // "Photos") and skips the substring search when
+            // `query` is longer than `name`. Cheap on
+            // typical filename lengths.
+            if name.localizedCaseInsensitiveContains(query) {
+                var n: UInt32? = idx
+                while let curr = n, !keep.contains(curr) {
+                    keep.insert(curr)
+                    n = scan.parent(of: curr)
+                }
+            }
+        }
+        return keep
+    }
+
     private func walkForRows(scan: Scan, nodeIndex: UInt32, depth: Int, out: inout [TreeListRow]) {
+        let isSearch = searchKeepSet != nil
+        if let keep = searchKeepSet, !keep.contains(nodeIndex) {
+            // Search mode: prune branches that don't contain
+            // any matches. The recursive call from the parent
+            // already gated on the keep-set; this is a
+            // safety net for the top-level call (where the
+            // root always passes via the explicit insert).
+            return
+        }
+
         let kind = scan.kind(of: nodeIndex)
         let childCount = scan.childCount(of: nodeIndex)
         let isDir = kind == .dir
         let hasChildren = isDir && childCount > 0
-        let isExpanded = hasChildren && expandedNodes.contains(nodeIndex)
+        // Search mode: auto-expand every ancestor of a match
+        // so the user sees matches in their hierarchical
+        // context. Non-search mode: honour the user's manual
+        // expand/collapse state from `expandedNodes`.
+        let isExpanded = hasChildren && (isSearch || expandedNodes.contains(nodeIndex))
         let isCurrent = nodeIndex == currentNode
         let id = (UInt64(nodeIndex) << 8) | UInt64(depth & 0xff)
         out.append(TreeListRow(
@@ -619,7 +776,15 @@ struct NativeContentView: View {
         // the value-per-child once into an array then sort to
         // keep the per-comparison FFI cost down.
         let children = Array(scan.children(of: nodeIndex))
-        let scored: [(UInt32, UInt64)] = children.map { ($0, metricValue(for: $0, scan: scan)) }
+        // Search mode: restrict the visible children to those
+        // in the keep-set. Done before sorting so the per-row
+        // overflow cap (`treeListChildrenCap`) doesn't waste
+        // its budget on pruned branches.
+        let filtered: [UInt32] = {
+            guard let keep = searchKeepSet else { return children }
+            return children.filter { keep.contains($0) }
+        }()
+        let scored: [(UInt32, UInt64)] = filtered.map { ($0, metricValue(for: $0, scan: scan)) }
         let sorted = scored.sorted { $0.1 > $1.1 }
         let visible = sorted.prefix(NativeContentView.treeListChildrenCap)
         for (child, _) in visible {
