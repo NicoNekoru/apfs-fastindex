@@ -552,12 +552,24 @@ pub extern "C" fn apfs_scan_node_count(scan: *const ApfsScan) -> u32 {
 }
 
 /// Search result handle returned by `apfs_scan_search_names`.
-/// Holds a `Vec<u32>` of matching node indices; the caller
-/// reads it via `apfs_search_results_count` +
-/// `apfs_search_results_indices` and must call
-/// `apfs_search_results_free` exactly once.
+/// Carries two parallel views into the same search:
+///
+/// - `indices`: the **full keep-set** — every matching node
+///   plus every ancestor plus the root, sorted. This is what
+///   a hierarchical tree-list UI needs to render matches in
+///   context.
+/// - `matches`: just the nodes whose name matched the query,
+///   sorted. A flat-list "search results" UI uses this to
+///   render matches without forcing an auto-expansion of the
+///   entire ancestor chain (which on a single-letter query
+///   like `"n"` can be 1 M+ nodes, blowing up any
+///   tree-walking renderer).
+///
+/// The Swift bridge reads both via dedicated accessors and
+/// must call `apfs_search_results_free` exactly once.
 pub struct ApfsSearchResults {
     indices: Vec<u32>,
+    matches: Vec<u32>,
 }
 
 /// Case-insensitive substring search across every node's
@@ -642,6 +654,7 @@ pub extern "C" fn apfs_scan_search_names(
         // and `buf` from start to end, which the prefetcher
         // streams through.
         let mut keep: FxHashSet<u32> = FxHashSet::default();
+        let mut matches: Vec<u32> = Vec::new();
         // Root always in (so the tree renders even when zero
         // matches).
         keep.insert(0);
@@ -650,6 +663,7 @@ pub extern "C" fn apfs_scan_search_names(
             let start = offsets[i] as usize;
             let end = offsets[i + 1] as usize;
             if finder.find(&buf[start..end]).is_some() {
+                matches.push(i as u32);
                 // Walk the parent chain and insert every
                 // ancestor. `insert` returns false the
                 // moment we hit a node already in the set
@@ -666,13 +680,15 @@ pub extern "C" fn apfs_scan_search_names(
                 }
             }
         }
-        // Return a sorted Vec for stable iteration on the
-        // Swift side (Swift wraps it back into a Set; ordering
-        // doesn't matter to the consumer, but a stable order
-        // makes debugging easier).
+        // Return both views sorted. The keep-set is for
+        // hierarchical rendering; the matches list is for
+        // flat "search results" rendering (cheap to walk even
+        // when the keep-set is huge).
         let mut indices: Vec<u32> = keep.into_iter().collect();
         indices.sort_unstable();
-        Box::into_raw(Box::new(ApfsSearchResults { indices }))
+        // `matches` is already in tree order from the
+        // sequential loop above — already sorted.
+        Box::into_raw(Box::new(ApfsSearchResults { indices, matches }))
     })
 }
 
@@ -714,6 +730,33 @@ pub extern "C" fn apfs_search_results_free(results: *mut ApfsSearchResults) {
     // pointer are UB on the Swift side (per the standard
     // `_free` contract).
     let _ = unsafe { Box::from_raw(results) };
+}
+
+/// Number of nodes whose name matched the query (i.e. the
+/// "real" matches, not the inflated keep-set). `0` on NULL.
+#[no_mangle]
+pub extern "C" fn apfs_search_results_match_count(results: *const ApfsSearchResults) -> usize {
+    ffi_guard(0, move || {
+        let Some(r) = (unsafe { results.as_ref() }) else {
+            return 0;
+        };
+        r.matches.len()
+    })
+}
+
+/// Pointer to the matches buffer (`u32` per entry, length
+/// from `apfs_search_results_match_count`). Sorted in tree
+/// (node-index) order. Valid until `apfs_search_results_free`.
+#[no_mangle]
+pub extern "C" fn apfs_search_results_match_indices(
+    results: *const ApfsSearchResults,
+) -> *const u32 {
+    ffi_guard(std::ptr::null(), move || {
+        let Some(r) = (unsafe { results.as_ref() }) else {
+            return std::ptr::null();
+        };
+        r.matches.as_ptr()
+    })
 }
 
 /// Sentinel returned by `apfs_scan_node_index_for_path` (and

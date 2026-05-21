@@ -83,10 +83,21 @@ typedef struct ApfsScan ApfsScan;
 
 /**
  * Search result handle returned by `apfs_scan_search_names`.
- * Holds a `Vec<u32>` of matching node indices; the caller
- * reads it via `apfs_search_results_count` +
- * `apfs_search_results_indices` and must call
- * `apfs_search_results_free` exactly once.
+ * Carries two parallel views into the same search:
+ *
+ * - `indices`: the **full keep-set** — every matching node
+ *   plus every ancestor plus the root, sorted. This is what
+ *   a hierarchical tree-list UI needs to render matches in
+ *   context.
+ * - `matches`: just the nodes whose name matched the query,
+ *   sorted. A flat-list "search results" UI uses this to
+ *   render matches without forcing an auto-expansion of the
+ *   entire ancestor chain (which on a single-letter query
+ *   like `"n"` can be 1 M+ nodes, blowing up any
+ *   tree-walking renderer).
+ *
+ * The Swift bridge reads both via dedicated accessors and
+ * must call `apfs_search_results_free` exactly once.
  */
 typedef struct ApfsSearchResults ApfsSearchResults;
 
@@ -419,6 +430,19 @@ const uint32_t *apfs_search_results_indices(const struct ApfsSearchResults *resu
  * Drop the search-results handle. Idempotent on NULL.
  */
 void apfs_search_results_free(struct ApfsSearchResults *results);
+
+/**
+ * Number of nodes whose name matched the query (i.e. the
+ * "real" matches, not the inflated keep-set). `0` on NULL.
+ */
+uintptr_t apfs_search_results_match_count(const struct ApfsSearchResults *results);
+
+/**
+ * Pointer to the matches buffer (`u32` per entry, length
+ * from `apfs_search_results_match_count`). Sorted in tree
+ * (node-index) order. Valid until `apfs_search_results_free`.
+ */
+const uint32_t *apfs_search_results_match_indices(const struct ApfsSearchResults *results);
 
 /**
  * Look up a node by its absolute logical path. The empty string

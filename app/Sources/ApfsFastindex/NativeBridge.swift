@@ -483,28 +483,24 @@ final class Scan {
         return idx == Scan.nodeInvalid ? nil : idx
     }
 
-    /// Case-insensitive substring search across every node's
-    /// display name. Returns the **full keep-set** — every
-    /// matching node index plus every ancestor of every match
-    /// plus the root — as a sorted `[UInt32]`. The set is what
-    /// the tree-list panel renders under an active search.
-    /// Empty / whitespace query returns `[]`.
+    /// Case-insensitive substring search. Returns just the
+    /// matched node indices (NOT including ancestors) — the
+    /// shape the flat "search results" panel renders.
     ///
-    /// Heavy lifting in Rust:
-    /// - Pre-lowercased name cache (built once at scan time)
-    /// - Tight `Vec<String>` substring scan
-    /// - Parent-pointer ancestor walk with `FxHashSet` early-out
-    ///   (insert returns false → rest of chain is already in;
-    ///   total ancestor work is O(unique kept nodes), not
-    ///   O(matches × depth))
+    /// Empty / whitespace query returns `[]`. All heavy work
+    /// (lowercased-name cache, memchr Finder, parent walks)
+    /// lives in Rust; this Swift wrapper is one FFI round-trip.
+    /// EX-33 measured the FFI at ~5-12 ms on a 1.56 M-entry
+    /// `/Users/kai` scan for typical 4-12 char queries; the
+    /// search filter and ancestor walk are both inside that.
     ///
-    /// Measured at low tens of ms on a 1.56 M-entry scan in
-    /// release. Replaces the original Swift loop that made
-    /// `nodeCount` FFI calls per keystroke + ran
-    /// `localizedCaseInsensitiveContains` (NFD normalisation +
-    /// locale-aware case folding) on each (multi-second
-    /// per keystroke at scale).
-    func searchNames(query: String) -> [UInt32] {
+    /// Callers that need the full keep-set (matches + every
+    /// ancestor — for a hierarchical tree-walk renderer) can
+    /// add a parallel `searchKeepSet(query:)` accessor; the
+    /// underlying FFI already holds both views in a single
+    /// `ApfsSearchResults` handle, so the cost overlaps. The
+    /// flat-list UI shipping today only needs matches.
+    func searchMatches(query: String) -> [UInt32] {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return [] }
         return trimmed.withCString { cQuery -> [UInt32] in
@@ -512,8 +508,8 @@ final class Scan {
                 return []
             }
             defer { apfs_search_results_free(results) }
-            let count = apfs_search_results_count(results)
-            guard count > 0, let ptr = apfs_search_results_indices(results) else {
+            let count = apfs_search_results_match_count(results)
+            guard count > 0, let ptr = apfs_search_results_match_indices(results) else {
                 return []
             }
             let buffer = UnsafeBufferPointer(start: ptr, count: Int(count))
