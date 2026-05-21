@@ -98,6 +98,39 @@ let package = Package(
                     "-L", "Sources/CApfsFastindex",
                 ])
             ]
+        ),
+        // Tier B end-to-end test for the Sparkle upgrade path
+        // (separate executable so it can spin up a real HTTP
+        // server + run a Sparkle check without dragging the FFI
+        // tests into the Sparkle dependency graph). Validates:
+        //
+        // - fake v0.0.0 host bundle assembly
+        // - appcast XML structure + sparkle namespace
+        // - Ed25519 signing produces something Sparkle's libsodium
+        //   verifier accepts
+        // - SPUUpdater fetches the appcast, parses, and announces
+        //   the newer version through the SPUUserDriver
+        //
+        // Run via `swift run apfs-update-tests` from app/. Exits
+        // 0 on success, non-zero with a printed reason on any
+        // assertion failure.
+        .executableTarget(
+            name: "apfs-update-tests",
+            dependencies: [
+                .product(name: "Sparkle", package: "Sparkle"),
+            ],
+            path: "Tests/ApfsUpdateTests",
+            linkerSettings: [
+                // Same Sparkle.framework rpath setup as the main
+                // app — `swift run` puts the framework at
+                // `.build/<triple>/<config>/Sparkle.framework`,
+                // and `@executable_path` makes dyld find it
+                // beside the test binary.
+                .unsafeFlags([
+                    "-Xlinker", "-rpath",
+                    "-Xlinker", "@executable_path",
+                ]),
+            ]
         )
     ]
 )
