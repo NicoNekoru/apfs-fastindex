@@ -1,11 +1,9 @@
 \chapter{The Container}
 
-Block zero is the locator. It is not the authoritative container
-superblock. Treating block zero as the source of truth is the first
-mistake an APFS reader can make; the second is reading the highest
-checkpoint without validating it; the third is reading the latest
-checkpoint while the volume is changing. This chapter is concerned
-with avoiding all three.
+Three rules govern reading an APFS container: block zero locates,
+it does not authorise; checkpoint selection picks the highest
+checksum-valid candidate; and the selected state must not advance
+during the scan. This chapter develops each rule.
 
 \section{Block Zero As Locator}
 
@@ -131,16 +129,17 @@ disagree with anything else that picks the latest.
 \subsection{Live State Is Not Pinned}
 
 \textbf{Observation.} On a mounted APFS volume that other processes
-are using, the highest valid XID moves under the reader. Two reads
-of "latest" may return two different transactions. Mixing objects
-from different transactions produces an incoherent namespace.
-EX-01's churn probe demonstrated this on a mounted lab image.
+are using, the highest valid XID advances during the scan. Two
+reads of ``latest'' may return different transactions; mixing
+objects across transactions produces an incoherent namespace. EX-01
+demonstrated this on a mounted lab image under write churn.
 
-The fix is structural rather than algorithmic: raw mode only runs
-on sources where state can be pinned. Detaching an image fixes the
-visible state. So does an explicit caller commitment that a device's
-checkpoint will not advance. Live mounted volumes are
-readable-but-not-supported; chapter~11 develops the vocabulary.
+Raw mode therefore only runs on sources where state can be pinned:
+a detached image (the \texttt{.dmg} layer fixes the visible state
+at detach time), or a caller-supplied raw device under an explicit
+commitment that the checkpoint will not advance. Live mounted
+volumes are readable but not supported; chapter~11 develops the
+vocabulary.
 
 \section{The Checkpoint Map Ring}
 \label{ssec:checkpoint-map}
@@ -167,15 +166,14 @@ The walk rule:
 A chain that runs out of length before the last flag is malformed.
 The parser fails closed.
 
-\textbf{Empirical correction.} The Apple reference describes
-ephemeral objects in a way that reads naturally as "the checkpoint
-map block itself is ephemeral." It is not. Validation against a
-real container demonstrates that \texttt{OBJECT\_TYPE\_CHECKPOINT\_MAP}
-blocks carry the \texttt{OBJ\_PHYSICAL} storage flag, not
-\texttt{OBJ\_EPHEMERAL}. The validator must expect
-\texttt{Physical} storage for these blocks. This correction was
-landed during EX-11 as a one-line constant change with a synthetic
-malformed-checkpoint-map regression test.
+\textbf{Empirical correction (EX-11).}
+\texttt{OBJECT\_TYPE\_CHECKPOINT\_MAP} blocks carry the
+\texttt{OBJ\_PHYSICAL} storage flag, not \texttt{OBJ\_EPHEMERAL},
+despite holding the ephemeral-object lookup table. The Apple
+reference reads naturally as ``the checkpoint-map block itself is
+ephemeral'' --- it is not. The validator expects
+\texttt{Physical} for these blocks. A synthetic malformed-map
+regression test covers the constant.
 
 \section{Roots Reachable From The Selected Checkpoint}
 
@@ -195,11 +193,7 @@ The selected NXSB names five things the reader needs:
 
 The incompatible-feature mask is the gate for format drift
 (chapter~11). Any bit the reader does not recognise stops the run.
-Better to refuse a container with a new feature bit than to
-silently emit a row that depends on the bit's meaning.
 
-The container OMAP and the volume superblocks both require object
-resolution, and that is the next chapter's subject. The point to fix
-here is that block zero, the descriptor area, and the checkpoint map
-together establish a single coherent transaction context. Everything
-that follows runs inside that context. The context is not negotiable.
+Block zero, the descriptor area, and the checkpoint map together
+establish a single coherent transaction context. The OMAP
+machinery of the next chapter operates inside that context.

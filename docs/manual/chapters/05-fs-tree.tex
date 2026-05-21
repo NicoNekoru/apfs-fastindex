@@ -1,50 +1,34 @@
 \chapter{The File-System Tree}
 \label{ssec:fs-tree-internal}
 
-The chapter contains the single most consequential reverse-engineering
-finding in the project so far. The finding is small; its absence cost
-a fixture and almost cost the project's first defended scope; its
-presence makes the parser correct on every FS tree dense enough to
-grow past one leaf node.
+\section{The Rule}
 
-\section{The Finding, Stated Once}
+\textbf{Observation.} An FS-tree internal-node entry carries an
+8-byte value. That value is a \emph{virtual object identifier},
+not a physical block address. To read the child node, the walker
+must resolve the value through the \emph{volume} OMAP at the scan
+XID. A walker that reads the value as a paddr reads random blocks
+on any FS tree of depth $\geq 1$.
 
-\textbf{Observation.} An FS-tree internal-node entry has an 8-byte
-value. That value is a \emph{virtual object identifier}, not a
-physical block address. To read the child node, the walker must
-resolve the value through the \emph{volume} OMAP at the scan XID.
-A walker that reads the value as a paddr will, on any FS tree of
-depth $\geq 1$, read random blocks.
+The Apple reference documents that FS-tree objects live in the
+volume's virtual address space, but does not foreground that
+\emph{internal-node child references are members of the same
+address space}. The reference reads naturally as ``the internal
+value is a pointer into the same area as physical extents,'' and
+many B-tree formats indeed encode internal references as direct
+physical offsets. The converged open-source code is unanimous in
+the right direction, but the unanimity is implicit: each reader's
+B-tree walker calls an object resolver that internally performs
+the OMAP lookup. A reimplemented walker without an equivalent
+resolver does not surface the bug on a small fixture, because a
+small enough FS tree fits in a single leaf node and has no internal
+entries.
 
-This is the rule. The rest of the chapter develops the consequences
-and the empirical evidence.
+EX-10 through EX-12 fixtures were each small enough to avoid the
+case. EX-14 produced a fixture dense enough to require an internal
+level, and the parser broke.
 
-\section{Why This Is The Easy Mistake}
-
-The Apple reference documents that FS-tree objects live in the volume's
-virtual address space. It does not foreground that
-\emph{internal-node child references are members of the same address
-space}. The reference reads naturally as "the internal value is a
-pointer into the same area as physical extents," and many B-tree
-formats indeed encode internal child references as direct physical
-offsets.
-
-The converged open-source code is unanimous in the right direction,
-but the unanimity is implicit. Each reader hands its B-tree walker an
-"object resolver" that internally does the OMAP lookup, and the
-walker code does not need to think about it. A reader who reimplements
-the walker without an equivalent resolver --- which is what the
-project's first Rust walker did --- will not notice the lapse on a
-small fixture, because a small enough FS tree fits in a single leaf
-node and has no internal entries to follow.
-
-The project missed this through the EX-10, EX-11, and EX-12 fixtures.
-Each was small enough that the FS tree had no internal level, and the
-walker was never asked to dereference an internal value. EX-14
-finally produced a fixture dense enough to need an internal level,
-and the parser broke.
-
-\section{The Probe That Found It}
+\section{The Probe (EX-14, EX-15)}
 
 \textbf{Observation.} EX-14 reported
 \texttt{APFS object validation failed: checksum mismatch at block
@@ -116,12 +100,12 @@ numeric value as a paddr.
   an unallocated block.}
 \end{figure}
 
-The fix is structural. \texttt{walk\_fs\_node} now takes the volume
-OMAP resolver and performs an \texttt{(oid, scan\_xid)} lookup for
-every internal entry before reading the child. A missing OMAP mapping
-returns a typed \texttt{InvalidObject} hard stop naming the OID.
+\texttt{walk\_fs\_node} now takes the volume OMAP resolver and
+performs an \texttt{(oid, scan\_xid)} lookup for every internal
+entry before reading the child. A missing OMAP mapping returns a
+typed \texttt{InvalidObject} hard stop naming the OID.
 
-Two synthetic regression tests in the Rust crate close the bug:
+Two synthetic regression tests close the bug:
 
 \begin{enumerate}
   \item \texttt{fs\_tree\_internal\_value\_is\_virtual\_oid\_resolved\_via\_omap}
@@ -135,38 +119,30 @@ Two synthetic regression tests in the Rust crate close the bug:
     than silently skipping or attempting a paddr fallback.
 \end{enumerate}
 
-These tests now run on every commit; a future regression that
-reintroduces the bug would be caught at the synthetic level rather
-than at the next fixture variant.
+\section{Object-Header Validation}
 
-\section{The Object-Header Validation Detail}
-
-Two further details follow from the FS-tree root being virtual.
+Two details follow from the FS-tree root being virtual.
 
 \textbf{Observation.} The FS-tree root is reached through the volume
 OMAP, so on disk it carries a virtual \texttt{obj\_phys\_t} header.
 The storage flags are \texttt{0x0000\_0000} (virtual), not
 \texttt{OBJ\_PHYSICAL}.
 
-\textbf{Observation.} A virtual object's \texttt{o\_oid} field does not
-equal the block's physical address; the OID is the virtual identity,
-the paddr is independent. The validator therefore must \emph{not}
-require \texttt{o\_oid == paddr} for virtual objects. The right check
-is \texttt{o\_oid == omap\_lookup.oid}: the OID the walker resolved
-through the OMAP must be the OID the on-disk header advertises.
+\textbf{Observation.} A virtual object's \texttt{o\_oid} is
+independent of the block's physical address. The validator must
+not require \texttt{o\_oid == paddr} for virtual objects; the
+correct check is \texttt{o\_oid == omap\_lookup.oid}.
 
-The corollary is that the project's object-header validator has two
-modes: \texttt{ExpectedStorage::Physical}, which requires
-\texttt{o\_oid == paddr}, and \texttt{ExpectedStorage::Virtual}, which
-does not. Every reader picks one at the call site. The fail-closed
-rule is preserved: a block validated under the wrong mode is
-rejected.
+The validator therefore has two modes:
+\texttt{ExpectedStorage::Physical}, which requires
+\texttt{o\_oid == paddr}, and \texttt{ExpectedStorage::Virtual},
+which does not. Every call site picks one; a block validated under
+the wrong mode is rejected.
 
 \section{Required Record Families}
 
-An indexer that reproduces POSIX namespace plus logical and
-allocated size needs five families of FS-tree records and one
-xfield family.
+An indexer that reproduces POSIX namespace plus logical, allocated,
+and clone-deduplicated size needs the following record families.
 
 \begin{description}
   \item[\texttt{DIR\_REC}.] Directory entries. Key carries the parent
@@ -185,18 +161,29 @@ xfield family.
     unification. A directory entry that participates in a hard-link
     group carries a sibling ID xfield; SIBLING\_MAP closes the
     mapping from sibling ID to file ID.
-  \item[dstream fields.] Logical size sources. Carried either inside
-    INODE's xfield tail as \texttt{INO\_EXT\_TYPE\_DSTREAM} or as a
-    dedicated \texttt{j\_dstream\_id\_val\_t} record.
+  \item[dstream fields.] Logical and allocated size sources.
+    Carried either inside INODE's xfield tail as
+    \texttt{INO\_EXT\_TYPE\_DSTREAM} or as a dedicated
+    \texttt{j\_dstream\_id\_val\_t} record. The
+    \texttt{j\_dstream\_id\_val\_t} also carries a reference count
+    used by chapter~8's clone-deduplication.
+  \item[\texttt{file\_extent}.] Per-inode extent records,
+    keyed by \texttt{dstream\_id}. Required for clone-dedup
+    (chapter~8); not consumed by namespace or logical size.
+  \item[\texttt{phys\_ext}.] Extent-reference-tree records.
+    One per shared physical extent, carrying
+    \texttt{(paddr\_first, length\_blocks, refcnt,
+    owning\_obj\_id)}. The extent-reference tree is a separate
+    B-tree, distinct from the FS tree, and is opened only when
+    clone-dedup is wanted. On detached \texttt{.dmg} images the
+    tree's storage class is physical; on live volumes it may be
+    virtual.
 \end{description}
 
-Other families are decoded but not used for the indexer's emission
-rows: \texttt{file\_extent} (chapter~13's extent-reference
-territory), \texttt{snapshot\_metadata} and \texttt{snapshot\_name}
-(deferred), and an ``unsupported'' bucket for record types the
-parser does not recognise. A record falling into the unsupported
-bucket on a volume that is otherwise in the allowlist triggers a
-typed validation gap that the caller must consume.
+\texttt{snapshot\_metadata} and \texttt{snapshot\_name} records are
+decoded but not consumed; an ``unsupported'' bucket catches record
+types the parser does not recognise. A record in the unsupported
+bucket on an allowlisted volume triggers a typed validation gap.
 
 \section{Topology Summary}
 
@@ -219,10 +206,6 @@ To enumerate one volume, the walker performs:
     families above.
 \end{enumerate}
 
-Every reader in the project's Rust crate that touches an FS-tree node
-goes through this path. There are no shortcuts; in particular there
-is no path that treats an internal value as a paddr.
-
-The next chapter handles what is inside the leaf records: the
-variable-length tails, and the single source-backed rule for reading
-them.
+Every FS-tree reader in the Rust crate goes through this path; no
+code path treats an internal value as a paddr. The next chapter
+covers the variable-length tail of the leaf records.

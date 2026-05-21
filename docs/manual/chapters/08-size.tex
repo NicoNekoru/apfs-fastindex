@@ -1,31 +1,30 @@
 \chapter{Sizes and Their Precedences}
 
-APFS records the size of a file in several places, and the places do
-not always agree. A parser that picks the wrong source on the wrong
-file silently produces wrong rows and wrong directory totals. This
-chapter fixes two rules --- one for logical size, one for allocated
-size --- and shows the cases for which each is the correct rule.
+APFS stores file size in several places, and the places do not
+always agree. The parser emits three per-inode metrics, each with
+its own precedence rule and its own oracle:
 
-The two metrics are independent. They have separate sources, separate
-oracles, and separate fail-closed boundaries. The chapter develops
-them in that order: logical first (the primary anchor; covers every
-case), allocated second (covers five of seven case classes; sparse
-and decmpfs fail closed).
+\begin{description}
+  \item[Logical.] The user-visible byte length (\texttt{st\_size}).
+    The primary anchor; covers every case.
+  \item[Allocated.] Bytes APFS has assigned to the inode's content
+    (\texttt{st\_blocks * 512}). Covers every shape the macOS
+    write path produces.
+  \item[Real.] Clone-deduplicated allocated bytes. Each inode is
+    charged its share of physically-allocated bytes, accounting for
+    extents that multiple inodes reference. Validated by the
+    extent-reference tree.
+\end{description}
+
+The chapter develops them in that order.
 
 \section{Logical Size}
 
-The primary size metric is \emph{logical size}: the user-visible byte
-length, the number POSIX \texttt{st\_size} reports, the number the
-shell shows in \texttt{ls -l}. It is not the bytes on disk; it is
-not the bytes the file would occupy after decompression on a
-different filesystem; it is not the bytes uniquely owned by this
-inode. Each of those is a separate metric, and at most one is
-treated here (allocated size, in the next section).
-
-The choice of logical size as the primary anchor is deliberate. It
-has a stable oracle (\texttt{st\_size}), applies uniformly to
-ordinary, sparse, cloned, hard-linked, symlink, and compressed
-files, and is the size every user-facing tool already agrees on.
+Logical size is the user-visible byte length: the number POSIX
+\texttt{st\_size} reports and the number \texttt{ls -l} prints. It
+has a stable oracle, applies uniformly to ordinary, sparse, cloned,
+hard-linked, symlink, and compressed files, and is the size every
+user-facing tool agrees on.
 
 \subsection{The Precedence Rule}
 
@@ -50,7 +49,7 @@ files, and is the size every user-facing tool already agrees on.
 
 The order matters. Steps 1 and 3 both reach into compression
 metadata, but they reach for different fields and have different
-trust. The next subsection shows why.
+trust; the load-bearing case below shows why.
 
 \begin{figure}[h]
 \centering
@@ -131,14 +130,14 @@ def logical_size(inode, xattrs):
   \item Mounted POSIX \texttt{st\_size = 53248}.
 \end{itemize}
 
-The decmpfs header's \texttt{uncompressed\_size} is a placeholder for
-this layout. Step~1 must beat step~3, or the parser emits 437 instead
-of 53248. The fixture is small but the principle is general: when
-APFS sets the inode flag, the inode flag is the source of truth;
-the decmpfs header is metadata the running system maintains for its
-own decompression path and is not reliably the file's size.
+The decmpfs header's \texttt{uncompressed\_size} is a placeholder
+for this layout. Step~1 must beat step~3 or the parser emits 437
+instead of 53248. The principle is general: when APFS sets the
+inode flag, the inode flag is the source of truth; the decmpfs
+header is metadata the running system maintains for its own
+decompression path and is not reliably the file's size.
 
-\subsection{The Hint That Is Not A Size}
+\subsection{Sparse Bytes Is A Hint, Not A Size}
 
 \textbf{Observation.}
 \texttt{INO\_EXT\_TYPE\_SPARSE\_BYTES} is an
@@ -154,15 +153,11 @@ On the proof fixture's sparse file:
   \item \texttt{st\_size = 1052897}.
 \end{itemize}
 
-The sparse bytes number describes the difference between the file's
-logical extent and its allocated bytes. It is useful for the
-allocated-size metric (next section) but is not the answer to "how
-large is this file"; that number is the dstream size, which the
-precedence rule correctly picks at step~2.
-
-A reader that treats \texttt{SPARSE\_BYTES} as anything else is
-adding sparse holes to the logical size of every sparse file --- a
-sizeable error on real-world data.
+\texttt{SPARSE\_BYTES} records the difference between the logical
+extent and the allocated bytes. It is the load-bearing input to the
+allocated-size rule (next section); it is not the answer to ``how
+large is this file.'' Treating \texttt{SPARSE\_BYTES} as anything
+else inflates the logical size of every sparse file.
 
 \subsection{Per-Inode Results}
 
@@ -191,22 +186,18 @@ appear as a separate row because the rule is per inode and
 
 \section{Allocated Size}
 
-Per inode, the number of bytes APFS has allocated on disk for the
-file's content stream.
+Per inode, the bytes APFS has assigned to the inode's content
+stream. Oracle: \texttt{st\_blocks * 512}.
 
-\textbf{Observation.} For ordinary, cloned, hard-linked, and symlink
-cases the parser emits \texttt{j\_dstream\_t.alloced\_size} (or zero
-for symlinks) and the result matches macOS's \texttt{st\_blocks *
-512} oracle. Two further cases used to fail closed --- sparse files
-and decmpfs-compressed files --- and were closed by EX-26 against
-the same \texttt{st\_blocks * 512} oracle. For sparse, the
-allocated bytes are \texttt{alloced\_size - sparse\_bytes}. For
-decmpfs, the allocated bytes are the sum of any stream-backed
-xattrs' \texttt{alloced\_size} values (the primary dstream is
-usually absent, and the compressed bytes live in either
-\texttt{com.apple.decmpfs} or \texttt{com.apple.ResourceFork}; an
-embedded xattr contributes zero because the bytes live inline in
-the xattr payload).
+\textbf{Observation.} The rule covers every shape the macOS write
+path produces. Ordinary, cloned, hard-linked, and symlink cases
+emit \texttt{j\_dstream\_t.alloced\_size} (zero for symlinks). The
+sparse and decmpfs cases were promoted from fail-closed to
+oracle-validated by EX-26: sparse emits
+\texttt{alloced\_size - sparse\_bytes}; decmpfs emits the sum of
+any stream-backed xattrs' \texttt{alloced\_size} (the primary
+dstream is usually absent; embedded xattrs contribute zero because
+their bytes live inline in the xattr payload).
 
 \subsection{The Precedence Rule}
 
@@ -233,49 +224,44 @@ the xattr payload).
 
 \texttt{None} is not a synonym for zero. A row with
 \texttt{allocated\_size = None} is recorded in the run's
-\texttt{not\_claimed} register, the metric toggle in the
-visualisation greys out for that row, and any directory aggregate
-that contains a \texttt{None}-allocated inode is itself emitted as
-\texttt{None} --- a partial aggregate is forbidden because a
-consumer might otherwise treat it as authoritative.
+\texttt{not\_claimed} register; the metric toggle in the
+visualisation greys out for that row; any directory aggregate
+containing a \texttt{None}-allocated inode is itself emitted as
+\texttt{None}. A partial aggregate is forbidden, since a consumer
+might otherwise treat it as authoritative.
 
 \subsection{Why \texttt{alloced\_size} Is The Only Candidate}
 
-Six independent open-source readers were surveyed
+A survey of six independent open-source readers
 (\texttt{linux-apfs-rw}, \texttt{apfsprogs}/\texttt{apfsck},
 the Sleuth Kit, \texttt{libfsapfs}, \texttt{dissect.apfs},
-\texttt{apfs-fuse}, \texttt{go-apfs}). All six decode
+\texttt{apfs-fuse}, \texttt{go-apfs}) finds all six decode
 \texttt{j\_dstream\_t.alloced\_size}; only TSK and
-\texttt{linux-apfs-rw} surface it to callers, and
-\texttt{linux-apfs-rw} publishes it directly as
-\texttt{inode->i\_blocks << 9}. No reader surfaces the alternative
-candidate --- the sum of \texttt{j\_file\_extent\_val\_t.len} over
-the inode's extents --- as a public allocated-bytes number. The
-extent-reference tree
-(\texttt{OBJECT\_TYPE\_BLOCKREFTREE}) is opened by some readers but
-is the per-volume reference-counting authority for snapshots and
-clones, not a per-file allocated-bytes table.
+\texttt{linux-apfs-rw} surface it to callers; no reader surfaces
+the alternative candidate (the sum of
+\texttt{j\_file\_extent\_val\_t.len}) as a public allocated-bytes
+number. The extent-reference tree is the per-volume
+reference-counting authority for clones and snapshots, not a
+per-file allocated-bytes table; it is used here for the Real metric
+below.
 
-A consistency conflict surfaces between two halves of the same
-project: \texttt{linux-apfs-rw} (the kernel module) writes
+The two halves of the same upstream project disagree:
+\texttt{linux-apfs-rw} (kernel) writes
 \texttt{alloced\_size = round\_up(ds\_size, blocksize)};
-\texttt{apfsck} (the same project's filesystem checker) enforces
+\texttt{apfsck} (filesystem checker) enforces
 \texttt{alloced\_size == sum(j\_file\_extent\_val\_t.len)}. The two
-agree only when every extent ends exactly at \texttt{ds\_size}
-and the file has no truncate residue. The kernel can therefore
-write volumes that its companion checker flags as corrupt. The
-right oracle is the external public number
-(\texttt{st\_blocks * 512}), not internal field consistency.
+agree only when every extent ends at \texttt{ds\_size} and the file
+has no truncate residue. The right oracle is the external public
+number (\texttt{st\_blocks * 512}), not internal field consistency.
 
-\subsection{The Sparse-File Lift (EX-26 Hypothesis A)}
+\subsection{The Sparse Identity (EX-22, EX-26)}
 \label{ssec:sparse-bytes-lift}
 
-EX-22 left this branch fail-closed because the fixture carried a
-single sparse shape and the observed identity
-\texttt{alloced\_size - sparse\_bytes = st\_blocks * 512} was a
-hypothesis worth a corpus-level probe before promoting to rule.
-EX-26 ran that probe on four sparse shapes and the identity held
-exactly across all of them.
+EX-22 left sparse fail-closed because the fixture carried one
+sparse shape and the observed identity
+\texttt{alloced\_size - sparse\_bytes = st\_blocks * 512} needed
+corpus-level confirmation. EX-26 ran the probe on four sparse
+shapes; the identity held exactly across all of them.
 
 \textbf{Observation.} On the EX-22 fixture the sparse file carries:
 
@@ -320,18 +306,16 @@ saturation guarding the (not observed in practice but algebraically
 possible) case where the kernel's residue exceeds the dstream-
 reported allocation.
 
-\subsection{The decmpfs Lift (EX-26 Hypothesis F)}
+\subsection{The decmpfs Rule (EX-26)}
 \label{ssec:decmpfs-lift}
 
-EX-22 left decmpfs fail-closed because none of the open-source
-readers agreed on the macOS-oracle number and the EX-22 fixture
-carried only one decmpfs case (the small-payload xattr-stream-
-stored shape). EX-26 added a second decmpfs variant (a 256~KiB
-compressible payload that ditto routes into the resource-fork-
-stored shape) and observed that both shapes are captured by a
-single rule: the allocated bytes are the sum of any stream-backed
-xattr \texttt{alloced\_size} values plus the (typically absent)
-primary dstream \texttt{alloced\_size}.
+EX-22 left decmpfs fail-closed because no open-source reader
+agreed on the macOS oracle and the fixture carried only one
+decmpfs shape. EX-26 added a 256~KiB compressible payload that
+ditto routes into the resource-fork-stored shape. Both shapes
+satisfy one rule: allocated bytes equal the sum of any
+stream-backed xattrs' \texttt{alloced\_size} plus the (typically
+absent) primary dstream \texttt{alloced\_size}.
 
 \textbf{Observation.} On the EX-26 fixture the two decmpfs files
 carry:
@@ -354,29 +338,25 @@ carry:
     Oracle \texttt{st\_blocks * 512 = 4096}.
 \end{itemize}
 
-The on-disk reality is that the \texttt{compression\_type} byte in
-the decmpfs header tells you \emph{where} the compressed bytes
-live (xattr inline vs.\ resource fork), but the bytes themselves
-are always counted by summing the \texttt{stream\_dstream.alloced\_size}
-fields of every xattr that is stream-backed. Embedded xattrs
-contribute zero because their bytes live inline in the xattr
-payload, which is part of the inode body's storage and does not
-allocate separate extents.
+The decmpfs header's \texttt{compression\_type} byte tells the
+reader \emph{where} the compressed bytes live (xattr inline vs.\
+resource fork). The bytes themselves are always counted by summing
+the \texttt{stream\_dstream.alloced\_size} fields of every xattr
+that is stream-backed. Embedded xattrs contribute zero because
+their bytes live inline in the xattr payload, which is part of the
+inode body's storage and does not allocate separate extents.
 
-The disagreement between \texttt{linux-apfs-rw} (publishes
-uncompressed size / 512) and \texttt{apfs-fuse} (publishes zero)
-that EX-22 documented is now resolved against the macOS oracle:
-neither was right; the sum-of-stream-dstreams formula is the
-public on-disk rule that reproduces \texttt{st\_blocks * 512}
-exactly.
+The disagreement EX-22 documented between \texttt{linux-apfs-rw}
+(publishes uncompressed size / 512) and \texttt{apfs-fuse}
+(publishes zero) resolves against the macOS oracle: neither is
+right; the sum-of-stream-dstreams formula reproduces
+\texttt{st\_blocks * 512} exactly.
 
-A residual case the EX-26 fixture did not exercise is the
-\emph{incompressible-payload} shape, where ditto leaves
+The incompressible-payload shape, where ditto leaves
 \texttt{UF\_COMPRESSED} off and emits no \texttt{com.apple.decmpfs}
-xattr at all. Such files fall through to branch~1 (regular file
-with a primary dstream) and emit \texttt{Some(alloced\_size)}
-under the EX-22 baseline; on the EX-26 fixture the
-\texttt{compressed-random.bin} case did exactly this.
+xattr, falls through to branch~1 and emits
+\texttt{Some(alloced\_size)} under the EX-22 baseline. The EX-26
+\texttt{compressed-random.bin} case does exactly this.
 
 \subsection{Per-Inode Results}
 
@@ -407,6 +387,87 @@ the macOS oracle. The hard-linked file \texttt{hard.txt} does not
 appear as a separate row because it shares its inode with
 \texttt{ordinary.txt} and contributes through the same per-inode
 rule.
+
+\section{Real (Clone-Deduplicated) Size}
+\label{ssec:real-size}
+
+Allocated size charges each clone its full dstream. The volume's
+on-disk allocation is smaller: clones share extents, and a survey of
+a clone-heavy directory using allocated bytes overstates the disk
+usage. The \emph{real} size charges each inode its share of
+physically-allocated bytes, so a directory total equals the unique
+on-disk bytes in its subtree.
+
+\textbf{Oracle.} Per-inode \texttt{du -A} on macOS reports
+apparent size (it reads \texttt{st\_blocks * 512} via
+\texttt{lstat}, which does not dedup clones), so there is no
+public per-file macOS oracle. The on-disk authority is the
+extent-reference tree itself:
+$\sum \texttt{phys\_ext.length} \cdot \texttt{block\_size}$ is the
+ground truth for the volume's allocated bytes.
+
+\subsection{The Formula (EX-27)}
+
+Three APFS trees feed the computation: the FS-tree's \texttt{inode}
+records, the FS-tree's \texttt{file\_extent} records (keyed by
+\texttt{dstream\_id} --- clones share a dstream, not an inode), and
+the extent-reference tree's \texttt{phys\_ext} records (one per
+shared physical extent, carrying \texttt{(paddr\_first,
+length\_blocks, refcnt, owning\_obj\_id)}).
+
+\begin{enumerate}
+  \item For each \texttt{file\_extent}, split its physical byte
+    range against the overlapping \texttt{phys\_ext} records. A
+    \texttt{phys\_ext} record's \texttt{refcnt} is the count of
+    \texttt{file\_extent}s pointing at that range; sub-extents
+    not covered by any \texttt{phys\_ext} record have implicit
+    \texttt{refcnt = 1}.
+  \item Per dstream:
+    $\texttt{dstream\_dedup} = \sum_i
+    \texttt{sub\_extent}_i\texttt{.length} /
+    \texttt{sub\_extent}_i\texttt{.refcnt}$.
+  \item Per inode:
+    $\texttt{real\_size} = \texttt{dstream\_dedup} /
+    \texttt{dstream.refcnt}$,
+    where \texttt{dstream.refcnt} is the count of inodes sharing
+    this dstream (from the \texttt{j\_dstream\_id\_val\_t} record).
+\end{enumerate}
+
+\textbf{Invariants.} On the EX-27 fixture (three clone families:
+5-way, 3-way, and a partial-share rewrite):
+
+\begin{itemize}
+  \item $\sum_\text{dstreams}\texttt{dstream\_dedup} =
+    \sum_\text{phys\_ext}\texttt{length\_blocks} \cdot
+    \texttt{block\_size}$ exactly.
+  \item $\sum_\text{inodes}\texttt{real\_size}$ equals the same
+    total modulo integer-division rounding of $\leq
+    (\texttt{refcnt} - 1)$ bytes per clone-shared dstream
+    (2-byte residue on the EX-27 fixture across two shared
+    dstreams).
+\end{itemize}
+
+The second invariant is what makes the metric sum cleanly across
+the treemap: per-clone shares summed over a directory equal the
+unique on-disk bytes in that subtree.
+
+\subsection{Storage Class Of The Extent-Reference Tree}
+
+\textbf{Observation.} On detached \texttt{.dmg} images
+\texttt{hdiutil} creates, the extent-reference tree carries
+\texttt{OBJECT\_TYPE\_PHYSICAL} storage --- the OID is the root
+paddr directly. Live volumes can use virtual storage, in which case
+the volume OMAP returns the root paddr. The crate reads
+\texttt{extentref\_tree\_type\_raw} on the volume superblock and
+dispatches; a virtual tree with no OMAP mapping at the scan XID
+records a validation gap.
+
+\subsection{Fallback Behaviour}
+
+The POSIX-traversal fallback has no access to per-extent
+refcounts. It emits \texttt{real\_size = allocated\_size}: the
+fallback walker cannot dedup, and saying so is more honest than
+publishing the wrong number under the same column heading.
 
 \section{Directory Aggregates}
 
@@ -441,30 +502,25 @@ The aggregate rule is implemented in one place
 \texttt{setdefault(file\_id, logical\_size)} keyed by inode --- the
 policy is enforced by construction rather than by careful summing.
 
-Allocated-size aggregates use the same unique-inode rule, with the
-extra step that any contributing inode whose
-\texttt{allocated\_size} is \texttt{None} (sparse or decmpfs)
-propagates \texttt{None} up to the directory total.
+Allocated-size aggregates use the same unique-inode rule with a
+\texttt{None}-collapse step: any contributing inode whose
+\texttt{allocated\_size} is \texttt{None} (any case not covered by
+the EX-26 rules) propagates \texttt{None} up to the directory
+total. Real-size aggregates follow the same shape: per-inode
+shares sum across the directory, and a \texttt{None} contribution
+(from the fallback walker, or from a raw run where the
+extent-reference tree did not validate) collapses the total.
 
-\section{What This Chapter Does Not Promise}
+\section{Out Of Scope}
 
-Three metrics remain outside the scope this chapter defends. Each
-has its own oracle and its own corpus of edge cases; chapter~13
-records them as open questions for future work.
+Two metrics remain outside the chapter's defended scope; chapter~13
+records each as an open question.
 
 \begin{description}
-  \item[Exclusive size.] Bytes owned only by this inode, after
-    accounting for clones and snapshots. Requires the
-    extent-reference tree to be opened and joined against per-inode
-    extents.
-  \item[Shared size.] Bytes shared with at least one other inode or
-    snapshot.
-  \item[Snapshot-retained bytes.] Bytes that exist on disk solely
-    because a snapshot still references them.
+  \item[Exclusive size.] Bytes owned only by this inode after
+    accounting for clones \emph{and} snapshots. The chapter's Real
+    metric handles clones (extent-reference tree); the
+    snapshot-metadata tree must be joined for full exclusivity.
+  \item[Shared size.] Bytes shared with at least one other inode
+    or snapshot. The complement of exclusive.
 \end{description}
-
-A future version of this manual will have its own chapter on each.
-Until those chapters exist, the parser does not emit those columns.
-Logical size is what it knows; allocated size is what it knows for
-five-of-six case classes; sparse and decmpfs allocated sizes are
-what it refuses to claim.

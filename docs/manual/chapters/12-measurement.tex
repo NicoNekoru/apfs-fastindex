@@ -1,18 +1,14 @@
 \chapter{Measurement}
 
-The project's policy on performance is straightforward: measure
-before optimising; record what was measured so future claims can be
-compared against it; never report a number whose source class is
-ambiguous.
+Performance work follows one rule: measure before optimising;
+record what was measured; report only numbers whose source class
+is unambiguous.
 
-This chapter contains the reproducible measurements
-\texttt{apfs-fastindex-scan} has produced. There are four passes:
-the standing baseline (chapter~11's fallback first cut), a
-user-space micro-optimisation pass on the fallback walker, a
-parallel-walker pass that follows from the performance-lever map,
-and a structural-density pass against the post-FFI workload. Each
-pass changes one thing at a time and records the before/after
-numbers.
+This chapter records five passes: the standing baseline; a
+user-space micro-optimisation pass; the parallel-walker pass that
+followed from the performance-lever map; the structural-density
+pass against the post-FFI workload; and the production-shape
+baseline that anchors the next phase of work.
 
 \section{The Standing Baseline}
 
@@ -376,48 +372,60 @@ no longer in user-space allocation or hashing --- it is the walk
 itself, where the kernel is already doing the syscall work
 \texttt{getattrlistbulk} reduced.
 
+\section{The Production-Shape Baseline (EX-30)}
+
+The chapter's other measurements run the walker as a library
+inside a benchmark loop. The shipping product invokes
+\texttt{apfs-fastindex-scan} as a subprocess with
+\texttt{-{}-format msgpack}, optional \texttt{-{}-progress}, and
+the default thread count. Process spawn, msgpack serialisation,
+stderr handling, and the user's actual data shape contribute to
+production wall time but had never been measured end to end.
+EX-30 fixes the baseline against \texttt{/Users/kai}, the largest
+single subtree the project owner routinely scans, on the same
+Apple silicon host.
+
+\begin{center}
+\begin{tabular}{lrrr}
+\toprule
+iteration & wall (s) & entries & entries/s \\
+\midrule
+cold    &  9.87 & 1\,556\,792 & 157\,760 \\
+warm 1  & 10.89 & 1\,556\,800 & 142\,940 \\
+warm 2  &  9.62 & 1\,556\,800 & 161\,789 \\
+warm 3  &  9.59 & 1\,556\,800 & 162\,258 \\
+warm 4  &  9.62 & 1\,556\,800 & 161\,766 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{Warm median: 9.62~s, 162~k entries/s, 1.56~M entries,
+172~k directory aggregates, 392~MB msgpack payload.} The cold
+iteration on this host could not force a true cold cache
+(\texttt{sudo -n purge} requires cached credentials the harness
+did not have) and the EX-30 record notes the degeneracy.
+Prior EX-25 measurements imply the walker is CPU-bound on this
+workload, not I/O-bound; APFS-on-NVMe rarely shows a $>$1.5$\times$
+cold/warm gap once the FS-tree pages are in RAM.
+
+The number anchors the R4 cache target: the warm 9.62~s is the
+oracle a ``no-changes-since-last-scan'' rescan must outperform.
+The acceptance criteria for the next R4 phase are
+(1)~cold-miss does not regress more than 5\,\% on EX-30's
+baseline, (2)~cache hit on an unchanged tree completes in
+$\leq$1.0~s, (3)~partial-mutation runs interpolate linearly
+between (1) and (2).
+
 \section{What The Numbers Do Not Say}
 
-The table is a baseline; it is not a claim about anything beyond
-what it measures. Three categories are explicitly outside it:
-
 \begin{enumerate}
-  \item Raw-mode throughput on a real source. The project has not
-    measured raw mode on a representative live or detached
-    volume of meaningful size. Until it does, the comparison
-    ``raw vs fallback'' cannot be made.
-  \item Incremental scans. The current model is full reparse on
-    every run; the cache work of chapter~10 has not landed in
-    product. Repeat-scan numbers will only mean something after
-    a cache implementation passes its own oracle.
-  \item Encrypted or live-boot-disk surfaces. The parallel
-    walker has not been measured on encrypted APFS; per
-    SR-021's review of Petrenko (2020), the surviving
-    contention may behave differently there.
+  \item Raw-mode throughput on a representative source. EX-28's
+    \texttt{live\_raw\_blocked\_by\_kernel} verdict precludes
+    measuring raw mode against the host's live volumes; the
+    project has not built a detached APFS sample large enough to
+    saturate the raw path.
+  \item Encrypted-volume surfaces. The parallel walker has not
+    been measured on encrypted APFS; per SR-021's review of
+    Petrenko (2020), the surviving container contention may
+    behave differently there.
 \end{enumerate}
-
-\section{The Measurement Discipline}
-
-Three habits keep the numbers honest.
-
-\paragraph{Measure before optimising.} Each pass landed only
-after a microbench established what the lever was worth. The
-micro-optimisation pass was justified by an allocator-pressure
-profile; the parallel pass was justified by EX-25's scaling
-verdict; the attribute-mask refactor was killed by EX-24's
-falsification of the vnode-rage cost.
-
-\paragraph{Record the source class and the semantic mode with
-each number.} The tables above carry both. A throughput number
-without those is not interpretable: 300 thousand entries per
-second is either impressive or unimpressive depending on whether
-it ran cold or warm, against raw or fallback, single-threaded
-or parallel, against \texttt{/Applications} or \texttt{/}.
-
-\paragraph{Hold the baseline.} Any future performance claim has
-to compare against the tables above or against a row added with
-the same shape. A new optimisation that does not improve a
-baseline row is not yet evidence of an improvement; it is a
-hypothesis awaiting measurement. The discipline that keeps the
-tables honest is the same discipline that keeps the manual
-honest.

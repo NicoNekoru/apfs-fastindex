@@ -1,88 +1,75 @@
 \chapter*{Preface}
 \addcontentsline{toc}{chapter}{Preface}
 
-This manual is a record of what the \texttt{apfs-fastindex} project has
-learned about the Apple File System on disk and about the specific
-problem of enumerating a single volume quickly and correctly. It is not
-a guide to the repository. The repository is a working environment;
-this manual is the textbook the working environment built up.
+This manual records what the \texttt{apfs-fastindex} project has
+learned about the Apple File System on disk, and about the problem
+of enumerating a single APFS volume quickly and correctly. It is
+written for a careful engineer who wants to read APFS metadata
+directly. Familiarity with copy-on-write filesystems and B-trees is
+assumed; APFS-specific knowledge is not.
 
-The reader the manual is written for is a careful engineer who wants to
-read APFS metadata directly. We assume familiarity with copy-on-write
-filesystems and with B-trees, but not with APFS specifically. Every
-claim that is not common knowledge is sourced or labelled.
+\section*{Claim Labels}
 
-\section*{Claim Discipline}
-
-Three labels appear throughout the text.
+Three labels appear throughout the text and are never blurred.
 
 \begin{description}
   \item[Spec.] Backed by Apple's public reference\footnote{\emph{Apple
     File System Reference}, retrieved 2026-05-13,
     \url{https://developer.apple.com/support/downloads/Apple-File-System-Reference.pdf}.}
-    or by another public, durable specification.
-  \item[Observation.] Backed by a controlled experiment in this project
-    or by behavior that converges across multiple independent
-    open-source readers
+    or by another durable specification.
+  \item[Observation.] Backed by a controlled experiment in this
+    project, or by behaviour that converges across multiple
+    independent open-source readers
     (\texttt{linux-apfs-rw}, \texttt{apfs-fuse}, \texttt{dissect.apfs},
     \texttt{go-apfs}, \texttt{libfsapfs}, the Sleuth Kit's APFS
     module).
   \item[Hypothesis.] Plausible, useful for design, not yet proven.
-    Anything labelled Hypothesis does not justify a product claim.
+    A hypothesis does not justify product behaviour; the parser does
+    not emit a row that depends only on a hypothesis-class claim.
 \end{description}
 
-Where Spec and Observation disagree, Observation wins. Apple's reference
-is one citation among many; converged code is often more decisive about
-what bytes actually mean. Where the disagreement matters, the text says
-so and names the smallest probe that would settle it.
+Where Spec and Observation disagree, Observation wins. The reference
+describes intent; the running system writes what is on disk, and the
+two occasionally disagree.
 
-\section*{Oracle Plurality}
+\section*{Oracles}
 
-There is no single oracle for an APFS indexer. Each feature has its
-own:
+Each feature owns its own oracle.
 
-\begin{itemize}
-  \item Namespace: POSIX traversal of the same volume at the same
+\begin{description}
+  \item[Namespace.] POSIX traversal of the same volume at the same
     selected state.
-  \item Logical size: \texttt{st\_size} per inode (or symlink-target
-    byte length for symlinks).
-  \item FS-record body: cross-tool field equality between independent
+  \item[Logical size.] \texttt{st\_size} per inode; for symlinks,
+    the target byte length returned by \texttt{readlink}.
+  \item[Allocated size.] \texttt{st\_blocks * 512}.
+  \item[FS-record body.] Field-equality between independent
     decoders against the same raw container.
-  \item Allocated size: \texttt{st\_blocks * 512}, for cases that have
-    been explicitly validated.
-  \item Incremental correctness: a fresh full reparse of the same
-    selected state.
-  \item Boot-root semantics: the user-visible macOS namespace, and only
-    when the product mode explicitly targets it.
-\end{itemize}
+  \item[Real (clone-deduplicated) size.] $\sum
+    \texttt{phys\_ext.length} \cdot \texttt{block\_size}$ from
+    the on-disk extent-reference tree (no public per-file macOS
+    oracle exists; \texttt{du -A} reports apparent size and does
+    not dedup clones).
+  \item[Incremental correctness.] A fresh full reparse of the
+    same selected state.
+\end{description}
 
-Every result in this manual names the oracle that verified it.
+Every result names the oracle that verified it.
 
-\section*{Fail Closed By Default}
+\section*{Fail-Closed Discipline}
 
-The parser refuses to guess. Outside the tested allowlist, it stops
-with a typed error and the caller is responsible for choosing a
-fallback. Plausible but unproven is treated as "do not emit." The
-discipline is not paranoia: it is the cheapest way to keep silently
-wrong rows out of aggregates and out of the user interface.
+Outside the tested allowlist the parser stops with a typed error
+and the caller picks a fallback. Plausible-but-unproven is treated
+as ``do not emit.'' The cost of a silently wrong row is unbounded:
+it propagates into directory aggregates, into the treemap, and into
+decisions the user takes from the treemap. The cost of refusing a
+row is bounded: the fallback path produces a correct answer through
+supported APIs.
 
-\section*{What Is And Is Not Here}
+\section*{Scope}
 
-The manual presents findings about APFS as a textbook would: each
-chapter takes one face of the system, states what is known, gives the
-evidence, and notes what remains open. Where the project's
-implementation makes a non-obvious choice, the choice is explained from
-first principles rather than from code organisation.
-
-What is not here: a tour of the repository, a list of files, a list of
-commits, a list of experiments treated as work units rather than as
-evidence. Those live in the repository itself; the manual cites them
-only where citation supports a claim.
-
-\section*{A Note On The Voice}
-
-We have tried to write as though the reader will need to defend each
-claim to a sceptic. That style is at odds with the way reverse
-engineering is usually written up, but the project has been disciplined
-about evidence, and the manual should reflect that. A sentence that
-cannot be defended should not have been written.
+Each chapter takes one face of APFS, states what is known, presents
+the evidence, and notes what remains open. Where the implementation
+makes a non-obvious choice the choice is explained from first
+principles. What is not here: a tour of the repository, a list of
+files, a chronology of commits. Those live in the repository; the
+manual cites them only when citation supports a claim.

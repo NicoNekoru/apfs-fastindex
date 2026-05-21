@@ -1,16 +1,15 @@
 \chapter{Support, Readability, and the Fallback}
 
-The chapter develops a vocabulary the rest of the manual has used
-implicitly: what does it mean to "support" a source. The vocabulary
-matters because every product decision sits on top of it. A source
-that is supported is one the product makes a correctness claim on; a
-source that is merely readable is not. The two are easy to confuse.
+A source the product makes a correctness claim on is
+\emph{supported}. A source that can merely be opened and decoded
+is \emph{readable}. This chapter develops the vocabulary, the
+current allowlist, and the fallback path the product runs when the
+boundary refuses a source.
 
-\section{Four Properties, In Order}
+\section{Four Properties}
 
-\textbf{Observation.} Four properties characterise a source's
-relationship to the parser. The order matters; each builds on the
-last.
+Four properties characterise a source's relationship to the parser.
+The order matters; each builds on the last.
 
 \begin{description}
   \item[Readable.] Raw bytes can be opened and sampled. A device file
@@ -26,26 +25,19 @@ last.
     correct; the source class belongs in production.
 \end{description}
 
-The first three are technical. The fourth is editorial: it is the
+The first three are technical. The fourth is editorial: the
 project's decision about which sources are stable enough to make a
-correctness claim on. A source can be readable and parsable and
-validatable in one moment and not be supported because the moment is
-not durable.
+correctness claim on. A source can be readable, parsable, and
+validatable in one moment and still not be supported because the
+moment is not durable.
 
-\section{Readable Is Not Supported}
-
-The common confusion is between readability and support. A mounted
-live volume is readable. It may, on a still moment, be parsable. It
-may, against a momentary POSIX snapshot, even be validatable. It is
-not supported, because the validation cannot be stable: the next
-moment moves the visible checkpoint, the next POSIX snapshot
-disagrees with the parser snapshot, and the user has no way to tell
-which row is from which moment.
-
-The right rule: support a source class only when the validation
-recipe is reproducible. If the validation works once and then is
-not reproducible because the source state has moved, the source
-class is not supported even though one validation passed.
+A mounted live volume is readable. It may be parsable on a still
+moment. It may be validatable against a momentary POSIX snapshot.
+It is not supported, because the validation is not reproducible:
+the next moment moves the visible checkpoint, the next POSIX
+snapshot disagrees with the parser snapshot, and no row can be
+attributed to one moment. The general rule: support a source class
+only when the validation recipe is reproducible.
 
 \section{The Current Allowlist}
 
@@ -71,20 +63,19 @@ flight.
 The allowlist will grow only after a paired oracle and a new probe
 clear the corresponding entry in the support matrix.
 
-\section{EX-28 Live-Volume Raw Mode (Hypothesis C: Blocked by the Kernel)}
+\section{Live-Volume Raw Mode (EX-28)}
 \label{sec:ex28-live-raw}
 
-A live mounted volume's \texttt{/dev/diskNsM} device node is not on
-the allowlist above. It cannot be: a live mounted volume is
-exactly the case the source-gate refuses, because the volume
-metadata advances during the scan window and SR-014 checkpoint
-selection has no way to pin the visible state.
+A live mounted volume's \texttt{/dev/diskNsM} device node is not
+on the allowlist: a live mounted volume's metadata advances during
+the scan window and SR-014 checkpoint selection has no way to pin
+the visible state.
 
-EX-28 asks the narrower question: \emph{if a user with root
-privileges hands the existing raw parser a \texttt{/dev/diskNsM}
-of a live volume, does the parser produce a self-consistent
-shape, and does that shape agree with what the fallback walker
-emits from the same mount point in the same scan window?}
+EX-28 asks the narrower question: with root privileges, does the
+existing raw parser produce a self-consistent shape on
+\texttt{/dev/diskNsM}, and does that shape agree with what the
+fallback walker emits from the same mount point in the same scan
+window?
 
 The harness lands as a Rust integration test in
 \texttt{crates/apfs-fastindex/tests/ex28\_live\_parity.rs},
@@ -114,100 +105,86 @@ which returns a structured \texttt{ShapeDiff} with
 \texttt{mismatches}. It is exposed as a public crate surface so
 any future tooling can use it.
 
-\textbf{Observation (2026-05-20).} The first privileged run on
-the project owner's Apple silicon host returned the harshest of
-the planned fallbacks: macOS refused to even open
-\texttt{/dev/disk3s1} for raw reads, returning \texttt{EPERM}
-(errno 1, ``Operation not permitted'') on the first
-\texttt{read(2)} of the device's block zero, despite the
-process running as root. The harness classifies this as
-\texttt{LiveScanOutcome::BlockedByKernel} and records the
+\textbf{Observation (2026-05-20).} On the project owner's Apple
+silicon host, macOS refused to open \texttt{/dev/disk3s1} for raw
+reads, returning \texttt{EPERM} on the first \texttt{read(2)} of
+block zero even under \texttt{sudo}. The harness classifies this
+as \texttt{LiveScanOutcome::BlockedByKernel} and records the
 \texttt{live\_raw\_blocked\_by\_kernel} verdict. The kernel's
 storage-system security policy refuses raw block access to the
-live boot data partition independently of POSIX file
-permissions; SIP and the sealed-system-volume seal both
-contribute. Neither the successive-scan stability nor the
-raw-vs-fallback parity assertions could be evaluated because the
-raw backend never opened.
+live boot data partition independently of POSIX permissions; SIP
+and the sealed-system-volume seal both contribute. Neither the
+successive-scan stability nor the raw-vs-fallback parity
+assertions could be evaluated because the raw backend never
+opened.
 
-\textbf{Product implication.} The "Scan as administrator…" menu
-item the original EX-28 plan anticipated does not graduate to
-raw mode on a stock Apple silicon macOS host. The
-privileged-subprocess shape still serves a purpose --- unlocking
-TCC-restricted user-data paths the fallback walker hits
-\texttt{EACCES} on --- but it stays on the fallback walker even
-under root. The raw fast path is unchanged in its original scope:
-detached \texttt{.dmg} images, caller-pinned raw devices on a
-quiesced volume. EX-28's contribution to the codebase is the
-reusable shape-parity comparator
-(\texttt{apfs\_fastindex::parity}) and the env-gated integration
-harness that future hosts (or future macOS versions with
-different security policies) can rerun without code changes.
+\textbf{Product implication.} The ``Scan as Administrator''
+shell action does not graduate to raw mode on a stock Apple
+silicon macOS host. The privileged-subprocess shape still serves
+a purpose --- unlocking TCC-restricted user-data paths the
+fallback walker hits \texttt{EACCES} on --- but it stays on the
+fallback walker even under root. The raw fast path is unchanged
+in its original scope (detached \texttt{.dmg} images and
+caller-pinned raw devices on a quiesced volume). EX-28's
+contribution to the codebase is the reusable shape-parity
+comparator (\texttt{apfs\_fastindex::parity}) and the env-gated
+integration harness, both rerunnable on future hosts or future
+macOS versions without code changes.
 
-The live-disk row of the support matrix therefore reads:
-\emph{not supported on stock macOS; raw read returns
-\texttt{EPERM} under \texttt{sudo}; the fallback walker remains
-authoritative for live volumes, including the
+The live-disk row of the support matrix: \emph{not supported on
+stock macOS; raw read returns \texttt{EPERM} under \texttt{sudo};
+the fallback walker remains authoritative, including the
 privileged-subprocess invocation that unlocks TCC-restricted
 user-data paths.}
 
-\section{EX-29 Local-Snapshot Enumeration (No User Snapshots
-on This Host)}
+\section{Local-Snapshot Enumeration (EX-29)}
 \label{sec:ex29-snapshots}
 
-The product surfaces local snapshots as a row in the status bar
-because their bytes are part of \texttt{df}'s ``used'' total and
-the volume's Finder-reported capacity, but the scanner walks
-only the live volume's fs-tree. Without a snapshot row, those
-bytes look ``missing'' on a user's mental model.
+The product surfaces local snapshots as a status-bar row because
+their bytes are part of \texttt{df}'s ``used'' total and the
+volume's Finder-reported capacity, but the scanner walks only the
+live volume's fs-tree; without a snapshot row, those bytes look
+missing.
 
-EX-29's deliverable is the enumeration: a count of user-visible
-local snapshots, with names. Reclaimable bytes are explicitly
-out of scope on stock Apple silicon: there is no public
-read-only oracle for per-snapshot reclaimable bytes
-(\texttt{tmutil thinlocalsnapshots} reports the number, but it
-deletes the snapshot in the process), and EX-28's verdict
-(\texttt{live\_raw\_blocked\_by\_kernel}) ruled out the raw
-extent-set diff path.
+EX-29's deliverable is enumeration: a count of user-visible local
+snapshots, with names. Reclaimable bytes are out of scope on stock
+Apple silicon. There is no public read-only oracle for per-snapshot
+reclaimable bytes (\texttt{tmutil thinlocalsnapshots} reports the
+number, but it deletes the snapshot in the process), and EX-28's
+verdict rules out the raw-extent-set-diff path.
 
-Enumeration is unprivileged. The crate's
-\texttt{snapshots} module calls \texttt{tmutil
-listlocalsnapshots <mount>} and \texttt{diskutil apfs
-listSnapshots <mount>}, parses each output, and classifies the
-result. SR-020's sealed-system filter excludes snapshots whose
-name matches \texttt{com.apple.os.update-*} (the read-only
-system volume's boot snapshot, which the user can't delete and
-whose bytes aren't user-visible).
+Enumeration is unprivileged. The \texttt{snapshots} module shells
+out to \texttt{tmutil listlocalsnapshots <mount>} and
+\texttt{diskutil apfs listSnapshots <mount>}, parses each output,
+and classifies. SR-020's sealed-system filter excludes
+\texttt{com.apple.os.update-*} (the boot snapshot the user cannot
+delete).
 
-\textbf{Observation (2026-05-20).} The project owner's host
-has zero user-visible TM local snapshots and one sealed-system
-OS-update snapshot on \texttt{disk3s1s1}. The classifier
-returned \texttt{NoUserSnapshots\{sealed\_system\_excluded\_count
-= 1\}}. EX-23 found the same shape in 2026-05-16; on a
-single-user development host without Time Machine configured
-this is the expected steady state.
+\textbf{Observation (2026-05-20).} The project owner's host has
+zero user-visible TM local snapshots and one sealed-system
+OS-update snapshot on \texttt{disk3s1s1}. The classifier returned
+\texttt{NoUserSnapshots\{sealed\_system\_excluded\_count = 1\}}.
+EX-23 found the same shape five days earlier; on a single-user
+development host without Time Machine configured this is the
+expected steady state.
 
 The integration harness in
-\texttt{crates/apfs-fastindex/tests/ex29\_snapshot\_enumeration.rs}
-mirrors EX-28's pattern. An unconditional unprivileged test runs
-the classifier; a gated test exercises a raw extent diff between
-a mounted snapshot's device node and the live volume, using the
-existing \texttt{parity::compare\_namespace\_shapes} comparator.
-The gated test reuses EX-28's \texttt{LiveScanOutcome}
-classifier, so an \texttt{EPERM} on the snapshot device is
-recorded as ``EX-28 Hypothesis C reproduces on the snapshot
-device'' rather than failing the test.
+\texttt{tests/ex29\_snapshot\_enumeration.rs} mirrors EX-28's
+pattern: an unconditional unprivileged test runs the classifier;
+a gated test exercises a raw extent diff between a mounted
+snapshot's device node and the live volume via
+\texttt{parity::compare\_namespace\_shapes}. The gated test reuses
+EX-28's \texttt{LiveScanOutcome} classifier, so an \texttt{EPERM}
+on the snapshot device is recorded rather than failing the test.
 
-The live-snapshot row of the support matrix therefore reads:
-\emph{enumeration validated; reclaimable bytes unclaimed (no
-read-only oracle; raw extent diff blocked by EX-28 Hypothesis C
-on Apple silicon under SIP).}
+Support matrix row: \emph{enumeration validated; reclaimable bytes
+unclaimed.}
 
 \section{Fail-Closed Triggers}
 
-A source that does not satisfy the allowlist must fail closed before
-emitting rows. The categorical triggers, with the chapter that
-develops each:
+A source outside the allowlist fails closed before any row is
+emitted. The categorical triggers, with the chapter that develops
+each:
 
 \begin{description}
   \item Ambiguous or malformed checkpoint state (chapter~3).
@@ -226,14 +203,13 @@ develops each:
   \item No validated corpus for the source class.
 \end{description}
 
-Each trigger is a typed error with a substring naming the rule. The
-caller dispatches on the error rather than retrying.
+Each trigger is a typed error with a substring naming the rule.
+The caller dispatches on the error rather than retrying.
 
 \section{The Fallback}
 
-When the parser refuses a source, the product is not stuck. The
-fallback path emits the same shape of output through supported
-operating-system APIs.
+When the parser refuses a source, the fallback path emits the
+same row shape through supported operating-system APIs.
 
 \textbf{Observation.} A POSIX-traversal fallback in both Python
 (\texttt{fallback\_traversal.py}) and Rust (\texttt{fallback.rs})
@@ -251,22 +227,15 @@ precedence rule at the trivial step: \texttt{st\_size} for regular
 files, \texttt{readlink} byte length for symlinks. Both apply the
 unique-inode aggregate policy from chapter~8.
 
-Two consequences follow.
-
-\paragraph{The contract is mode-independent.} The product emits the
-same shape of output regardless of which backend produced it. The
-caller does not have to know whether the row came from a raw FS-tree
-walk or a POSIX traversal; the field set and the semantic mode are
+The row contract is mode-independent: the caller does not need
+to know which backend produced the row. The field set is
 identical.
 
-\paragraph{The slow path is not slow.} Chapter~12 shows that the
-parallel fallback (four workers by default) sustains roughly 313
-thousand entries per second on warm directory trees on Apple
-silicon --- 2.47$\times$ the post-micro-optimisation single-threaded
-throughput and 1.82$\times$ the pre-perf baseline. On a cold
-whole-machine scan the bottleneck is the disk, not the parser. The
-fallback is fast enough to be the default for sources outside the
-raw allowlist, not a degraded mode.
+The fallback is not slow. Chapter~12 records 313~k entries per
+second on warm directory trees with four workers
+(2.47$\times$ the post-micro-optimisation single-threaded
+throughput, 1.82$\times$ the pre-perf baseline). On a cold
+whole-machine scan the disk is the bottleneck, not the parser.
 
 \section{Resilience In The Fallback}
 
@@ -329,35 +298,15 @@ normalises.
 Live progress events flow through a dedicated sampling thread
 inside the parallel scheduler at a 250~ms cadence (matching the
 serial path), so the CLI's \texttt{-{}-progress} stream and any
-user-space consumer of it can tick smoothly even on a
-whole-machine scan that is otherwise silent for tens of seconds.
-The in-process FFI consumed by the native shell of chapter~13
-exposes the same stream through
-\texttt{apfs\_scan\_directory\_with\_progress}, which takes a
-\texttt{(*const c\_void, ApfsProgressEvent*)} callback the
-sampling thread invokes from the library side; the SwiftUI shell
-hands in a closure that updates an \texttt{@Published}
-\texttt{ProgressSnapshot} on the main actor and the toolbar's
-determinate progress bar follows it. The serial-vs-parallel
-cadence and event payload are identical across the CLI and the
-FFI; one source of truth, two delivery surfaces.
-
-\begin{figure}[h]
-\centering
-\includegraphics[width=\linewidth]{figures/app-progress.png}
-\caption{A whole-machine \texttt{/} scan mid-flight in the
-pre-native build that consumed \texttt{-{}-progress} stderr
-events. The stopwatch and entry counter come from the parallel
-walker's progress thread; 231 paths have been recorded as
-skipped at this point in the walk (sandboxed application data,
-sealed-system locations). The Cancel control terminates the
-worker pool cleanly. The same event stream now also flows into
-the native shell through
-\texttt{apfs\_scan\_directory\_with\_progress}, which carries
-the cumulative logical-bytes count as well so the SwiftUI
-shell's progress bar is determinate rather than spin-wait
-indeterminate.}
-\end{figure}
+user-space consumer of it can tick smoothly on a whole-machine
+scan that is otherwise silent for tens of seconds. The in-process
+FFI consumed by the native shell (chapter~13) exposes the same
+stream through \texttt{apfs\_scan\_directory\_with\_progress},
+whose callback the sampling thread invokes from the library side.
+The SwiftUI shell hands in a closure that updates an
+\texttt{@Published} \texttt{ProgressSnapshot} on the main actor;
+the determinate progress island follows it. One source of truth,
+two delivery surfaces.
 
 \section{Firmlink Overlay Dedup}
 
@@ -407,25 +356,14 @@ automatically based on the source path's shape.
     \texttt{--mode fallback}, or \texttt{--mode auto}.
 \end{itemize}
 
-The auto-dispatch is what makes the support boundary usable as a
-product surface. The user does not have to remember which sources
-are in the allowlist; the binary handles the dispatch and tells the
-caller, through the \texttt{correctness\_claim} and
-\texttt{not\_claimed} fields, which mode actually ran.
+Auto-dispatch makes the support boundary usable as a product
+surface. The binary handles the dispatch and reports through
+\texttt{correctness\_claim} and \texttt{not\_claimed} which mode
+ran.
 
 \section{Why The Boundary Is Permanent}
 
-The boundary between raw and fallback is not provisional. As the
-allowlist grows (chapter~13 tracks the open candidates), each new
-source class gets its own line in the support matrix: its own
-allowlist row, its own oracle, its own probe. The boundary moves
-only when there is evidence to move it.
-
-This means the manual will keep growing chapters of this shape:
-``\emph{here is the source class, here is the oracle, here is the
-probe, here is the result, here is the support claim}.'' The work
-finishes only when every source class an APFS reader is willing to
-claim has its own line in the matrix.
-
-The unsexy form of the work is the price of having a fast indexer
-that is also correct.
+As the allowlist grows (chapter~13 tracks the open candidates),
+each new source class gets its own line in the support matrix:
+own allowlist row, own oracle, own probe. The boundary moves only
+when there is evidence to move it.

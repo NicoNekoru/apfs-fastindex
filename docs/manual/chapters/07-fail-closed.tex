@@ -1,19 +1,12 @@
 \chapter{The Fail-Closed Boundary}
 
-A parser that emits rows for cases it does not understand is worse than
-a parser that emits nothing. The user can react to a missing row by
-looking elsewhere; a silently wrong row propagates into aggregates, into
-treemaps, and into actions the user takes on the basis of those
-aggregates. The cost of being silently wrong is unbounded. The cost of
-hard-stopping with a typed reason is bounded: the caller chooses a
-fallback, and no false output reaches the user.
+The parser refuses to emit a row it does not understand. The cost
+of a silently wrong row is unbounded (it propagates into
+aggregates, treemaps, and user actions); the cost of hard-stopping
+with a typed reason is bounded (the caller dispatches to the
+fallback). The discipline is concentrated in two chokepoints.
 
-Fail-closed is therefore not an aesthetic preference. It is the only
-discipline that bounds the cost of incomplete understanding.
-
-\section{Where The Boundary Sits}
-
-The boundary is concentrated in two single chokepoints:
+\section{The Two Chokepoints}
 
 \begin{description}
   \item[Object headers.] One function
@@ -28,13 +21,10 @@ The boundary is concentrated in two single chokepoints:
     before any emission path trusts the decoded values.
 \end{description}
 
-There is no second path through either chokepoint. A block that fails
-header validation never reaches a body decoder; a record that fails
-body validation never reaches the namespace builder. The discipline is
-maintained by the topology of the calls, not by every caller
-remembering to validate.
-
-A representative hard stop, from the body decoder:
+No second path bypasses either chokepoint: a block that fails
+header validation never reaches a body decoder; a record that
+fails body validation never reaches the namespace builder. A
+representative hard stop, from the body decoder:
 
 \begin{minted}{rust}
 if blob_header.xf_used_data as usize != padded_total {
@@ -45,9 +35,9 @@ if blob_header.xf_used_data as usize != padded_total {
 }
 \end{minted}
 
-The error carries the rule that failed, the observed value, and the
-expected value. The caller dispatches on the variant
-(\texttt{InvalidObject}), and the substring is preserved for
+The error carries the rule that failed, the observed value, and
+the expected value. The caller dispatches on the variant
+(\texttt{InvalidObject}); the substring is preserved for
 diagnostic display.
 
 \section{The Per-Record Catalogue}
@@ -138,13 +128,9 @@ tracks their status.
 These cases will close as the project lands EX-22 and the future
 cross-record consistency probe.
 
-\section{Why The Boundary Is Tighter Than It Looks}
+\section{Why The Catalogue Is Worth Its Weight}
 
-The fail-closed catalogue may seem heavy for a parser that, in
-ordinary operation, encounters none of these cases. The point of the
-catalogue is what happens in the not-ordinary case.
-
-Three concrete situations exercise the boundary in practice:
+The catalogue exercises in three not-ordinary cases:
 
 \begin{description}
   \item[Format drift.] APFS reserves bits and types over time. A
@@ -164,18 +150,10 @@ Three concrete situations exercise the boundary in practice:
     catalogue is also a regression suite.
 \end{description}
 
-The catalogue is therefore proportional to the cost it prevents, not
-to the frequency with which it is exercised.
+\section{Object-Header Storage Classes}
 
-\section{The Object-Header Side}
-
-The header-validation chokepoint is smaller but no less load-bearing.
-A block that does not validate is never decoded; a block that
-validates under the wrong storage class is also rejected, because
 \texttt{validate\_object\_block} takes the expected storage as a
-parameter.
-
-The storage classes the parser uses:
+parameter; a block validated under the wrong class is rejected.
 
 \begin{description}
   \item[\texttt{Physical}.] The object's \texttt{o\_oid} equals its
@@ -193,23 +171,12 @@ The storage classes the parser uses:
     mapping, never an ephemeral storage flag.
 \end{description}
 
-Mixing classes is a structural mistake. Chapter~3 records the empirical
-correction that checkpoint-map \emph{blocks} are themselves physical,
-not ephemeral, despite naming objects that are ephemeral; chapter~5
-records that FS-tree roots are virtual despite living at a known
-paddr that the volume OMAP returns. The parser keeps both rules
-isolated to their call sites.
+Mixing classes is a structural mistake. Chapter~3 records that
+checkpoint-map blocks are themselves physical despite naming
+ephemeral objects; chapter~5 records that FS-tree roots are virtual
+despite living at a known paddr. Both rules are isolated to their
+call sites.
 
-\section{The Boundary And The Fallback}
-
-The fail-closed boundary is the upstream half of the support contract;
-the fallback path (chapter~11) is the downstream half. When the
-boundary refuses a source, the caller is not stuck: it dispatches to
-the POSIX-traversal fallback, which produces the same shape of output
-through supported APIs. The user sees an answer; the wrong answer is
-not produced.
-
-This is the design pattern the rest of the manual presupposes: known
-behaviour is enforced as a hard rule, unknown behaviour is escalated
-to a path that asks the operating system rather than guessing on its
-behalf.
+When the boundary refuses a source, the caller dispatches to the
+POSIX-traversal fallback (chapter~11), which produces the same row
+shape through supported APIs.

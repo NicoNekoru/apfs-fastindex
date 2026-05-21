@@ -1,94 +1,259 @@
-\chapter{Open Questions}
+\chapter{Engineering Surface and Open Questions}
 
-The previous chapters develop the manual's defended scope: one
-volume, one pinned state, namespace plus logical size plus the
-allocated-size column where it has an oracle, fallback for
-everything else. This chapter is everything that sits on the
-boundary --- the work that has been done since the foundation
-settled, and the work that has been scoped but not yet validated.
-A reader who wants to understand the surface of unknowns around an
-APFS reader, rather than the well-explored interior, reads this
-chapter.
+The previous chapters develop the manual's defended interior: one
+volume, one pinned state, namespace, logical, allocated, and
+clone-deduplicated size, fallback for sources outside the
+allowlist. This chapter records the engineering surface around that
+interior and the questions that remain open.
 
-Each section below names one open question, what is known about
-it, what is not, and the smallest probe that would close it.
+\section{The Native Shell}
 
-\section{Allocated Size}
+The product surface is a SwiftUI app whose visualisation is laid
+out by Rust and drawn by Core Graphics. The scanner is not a
+subprocess; the Rust crate is linked into the app process as a
+static library, and every call from Swift into the indexer crosses
+a \texttt{cbindgen}-generated C ABI. There is no JSON
+serialisation, no temp file, no WebKit, no JavaScript.
 
-The most visible WizTree-equivalent metric, and the one whose
-on-disk story is least settled.
+\subsection{The FFI Boundary}
 
-\textbf{The question.} For each inode, what number of bytes does
-APFS allocate to its content on disk?
+The crate's C ABI is a small surface of opaque-handle
+constructors, accessors, and destructors:
 
-\textbf{The result.} Every case class the EX-26 corpus exercises
-emits a per-inode \texttt{allocated\_size} that matches macOS's
-\texttt{st\_blocks * 512} oracle exactly. Sparse files emit
-\texttt{alloced\_size - sparse\_bytes} (EX-26 Hypothesis~A,
-validated across four sparse shapes after EX-22 first observed the
-identity on one). Decmpfs-compressed files emit the sum of any
-stream-backed xattr dstreams' allocated bytes (EX-26 Hypothesis~F,
-validated across both ditto-produced shapes: xattr-stream-stored
-and resource-fork-stored). Chapter~8 gives the precedence rule,
-the case-class table, and the per-row evidence.
+\begin{description}
+  \item[\texttt{apfs\_scan\_directory(\_with\_progress)}]
+    returns an \texttt{ApfsScan*}. The handle owns the
+    \texttt{FallbackScanOutput} (entries, walk-skips,
+    \texttt{correctness\_claim}, source descriptor), the indexed
+    tree built from it, and a lazy path-string cache.
+  \item[\texttt{apfs\_layout\_new(scan, subtree, depth, metric,
+    dims)}] returns an \texttt{ApfsLayout*} whose flat
+    \texttt{ApfsCell} array Swift reads as
+    \texttt{UnsafeBufferPointer<ApfsCell>}: no per-cell call into
+    Rust during paint, no array copy across the language boundary.
+  \item[\texttt{apfs\_scan\_ext\_summary\_new}] returns an
+    \texttt{ApfsExtSummary*} with the per-extension aggregate the
+    right-hand panel reads.
+  \item[\texttt{apfs\_scan\_search\_names}] returns the
+    node-indices of substring matches sorted by the active metric.
+\end{description}
 
-\textbf{What is still open.} Exclusive bytes (bytes only this inode
-owns, after accounting for clones and snapshots) and shared bytes
-(bytes shared across inodes or snapshots) require the
-extent-reference tree to be opened and joined against per-inode
-extents. Neither has been validated end to end against a public
-oracle; both are separate questions with their own corpora. EX-27
-is the planned probe for clone-deduplicated allocated bytes via the
-extent-reference tree.
+Bulk data crosses the boundary as \texttt{(*const Item, usize)}
+pairs Swift consumes via \texttt{UnsafeBufferPointer<Item>} ---
+no copy, no per-element call into Rust. Per-handle
+\texttt{\_free} functions release every allocation \texttt{\_new}
+produced. The header regenerates from \texttt{src/ffi.rs} on every
+change via \texttt{cbindgen}, so the C declarations cannot drift
+from the Rust \texttt{\#[no\_mangle] extern "C"} surface.
 
-\section{Snapshot-Assisted Scanning}
+\subsection{Division Of Labour}
 
-The mechanism by which a fast indexer can scan a live machine
-honestly. Entitlement-blocked rather than technically blocked: the
-walker is wired, but the validation oracle requires privileges the
-project's reproducer host does not have.
+\textbf{Rust owns:} the fallback walker, the firmlink dedup, the
+indexed tree (one \texttt{TreeNode} per directory and per leaf,
+parent and children indices, pre-computed
+\texttt{value\_logical} / \texttt{value\_allocated} /
+\texttt{value\_real} / \texttt{item\_count} aggregates), the
+squarified treemap layout (a direct port of
+\texttt{d3-hierarchy}'s \texttt{treemapSquarify}), the
+$64 \times 64$ hit-grid, the per-extension aggregator behind the
+right-hand panel, the substring-search index, and the colour
+palette that decides a leaf's \texttt{fill\_rgb}.
 
-\textbf{The question.} If the indexer takes a local APFS snapshot
-of a live volume, mounts it read-only, and walks it through the
-existing fallback, does the result match what the same walker
-would have emitted on the live volume at the snapshot moment?
+\textbf{Swift owns:} the SwiftUI shell (toolbar, breadcrumb,
+folder-tree side panel, ext-list side panel, search field,
+status bar, depth stepper, metric picker), the AppKit treemap
+view (one \texttt{NSView} whose \texttt{draw(\_:)} walks the cell
+array grouped by colour to amortise \texttt{setFillColor}
+calls), the right-click menu plumbing onto \texttt{NSWorkspace}
+(\texttt{Open}, \texttt{Reveal in Finder}, \texttt{Copy Path},
+\texttt{Move to Trash}), the sticky admin-mode flag and
+privileged-subprocess invocation, the snapshot enumeration
+status pill, and the Sparkle updater.
 
-\textbf{What landed.} A source review of the snapshot API surface
-(SR-020) made the privilege boundary explicit:
+\subsection{Treemap Layout}
+
+The layout is the standard squarified treemap of Bruls, Huijzen,
+and van Wijk (2000), in the variant \texttt{d3-hierarchy}
+implements. Children are sorted descending by the active metric;
+greedy row-packing on the shorter side of the current rect adds
+children to a row until the worst-case aspect ratio would worsen,
+then lays the row out by dice (horizontal) or slice (vertical)
+and recurses on the remaining strip. The Rust port preserves the
+d3 expressions for $\alpha$ and $\beta$; for the same input
+\texttt{(node\_index, value)} array and viewport the two
+implementations produce the same rectangles.
+
+A $64 \times 64$ axis-aligned spatial hash sits over the cell
+array. Each cell is inserted into every bucket it overlaps; each
+bucket is sorted depth-descending so the first containing match a
+hit-test walk sees is the deepest cell at that point. Mouse-move
+becomes a few-cell comparison rather than a walk through the
+hundred-thousand-cell layout for a \texttt{/}-scan view.
+
+When the metric picker is on Allocated (or Real) and a leaf's
+\texttt{value\_allocated} (or \texttt{value\_real}) is
+\texttt{None}, the cell's \texttt{fill\_rgb} is the unclaimed
+grey rather than a colour from the extension palette. The
+fail-closed register surfaces on the picture.
+
+\subsection{Substring Search (EX-33)}
+\label{ssec:search-perf}
+
+The shell ships a substring search over already-enumerated names.
+The C ABI exposes \texttt{apfs\_scan\_search\_names(scan,
+needle\_ptr, needle\_len, limit)}, which returns a sorted slice
+of matching node indices. The implementation is the result of a
+two-round perf study.
+
+\textbf{Round 1 (pre-EX-33).} The naive
+\texttt{Vec<String>}-of-pre-lowercased-names plus
+\texttt{str::contains} brought per-keystroke latency down from
+multi-second to roughly 30--55~ms on the 1.56~M-entry
+\texttt{/Users/kai} scan --- a 100$\times$ win, still 10--20$\times$
+off the memory-bandwidth floor for 50~MB of name bytes.
+
+\textbf{Round 2 (EX-33).} Two compounding costs remained: the
+\texttt{Vec<String>} layout put each name behind its own heap
+allocation (1.5~M random-pointer reads are 10--20$\times$ slower
+than sequential bytes); and \texttt{str::contains} built its
+searcher state once per call (1.5~M searcher constructions for
+the same needle). The fix replaced the storage with a flat
+\texttt{Vec<u8>} plus a cumulative \texttt{Vec<u32>} offset
+table, and built one \texttt{memchr::memmem::Finder} per search
+reused across every haystack.
+
+\begin{center}
+\begin{tabular}{lrrr}
+\toprule
+query                              & before & after & speedup \\
+\midrule
+\texttt{".txt"}                    & 32.5~ms & 10.1~ms & 3.21$\times$ \\
+\texttt{"Library"}                 & 41.7~ms & 11.8~ms & 3.53$\times$ \\
+\texttt{"node\_modules"}           & 53.2~ms &  9.5~ms & 5.59$\times$ \\
+\texttt{"com.apple.developer"}     & 34.6~ms &  5.3~ms & 6.53$\times$ \\
+zero-match (memory-bandwidth floor)& 27.5~ms &  2.3~ms & 12.0$\times$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Typical 4--12-character queries now median 9--12~ms on the 1.5~M
+entry tree --- comfortably inside the ``feels live'' threshold
+(100~ms) and within range of 60-Hz frame-rate (16~ms) for
+hot-cache repeats. The shorter-needle high-match cases see modest
+gains because their cost is dominated by ancestor walking
+on millions of matches; long-needle queries hit the
+memory-bandwidth floor.
+
+The search is substring only; it does not perform an APFS-hash
+lookup (chapter~9) and inherits no risk from the missing hash.
+
+\subsection{What Is Not In The Shell}
+
+\begin{itemize}
+  \item Snapshot-content traversal: the SR-020/EX-23 oracle
+    requires the privileged \texttt{mount\_apfs -s} step; EX-29
+    confirmed reclaimable-bytes accounting is blocked by EX-28
+    on the same host class.
+  \item Live raw mode: EX-28 records the
+    \texttt{live\_raw\_blocked\_by\_kernel} verdict. The
+    privileged-subprocess shape still runs the fallback walker
+    to unlock TCC-restricted paths, but does not graduate to
+    raw mode.
+  \item Code signing and notarisation.
+\end{itemize}
+
+\section{Boot-Root Semantics (EX-31)}
+
+Gate~3 of the roadmap asked: define the semantic target for a
+Finder-visible scan, build an oracle, compare raw System and Data
+outputs against the user-visible tree, decide whether the mode is
+API-only or raw-capable.
+
+EX-28 foreclosed the raw comparison (the raw read returns
+\texttt{EPERM} on the live boot data partition). EX-31 fills in
+the rest: the only product mode the app can deliver on a typical
+macOS install is Finder-visible startup root via POSIX traversal,
+and that is exactly what the existing fallback walker already
+does. POSIX traversal transparently follows firmlinks; the user
+scanning \texttt{/} gets one tree matching what Finder shows ---
+\texttt{/Users} and \texttt{/System/Library} both appear in
+expected positions even though \texttt{/Users} lives on the data
+volume and \texttt{/System/Library} on the sealed-system
+snapshot.
+
+\textbf{Observation.} On the project owner's host every
+top-level path under \texttt{/} reports the same \texttt{st\_dev}
+from \texttt{stat()} / \texttt{fstatat()} --- the kernel exposes
+the system volume's dev for every path under \texttt{/} regardless
+of which volume the bytes physically live on. The
+\texttt{st\_dev}-based ``is this a different filesystem?''
+heuristic carries no firmlink information; the firmlink table at
+\texttt{/usr/share/firmlinks} is the only authoritative source.
+The walker reads it at scan-start for the dedup pass of
+chapter~11; nothing else is needed.
+
+Verdict: \texttt{api\_only\_already\_correct}. A future polish
+would surface a more specific mode label
+(\texttt{fallback\_finder\_visible} rather than bare
+\texttt{fallback}) so consumers can distinguish a merged-Finder
+scan from a single-external-volume scan; the current envelope
+does not. Slotted for a follow-up.
+
+\section{Encryption (EX-32 Scratchpad)}
+
+FileVault and per-file encryption sit at the most opaque corner
+of APFS. The on-disk structures are named in the reference
+(\texttt{apfs\_keybag\_loc}, \texttt{apfs\_kb\_locker\_t},
+\texttt{apfs\_keybag\_entry\_t}, \texttt{crypto\_state\_t},
+\texttt{wrapped\_meta\_crypto\_state\_t}, \texttt{cp\_key\_class\_t},
+\texttt{INCOMPAT\_ENC\_ROLLED}), but field-level semantics, the
+cryptographic primitives at each layer, and the key-derivation
+chain are described only at a behavioural level. Bit layouts,
+KDF input strings, per-block IV derivation, and the Secure-Enclave
+relationship come from third-party reverse-engineering
+(\texttt{apfs-fuse}, \texttt{linux-apfs-rw}, FileVault-to-APFS
+transition writeups).
+
+EX-32 is a research scratchpad, not a feature. The current crate
+exposes \texttt{crypto\_meta} as a non-production module whose
+public symbols decode keybag and per-file crypto-state shapes
+against synthetic fixtures. The deliverable is documentation; no
+decryption path is implemented and none is planned without an
+oracle. The encryption row of the support matrix stays at
+\emph{hard-stop at OMAP open}.
+
+\section{Open Questions}
+
+\subsection{Exclusive and Shared Bytes}
+
+The Real metric of chapter~8 charges each inode its share of
+clone-deduplicated bytes via the extent-reference tree.
+\emph{Exclusive} bytes --- bytes only this inode owns, after
+accounting for clones \emph{and} snapshots --- additionally
+requires the snapshot-metadata tree to be opened and joined
+against per-inode extents. \emph{Shared} bytes are the
+complement. Neither has been validated against a public oracle;
+both are open.
+
+\subsection{Snapshot-Assisted Scanning}
+
+The mechanism for honest scanning of a live machine. The walker
+already accepts a \texttt{-{}-snapshot <mountpoint>} flag that
+runs the fallback against an already-mounted snapshot directory;
+the missing piece is the shape-parity oracle.
+
+\textbf{Privilege boundary (SR-020).}
 \texttt{fs\_snapshot\_create(2)} requires root \emph{and} the
-\texttt{com.apple.developer.vfs.snapshot} entitlement; the same
+\texttt{com.apple.developer.vfs.snapshot} entitlement. The same
 gate applies to delete, rename, mount, and revert.
 \texttt{mount\_apfs -s} also requires root.
-\texttt{tmutil~localsnapshot} is the only unprivileged create
-path; it invokes \texttt{backupd} over XPC and only works on
-volumes included in the Time Machine backup set.
-\texttt{fs\_snapshot\_list(2)} and the corresponding
-\texttt{diskutil} and \texttt{tmutil list} subcommands are free.
+\texttt{tmutil localsnapshot} is the only unprivileged create
+path, available only on Time-Machine-included volumes.
 
-The scanner therefore cannot stage its own snapshot inside an
-unprivileged test process. The Rust integration --- a
-\texttt{--snapshot <mountpoint>} flag that consumes an
-already-mounted snapshot directory and runs the existing fallback
-against it --- is operationally useful immediately. The
-shape-parity claim itself is parked behind an unblock condition:
-the EX-23 probe ran on a clean dev workstation, found no
-user-visible snapshots (only the sealed-system
-\texttt{com.apple.os.update-*} snapshot, which it correctly
-skipped), and emitted a \texttt{blocked\_no\_snapshots\_at\_all}
-verdict with the exact \texttt{sudo mount\_apfs -s} reproducer
-command saved in the probe artefacts.
-
-\textbf{What is still open.} The shape-parity oracle itself.
-Until a privileged rerun produces a positive verdict, the
-\texttt{--snapshot} flag tags the source as a snapshot in
-\texttt{correctness\_claim} and \texttt{not\_claimed} but does
-not promise that the result matches a live-directory walk on this
-host. The \texttt{not\_claimed} register names the missing
-oracle explicitly so a consumer cannot accidentally treat a
-snapshot scan as equivalent to a live scan.
-
-\textbf{The smallest probe that would close it.} A privileged
-rerun. The reproducer is:
+\textbf{Reproducer.} The probe is re-runnable; EX-23's clean dev
+workstation found no user-visible TM snapshots and emitted
+\texttt{blocked\_no\_snapshots\_at\_all}. The privileged rerun
+reads:
 
 \begin{minted}{bash}
 tmutil localsnapshot /
@@ -99,330 +264,31 @@ python3 docs/research/experiments/EX-23-snapshot-shape-parity/artifacts/probe_ex
 sudo umount /tmp/apfsfi-ex23-snap
 \end{minted}
 
-A positive verdict would unlock moving the snapshot-mount cell of
-the support matrix from \texttt{not\_claimed} to
+A positive verdict would unlock the snapshot-mount cell of the
+support matrix from \texttt{not\_claimed} to
 \texttt{fallback\_supported}.
 
-\section{Scanner Ergonomics and Performance}
+\subsection{Persistent Incremental Cache}
 
-The questions in this section do not change what the parser
-claims about APFS, only how the claim is delivered. They are
-worth recording because the answers --- which performance levers
-matter on macOS-on-Apple-silicon and which are folklore --- are
-themselves contributions to the literature on reading APFS at
-speed.
+The R4 v1 cache (chapter~10) ships on stable trees and degenerates
+on home-directory-scale churn. The R4 v2 promise --- walker-emitted
+signatures plus per-subtree caching --- needs a probe against
+the EX-30 baseline. Acceptance: 9.62~s warm baseline,
+$\leq$1.0~s unchanged-tree rescan, linear interpolation under
+partial mutation.
 
-\textbf{The questions.} Which parts of the scanner's
-user-facing surface --- backend selection, progress reporting,
-embeddability in a native UI, attribute fetch cost, parallelism
---- can be improved without moving the emission contract?
+\subsection{Encrypted Surfaces}
 
-\textbf{The performance-lever map.} A source review (SR-021)
-synthesised four parallel research threads (xnu source, the
-Spotlight alternative, an OSS-tool survey, and the
-\texttt{jwalk}/\texttt{rayon} prior art) into one map.
+FileVault, per-file class keys, hardware-tied key wrapping. The
+parser fails closed on every encryption flag (chapter~4); opening
+support requires deciding which key-access classes the reader is
+willing to use. EX-32 is the documentation scratchpad; no
+feature follows from it without an oracle.
 
-\paragraph{Falsified.} EX-24 measured the attribute-mask shrink
-lever: drec-only attributes (no inode-required fields) versus the
-production walker's attribute mask
-(\texttt{ATTR\_FILE\_TOTALSIZE | ATTR\_FILE\_ALLOCSIZE}).
-The two rows landed within one per cent of each other. The
-SR-021 hypothesis that the inode-attribute fetch path crosses
-xnu's vnode-rage boundary as a measurable lever is
-\emph{falsified for modern Apple silicon and this attribute set}.
-The Phase-2 deferred-attribute refactor is therefore
-de-prioritised. The \texttt{fts(3)} control was 1.7$\times$
-slower than the production mask, contradicting Tempel's 2019
-result and cancelling the conditional follow-up.
+\subsection{Live Boot Disk Raw Mode}
 
-\paragraph{Validated.} EX-25 measured the parallel-walker lever
-at $T \in \{1, 2, 4, 8, 14\}$. T=4 reached 2.47$\times$ the
-single-threaded throughput; the system-CPU-per-thread cost
-stayed flat through T=4 then jumped super-linearly. Chapter~12
-gives the curve. The parallel slice landed with default
-\texttt{min(hw.physicalcpu, 4)} and a synthetic-tree regression
-test asserting byte-identical output across schedulers.
-
-\paragraph{Ruled out.} Spotlight as a metadata oracle (by-design
-incomplete coverage, no scoped-subtree streaming API, no
-row-formatted output, undocumented store format, write
-visibility lag). \texttt{getattrlistbulk} buffer size larger
-than 64~KiB (the per-syscall floor is sub-0.1\% of the budget).
-\texttt{getdirentriesattr(2)} (deprecated since macOS 10.10,
-routes through the same VFS path on APFS).
-
-\paragraph{Other improvements that landed.} A firmlink-overlay
-dedup that cut whole-machine \texttt{/} scans from 5.25M to 3.06M
-entries by refusing the \texttt{/System/Volumes/Data/*} duplicate
-paths (chapter~11); a progress-cadence change from one second to
-250~ms so the stopwatch on a fast CLI scan does not freeze; and
-the native shell developed in the next subsection, which moved
-the visualisation from a WebKit-embedded JS treemap to an
-in-process Rust-and-Core-Graphics renderer.
-
-\subsection{The Native Shell}
-
-The lane's product surface is a SwiftUI app whose visualisation
-is laid out by Rust and drawn by Core Graphics. The scanner is
-not a subprocess; the Rust crate is linked into the app process
-as a static library, and every call from Swift into the
-indexer crosses a \texttt{cbindgen}-generated C ABI. There is
-no JSON serialisation, no temp file, no WebKit, and no
-JavaScript.
-
-\paragraph{Why the rewrite happened.} The pre-rewrite pipeline
-emitted JSON from a subprocess, wrote it to a temp file, served
-it through a \texttt{WKURLSchemeHandler}, parsed it in
-WebKit, built a hierarchy in JavaScript, laid it out with
-\texttt{d3.treemap}, and drew it into a \texttt{<canvas>}. A
-series of optimisations --- canvas instead of SVG, bytes-aware
-ingest, hot-loop rewrites of \texttt{buildHierarchy}, lazy
-hit-grid construction --- pulled \texttt{/Applications}-class
-scans into the one-second range. On a whole-machine scan the
-JS path still spent five-to-eight seconds between the scanner
-exit and the first painted rectangle. A separate probe
-(documented in \texttt{docs/implementation/viz-perf-study.md})
-falsified the most attractive remaining JS lever (a pure-JS
-\texttt{msgpack} decoder, which V8's \texttt{JSON.parse} beat
-by about three times) and projected that going native would
-collapse the same window to roughly six hundred milliseconds
-to one and a half seconds. The projection was the
-justification for the rewrite; the rewrite landed and the
-projection held.
-
-\paragraph{The FFI boundary.} The crate's C ABI is a small
-surface of opaque-handle constructors, accessors, and
-destructors. \texttt{apfs\_scan\_directory} returns an
-\texttt{ApfsScan*}; the handle owns the entry vector, the
-indexed tree, and the strings the Swift side reads through
-\texttt{String(cString:)}. \texttt{apfs\_layout\_new} returns
-an \texttt{ApfsLayout*} whose flat \texttt{ApfsCell} array
-Swift reads as an \texttt{UnsafeBufferPointer<ApfsCell>} ---
-no per-cell call into Rust during paint, and no array copy
-across the language boundary. Bulk data is handed across as
-\texttt{(*const Item, usize)} pairs; per-handle \texttt{\_free}
-functions are responsible for releasing every allocation
-\texttt{\_new} produced. The header is regenerated by
-\texttt{cbindgen} on every change to \texttt{src/ffi.rs} so the
-two sides cannot drift in the type signatures they agree on.
-
-\paragraph{The division of labour.} Rust owns: the fallback
-walker, the firmlink dedup, the indexed tree (one
-\texttt{TreeNode} per directory and per leaf, parent and
-children indices, pre-computed \texttt{value\_logical} /
-\texttt{value\_allocated} / \texttt{item\_count} aggregates),
-the squarified treemap layout (a direct port of
-\texttt{d3-hierarchy}'s \texttt{treemapSquarify}), the
-$64 \times 64$ hit-grid, the per-extension aggregator
-behind the right-hand panel, and the colour palette that
-decides a leaf's \texttt{fill\_rgb}. Swift owns: the SwiftUI
-shell (toolbar, breadcrumb, status bar, depth stepper, metric
-picker), the AppKit treemap view (one \texttt{NSView} whose
-\texttt{draw(\_:)} walks the cell array as one fillRect per
-cell, grouped by colour to amortise \texttt{setFillColor}
-calls), the tree-list and ext-list panels, and the right-click
-menu plumbing onto \texttt{NSWorkspace} for the
-\texttt{Open}, \texttt{Reveal in Finder}, \texttt{Copy Path},
-and \texttt{Move to Trash} actions. The renderer touches no
-JavaScript and no DOM; the shell touches no APFS bytes.
-
-\paragraph{What got removed.} The repository still ships a
-standalone \texttt{viz/index.html} for drop-a-file-into-browser
-use (a separate workflow that does not require the native
-build), but the app itself no longer embeds it. With the
-WebKit dependency gone, several layers of intermediate
-representation went with it: the JSON serialiser as a
-post-scan step, the \texttt{rmp-serde} msgpack encoder, the
-JavaScript \texttt{buildHierarchy} hot loop, the
-\texttt{d3.treemap.squarify} call site, the \texttt{<canvas>}
-DOM node, the JavaScript hit-grid, the
-\texttt{WKURLSchemeHandler}-via-\texttt{ArrayBuffer} ingest
-path, and the JS-to-Swift bridge protocol that carried the
-typed messages between them. The scanner subprocess is gone;
-so is the post-scan ingestion gap that motivated the loading
-overlay an earlier slice of the lane introduced.
-
-\paragraph{Progress and polish.} The FFI exposes a
-\texttt{apfs\_scan\_directory\_with\_progress} entry point that
-takes a C-ABI callback the library's sampling thread invokes at
-the same 250~ms cadence the CLI's \texttt{-{}-progress} stream
-uses; the callback's \texttt{ApfsProgressEvent} carries
-\texttt{(phase, scanned, skipped, bytes, terminal)} so the
-SwiftUI shell can render a \emph{determinate} progress island
-(phase label, scanned/skipped counts, cumulative bytes against
-\texttt{volume.used}, m:ss stopwatch). The standard macOS
-settings scene (depth and worker-thread \texttt{@AppStorage}
-preferences), the right-click context menu, the breadcrumb-and-
-back-nav header, the depth-limited progressive treemap (which
-defers the deepest level of cells off the first render so the
-initial paint lands tens of milliseconds sooner on a whole-
-machine scan), and the unified Trebuchet MS / monospaced-digit
-typography all landed alongside the FFI progress surface; they
-are recorded here because each is a small visible move that the
-single chapter-13 narrative would otherwise lose.
-
-\paragraph{What the screenshots show.} The figures below were
-captured against an earlier build of the SwiftUI shell, before
-the tree-list and ext-list side panels, the breadcrumb bar, the
-determinate progress island, and the settings scene landed. The
-toolbar and the treemap content read the same in both builds
-because they describe the same underlying data; the current
-build adds two resizable side panels above the treemap, the
-breadcrumb above them, and the centered determinate progress
-island during a scan.
-
-\begin{figure}[h]
-\centering
-\includegraphics[width=\linewidth]{figures/app-idle.png}
-\caption{The shell in its idle state: source picker, backend
-mode (\texttt{Auto} / \texttt{Raw} / \texttt{Fallback}), metric
-picker (greyed until a scan completes), and the
-\texttt{auto / ready} status. No scan has been requested yet.}
-\end{figure}
-
-\begin{figure}[h]
-\centering
-\includegraphics[width=\linewidth]{figures/app-treemap.png}
-\caption{A loaded scan of \texttt{/Applications}: 163{,}651
-entries laid out in 0.3~s by the four-thread parallel fallback.
-Leaf rectangles carry path and size; the colour family encodes
-file kind. The status bar reads the total logical bytes for the
-visible aggregate. In the current native build the rectangles
-are drawn by Core Graphics from a cell array Rust laid out
-directly; the visible result is unchanged.}
-\end{figure}
-
-\begin{figure}[h]
-\centering
-\includegraphics[width=\linewidth]{figures/app-context-menu.png}
-\caption{A right-click context menu over a leaf
-(\texttt{WhatsApp.app/Contents/MacOS/WhatsApp}). The menu is a
-native \texttt{NSMenu}, positioned at the click event the
-treemap view forwarded through the SwiftUI coordinator.
-\texttt{Open}, \texttt{Reveal in Finder}, \texttt{Copy Path},
-and \texttt{Move to Trash} are real \texttt{NSWorkspace} calls;
-they inherit the operating system's permissions, undo
-semantics, and recovery behaviour.}
-\end{figure}
-
-\paragraph{Future direction.} The user-space post-processing
-tax recorded as ``the next bounded scanner-side lever'' in
-chapter~12's parallel-walker section was the input to the
-structural-density pass the same chapter now records. The pass
-landed eight rounds against the FFI workload --- $-32\%$ scan
-wall, $-50\%$ tree wall, $-28\%$ peak RSS, with allocator
-pressure roughly halved (chapter~12, \S~Structural-Density
-Pass). What remains is no longer user-space allocation or
-hashing on this workload; the next bounded lever moves back to
-the kernel side, where EX-24 already falsified the most
-attractive structural candidate. A second oracle on a larger or
-different-shaped tree (a /-scale scan on a freshly cleared
-filesystem cache; a tree with deeper-than-usual nesting; a
-case-insensitive APFS volume) is the cheap follow-up before any
-further user-space rounds are planned. The progress-FFI gap
-this paragraph used to record is closed:
-\texttt{apfs\_scan\_directory\_with\_progress} now carries the
-same event stream the CLI's \texttt{-{}-progress} flag does, the
-SwiftUI shell renders it as a determinate progress island, and
-the CLI path is unchanged for headless use.
-
-\subsection{The Treemap Layout}
-
-The visualisation's correctness is now a Rust correctness
-question. Three pieces are worth fixing in this manual; each is
-small, but each is the kind of detail that decides whether two
-pictures of the same data agree.
-
-\paragraph{Squarify.} The layout is the standard squarified
-treemap of Bruls, Huijzen, and van Wijk (2000), in the variant
-\texttt{d3-hierarchy} implements. Children are sorted
-descending by the active metric; greedy row-packing on the
-shorter side of the current rect adds children to a row until
-the worst-case aspect ratio would worsen, then lays the row out
-by dice (horizontal) or slice (vertical) and recurses on the
-remaining strip. The Rust port keeps the same
-$\alpha = \max(dy/dx,\ dx/dy)\,/\,(\mathrm{value} \cdot
-\mathrm{ratio})$ and $\beta = \mathrm{sum\_value}^2 \cdot
-\alpha$ expressions the d3 source uses; for the same input
-\texttt{(node\_index, value)} array and the same viewport, the
-two implementations produce the same rectangles.
-
-\paragraph{Hit-grid.} A $64 \times 64$ axis-aligned
-spatial hash sits over the laid-out cell array. Each cell is
-inserted into every bucket it overlaps; each bucket is then
-sorted depth-descending so the first containing match a
-hit-test walk sees is the deepest cell at that point. This is
-what makes a mouse-move event a few-cell comparison rather
-than a walk through the hundred-thousand-cell layout for a
-\texttt{/}-scan view.
-
-\paragraph{The unclaimed swatch.} When the metric picker is on
-\texttt{Allocated} and a leaf's \texttt{value\_allocated} is
-\texttt{None} (SR-019 None-collapse, chapter~8), the cell's
-\texttt{fill\_rgb} is the unclaimed grey rather than a colour
-from the extension palette. The rule is one branch at layout
-time, but it is the visual surface of the fail-closed
-discipline: the user sees, on the picture, exactly the cells
-the parser refused to claim a number for.
-
-\section{Deliberately Deferred}
-
-Four APFS surfaces remain deliberately outside the manual's
-defended scope. Each is large enough to warrant its own oracle
-work; each is unsafe to open opportunistically.
-
-\paragraph{Encryption.} FileVault-encrypted volumes and
-hardware-backed encryption have separate threat models, separate
-privilege requirements, and separate validation problems. The
-parser currently fails closed on encryption flags; opening
-encryption support requires deciding which classes of key access
-an APFS reader is willing to use and which it is not.
-
-\paragraph{Live boot disk.} The startup disk on modern macOS is
-a sealed system volume joined to a data volume by firmlinks,
-with a snapshot pinning the system content. Raw scanning of the
-System volume is constrained by the seal; raw scanning of the
-Data volume is constrained by the live-churn problem; the
-merged user-visible view depends on firmlink table semantics
-that are themselves not fully public. Opening live boot support
-means building each of those subsystems' oracle.
-
-\paragraph{Boot-root merged namespace.} The Finder-visible
-\texttt{/} on a modern Mac is not any single APFS volume's
-namespace. It is the System volume's content joined to the
-Data volume's content through firmlinks, plus the current
-snapshot overlay. The reader mode for this is distinct from
-raw-single-volume; it cannot share the same oracle, and its
-support claims must be stated separately. The firmlink-dedup
-slice in chapter~11 is the closest this work has come to it:
-the on-disk duplication is suppressed at the fallback layer,
-without any claim on Finder semantics proper.
-
-\paragraph{Persistent incremental cache.} The work of
-chapter~10 turns into a product only after the full set of
-cache-invalidation conditions has been enumerated, a
-crash-safe cache storage design exists, and an incremental scan
-has been validated against a fresh full reparse. The questions
-above deliberately precede this work; a cache built on top of
-incomplete metrics or unstable support matrices would propagate
-its instability.
-
-\section{The Manual's Own Future}
-
-The chapter ends where the manual ends. Each question above
-will, when its oracle work lands, become its own chapter: a
-thesis, the evidence, the precedence rule or the oracle pairing,
-the per-case table, the limits of what was checked. The chapter
-list will lengthen; the voice should not change.
-
-The supported interior of the manual is narrow but defensible.
-The open surface around it is genuinely open: a metric whose
-fail-closed cases are honest, a snapshot path correctly
-entitlement-gated, a perf envelope empirically calibrated
-against a contention regime the project did not invent and does
-not pretend does not exist, a native renderer whose correctness
-is now a Rust-side question rather than a JavaScript-side one.
-Anything written here that survives the next year of work
-survives because it was written carefully. Anything that does
-not survive was an error worth recording so the next attempt
-does not repeat it.
+EX-28's verdict
+\texttt{live\_raw\_blocked\_by\_kernel} stands on stock Apple
+silicon under SIP. The harness remains re-runnable on future
+hosts or future macOS versions with different security policies
+without code changes.

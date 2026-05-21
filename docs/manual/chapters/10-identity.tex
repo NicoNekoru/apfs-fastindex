@@ -1,27 +1,23 @@
-\chapter{Identity, Reuse, and What a Cache Key Cannot Be}
+\chapter{Identity, Reuse, and Cache Keys}
 
-The most attractive idea in any fast-indexer project is that a second
-scan should be faster than the first. The natural mechanism is a
-cache of parsed subtree summaries: walk the FS tree once, summarise
-each node, and on the next run reuse the summary if the node has not
-changed. The chapter is about why the obvious cache key for that
-mechanism is dangerous, and what the right shape of a safe key looks
-like.
+A second scan of an unchanged volume should be faster than the
+first. The natural mechanism is a subtree-summary cache: walk the
+FS tree once, summarise each node, reuse the summary on the next
+run when the node has not changed. The chapter develops what
+identity that cache must key on, why the obvious key is unsafe,
+and what the shipping CLI cache already does.
 
-\section{The Tempting Mistake}
+\section{Why OID Alone Is Unsafe}
 
-The most obvious cache key is the OID: it identifies an object across
-versions, it is stable across copy-on-write rewrites, and it is small.
-A summary cache keyed on \texttt{(volume\_uuid, oid)} would deduplicate
-unchanged subtrees across runs.
-
-It would also return stale summaries, silently, the first time the
-volume mutates a subtree the cache already knows.
+A summary cache keyed on \texttt{(volume\_uuid, oid)} would
+deduplicate unchanged subtrees across runs. It would also return
+stale summaries the first time the volume mutates a subtree the
+cache already knows.
 
 \textbf{Observation.} The FS-tree root's logical OID stays stable
-across mutations; everything else about the on-disk object changes.
-EX-06 mutated the proof fixture, recorded the FS-tree root identity
-fields before and after, and observed:
+across mutations; every other identity field changes. EX-06 mutated
+the proof fixture, recorded the FS-tree root identity before and
+after, and observed:
 
 \begin{center}
 \begin{tabular}{ll}
@@ -38,19 +34,16 @@ block hash                 & changed \\
 \end{center}
 
 A cache keyed on OID would return the pre-mutation summary for the
-post-mutation tree. The parser would emit rows derived from the old
-state and aggregate them into the new state's directory totals. The
-user would see a treemap that does not match the disk.
-
-The OID is a \emph{virtual address}. It names \emph{some} version of
-the object; it does not name a particular content. A cache that wants
-content identity must use a content identifier.
+post-mutation tree, and the user would see a treemap that does not
+match the disk. The OID names \emph{some} version of the object;
+it does not name particular content. A cache that wants content
+identity must use a content identifier.
 
 \section{The Shape Of A Safe Cache Key}
 
-A summary cache that is safe under mutation must distinguish entries
-that share an OID but differ in content. The minimum sufficient key
-is a tuple whose members come from several layers:
+A safe cache key distinguishes entries that share an OID but
+differ in content. The minimum sufficient key is a tuple from
+several layers:
 
 \begin{description}
   \item[Source identity.] A volume UUID, a container UUID, and an
@@ -80,94 +73,119 @@ is a tuple whose members come from several layers:
     re-allocated to a different object class is a new object.
 \end{description}
 
-The key is therefore not a small integer. It is a record of nine
-fields, eight of which the parser already needs to compute for any
-read, and the ninth (parser version) is constant per build.
+The key is not a small integer: nine fields, eight of which the
+parser already computes during a read, the ninth (parser version)
+constant per build.
 
-\section{What EX-07 Proved And What It Did Not}
+\section{What EX-07 Proved}
 
-The project's first probe of the cache idea (EX-07) restricted itself
-to a narrow question: under exact node-identity matches on every
-field of the key above, does subtree reuse ever produce a wrong
-summary?
+EX-07 asked a narrow question: under exact node-identity matches on
+every field of the key above, does subtree reuse ever produce a
+wrong summary?
 
 \textbf{Observation.} EX-07 found zero false reuse for exact
-node-identity matches in the detached lab corpus.
+node-identity matches on the detached lab corpus. Two parses that
+see the same node identity get the same summary; reusing one for
+the other is safe.
 
-That is the strongest positive result a subtree-reuse cache can ask
-for at this stage. It means the mathematical foundation is sound:
-if two parses see the same node identity, they will get the same
-summary, and reusing one for the other is safe.
+The result is not a production cache theorem. EX-07 ran one corpus,
+on detached images, with a small mutation set. A production cache
+that consumes the raw parser must also resolve cache storage with
+crash-safe writes (a corrupting cache produces
+stale-and-wrong instead of absent-and-correct) and an explicit
+invalidation policy covering parser-version mismatch, source
+identity mismatch, feature drift, checkpoint rollback, snapshot
+switch, unknown record-body types, and any new metric absent from
+the pre-existing schema. The Real metric of chapter~8 is the most
+recent example of a column a pre-existing cache would not have
+recorded.
 
-It is not yet a production cache theorem. The probe ran on one
-corpus, on detached images, with mutations limited to a small set.
-Three things still have to land before a cache is safe to ship:
+\section{The Shipping CLI Cache (EX-30)}
+
+The CLI ships a v1 cache behind the \texttt{--cache} flag (off by
+default). It operates on the fallback walker, not the raw parser:
+the safe-reuse work above remains future for raw-mode subtree
+summaries. The v1 design is intentionally smaller than what EX-07
+gestures at.
+
+\textbf{Mechanism.} On a cache miss, the full scan runs, the
+output is written to a content-addressed entry under
+\texttt{~/Library/Caches/apfs-fastindex/}, and the entry is keyed
+on a probe-derived signature of the scanned directory tree. On a
+hit, the cached entry is replayed without walking the tree.
+
+\textbf{Observation (EX-30).} The cache works on stable trees and
+does not on actively-churning ones:
+
+\begin{center}
+\begin{tabular}{lrrl}
+\toprule
+target & first scan & rescan (\texttt{--cache}) & speedup \\
+\midrule
+project \texttt{docs}     &  0.33~s &  0.007~s & 47$\times$ \\
+project root              &  0.59~s &  0.12~s  & 4.9$\times$ \\
+\texttt{/Users/kai}       & 46.6~s  & 45.4~s   & 1.0$\times$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Two factors compound on \texttt{/Users/kai}-class trees. First, the
+probe uses naive \texttt{read\_dir} plus \texttt{symlink\_metadata}
+per child; the walker uses \texttt{getattrlistbulk}, which batches
+metadata reads. On 172k directories the probe pays roughly 37~s
+versus the walker's roughly 9~s --- a cache hit costs more than no
+cache. Second, dozens of subdirectories under \texttt{/Users/kai}
+mutate continuously (browser caches, Spotlight, log rotation, Xcode
+derived data); the signature almost never matches the cached
+signature, every cache write is wasted.
+
+For stable trees (project directories, \texttt{/Applications},
+read-only system paths) the v1 cache delivers a 5--50$\times$
+speedup. The CLI prints \texttt{cache: hit} to stderr on hits; the
+documentation labels the flag ``useful for stable trees; not
+recommended for active home directories.''
+
+\section{What R4 v2 Needs}
+
+The v1 cache becomes useful on home-directory-scale trees when two
+pieces land. Both belong to future work; neither is in the shipping
+binary.
 
 \begin{enumerate}
-  \item Re-run EX-07's mutation grid against the native Rust full
-    parse (now possible, since the parser and the parallel
-    fallback of chapter~11 are both production code) to confirm
-    the finding holds when the parser is this project's own
-    production code rather than a third-party reference.
-  \item Build a cache storage design with crash-safe writes; a
-    cache that can corrupt during a kill produces stale-and-wrong
-    rather than absent-and-correct, which is the failure mode the
-    fail-closed discipline is supposed to prevent.
-  \item Specify an invalidation policy that names every condition
-    under which a summary becomes stale: parser version mismatch,
-    missing volume continuity, source identity mismatch,
-    unsupported feature drift, checkpoint rollback, snapshot
-    switch, unknown record-body type, or any new metric the cache
-    did not record (the allocated-size column is the most recent
-    example of a column a pre-existing cache would not have
-    recorded).
+  \item \textbf{Walker-emitted signature.} The parallel walker
+    accumulates each directory's signature inline, while it is
+    already calling \texttt{getattrlistbulk}. The separate
+    directory-only probe disappears; the cache-hit cost drops from
+    roughly 37~s to roughly 0~s.
+  \item \textbf{Per-subtree caching.} One signature per directory
+    rather than per scan. On rescan the walker descends
+    incrementally: when a directory's signature matches the
+    cached one, the subtree's entries and aggregates are reused
+    without descent. A few churning subdirectories invalidate
+    themselves; the unchanged 99\,\% stays cached.
 \end{enumerate}
 
-Until those gates pass, the safe default is full reparse, validated
-against the namespace, logical-size, and allocated-size oracles. A
-second scan of the same volume produces the same answer as the
-first; the parallel walker has made it produce that answer faster,
-but it does not yet produce it incrementally.
-
-\section{The Identity-Tracking Discipline}
-
-A small detail of EX-06 deserves promotion. The probe did not assume
-which identity fields would change; it recorded all of them, every
-time. That habit --- "record every plausibly-load-bearing identity
-field at every relevant boundary, before deciding which ones matter"
---- is what made the cache discussion concrete instead of speculative.
-
-The same habit appears in EX-12's OMAP lookup contract: the probe
-records every resolved \texttt{(oid, paddr, xid)} sample and replays
-header validation at each, rather than checking only the resolutions
-that the parser happens to read. The cost of recording is small;
-the cost of discovering, later, that a key field was never captured
-is large.
-
-The discipline generalises beyond caching. A reverse-engineering
-project produces evidence whose value depends on what it recorded
-at the time. The right rule is: when the question is "which fields
-matter," the experiment records all of them.
+Together these turn a 45-second rescan on \texttt{/Users/kai} into
+roughly one second when 10\,\% of subdirectories have changed.
+That is the R4 v2 promise; an EX-* in the next phase will validate
+it against a forced full rescan.
 
 \section{What This Chapter Forecloses}
 
-The chapter forecloses two specific design moves that other indexers
-sometimes make.
-
-\paragraph{No bare-OID cache.} The parser will never key reuse on
+\paragraph{No bare-OID cache.} The parser does not key reuse on
 OID alone, even with parser-version qualification. The mutation
-behaviour above means a bare-OID cache is unsafe in principle, not
-just unsafe under unusual conditions.
+behaviour above makes a bare-OID cache unsafe in principle.
 
-\paragraph{No partial summary reuse across mismatched scan XIDs.}
-A summary computed at scan XID $a$ is not reused at scan XID $b$.
-The whole point of pinning the scan XID is that object identity
-includes the XID; relaxing that turns the cache into a stale-state
-producer. The cache may compare keys across runs only when the keys
-agree on every field, scan XID included.
+\paragraph{No reuse across mismatched scan XIDs.} A summary
+computed at scan XID $a$ is not reused at scan XID $b$. Object
+identity includes the XID; relaxing that turns the cache into a
+stale-state producer. The cache may compare keys across runs only
+when the keys agree on every field, scan XID included.
 
-The chapter does not foreclose the cache idea itself. Subtree reuse
-is a real opportunity --- the EX-07 result is encouraging --- but
-the cost of getting it wrong is high enough that the project will
-land it only after the gates above are met. Until then, every scan
-fully reparses, and the manual records why.
+EX-06's discipline --- record every plausibly-load-bearing identity
+field at every relevant boundary before deciding which ones matter
+--- generalises beyond caching. EX-12's OMAP probe used the same
+habit, recording every resolved \texttt{(oid, paddr, xid)} sample
+before deciding which mattered. The cost of recording is small; the
+cost of discovering later that a key field was never captured is
+large.

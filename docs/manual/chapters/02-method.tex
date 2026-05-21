@@ -1,154 +1,64 @@
 \chapter{Method}
 
-The findings in this manual were arrived at through a deliberately
-restrictive method. The method is worth stating explicitly because it
-shapes which claims appear, and because the same discipline is what
-allows the reader to trust those claims.
-
-\section{Claim Discipline}
-
-Three categories. They are never blurred.
-
-\textbf{Spec.} A claim backed by Apple's public reference or by another
-durable specification. Spec claims are useful but not sufficient. The
-reference describes intent; what is on disk is what the running system
-writes, and the two occasionally disagree.
-
-\textbf{Observation.} A claim backed either by a controlled experiment
-on a real APFS image, or by behaviour that converges across multiple
-independent open-source readers. Convergence across six readers
-(\texttt{linux-apfs-rw}, \texttt{apfs-fuse}, \texttt{dissect.apfs},
-\texttt{go-apfs}, \texttt{libfsapfs}, the Sleuth Kit's APFS module)
-plus the reference is harder to fault than the reference alone. For
-performance claims the same convergence pattern applies across
-independent fast macOS scanners (\texttt{dumac}, \texttt{macdirstat},
-\texttt{jwalk}) and the xnu kernel source itself.
-
-\textbf{Hypothesis.} A claim that is plausible and useful for design
-but has no probe or convergence behind it yet. Hypothesis does not
-license product behaviour. If the parser would emit a row only on a
-Hypothesis-class claim, the parser does not emit the row.
-
-The two rules that follow from these labels.
-
-\paragraph{Where Spec and Observation disagree, Observation wins.}
-Section~\ref{ssec:xfield-spec-vs-impl} on the xfield cursor rule is one
-example; section~\ref{ssec:fs-tree-internal} on the FS-tree internal
-edge is another. In both cases the reference is easy to read in a
-direction that the converged code does not support. The converged
-code is right.
-
-\paragraph{Where a Hypothesis matters, the smallest decisive probe is
-named.} The manual does not leave open questions floating; it leaves
-them attached to the experiment that would close them.
-
-\section{Oracle Plurality}
-
-There is no single oracle for an APFS indexer. The phrase "the
-oracle" is a tell that someone has glued mismatched validation sources
-together and called the result authoritative. Each feature owns its
-own oracle.
-
-\begin{description}
-  \item[Namespace.] POSIX traversal (\texttt{os.walk}) of the chosen
-    volume at the chosen state. Path bytes, entry type, hard-link
-    grouping by inode, symlink target.
-  \item[Logical size.] \texttt{st\_size} per inode; for symlinks, the
-    target byte length returned by \texttt{readlink}. This is the
-    public, stable per-file size that user-space tools agree on.
-  \item[FS-record body.] Cross-tool field equality between
-    independent decoders against the same raw container. The
-    \texttt{go-apfs identitydump} tool plus an independent Python
-    decoder against the same \texttt{/dev/rdiskN} is the form the
-    project uses.
-  \item[Allocated size.] \texttt{st\_blocks * 512}, and only on cases
-    that have an explicit validated mapping from raw fields to it.
-  \item[Incremental correctness.] A fresh full reparse of the same
-    selected state. Any cache reuse must equal this.
-  \item[Boot-root semantics.] The user-visible macOS namespace ---
-    System/Data join, firmlinks, current snapshot --- and only when
-    the product mode targets it.
-\end{description}
-
-A probe that does not name its oracle does not produce evidence.
+This chapter records the probe-construction discipline the rest of
+the manual presupposes. It is short by design.
 
 \section{Paired Probes}
 
 The most informative experiments build the fixture, capture every
-oracle, run the candidate parser, and compare --- all in one execution
-of one script. This rules out the kind of subtle drift that breaks an
-experiment: a fixture rebuilt with slightly different operations, a
-volume remounted between probes, a parser pointed at a different
-container than the oracle.
+oracle, run the candidate parser, and compare --- all in one
+execution of one script. This rules out the drift modes that
+otherwise break a probe: a fixture rebuilt with slightly different
+operations, a volume remounted between captures, a parser pointed
+at a different container than the oracle.
 
-Two patterns in particular keep recurring.
+Two patterns recur.
 
 \paragraph{Detach-and-reattach.} Build the fixture mounted; capture
-the mounted POSIX oracle; \texttt{hdiutil detach}; \texttt{hdiutil
-attach -nomount -readonly}; run the raw parser; diff. The detach
-fixes the visible checkpoint, so the raw parser and the mounted
-oracle agree on what state to compare.
+the mounted POSIX oracle; \texttt{hdiutil detach};
+\texttt{hdiutil attach -nomount -readonly}; run the raw parser;
+diff. The detach fixes the visible checkpoint, so the raw parser
+and the mounted oracle agree on what state to compare.
 
 \paragraph{Cross-tool agreement.} Run the candidate parser and an
-independent third-party reader against the same raw container in the
-same probe. Record the parser's resolved \texttt{(oid, paddr, xid)}
-samples; replay the object-header validation rules at every resolved
-\texttt{paddr}; confirm the two tools agree on the FS-tree root OID.
-A divergence in \emph{which} checkpoint each tool selected is itself
-recorded as a caveat, not silenced.
+independent third-party reader against the same raw container in
+the same script. Record the parser's resolved
+\texttt{(oid, paddr, xid)} samples; replay the object-header
+validation rules at every resolved \texttt{paddr}; confirm the two
+tools agree on the FS-tree root OID. A divergence in
+\emph{which} checkpoint each tool selected is recorded as a
+caveat, not silenced.
 
 \section{The Smallest Useful Fixture}
 
-Probes prefer the smallest fixture that exercises the question, not
-the largest fixture that might. The proof fixture used through most
-of this manual is intentionally tiny: two directories, a renamed
-file, a moved file, a hard link, a sparse 1 MiB file, a clone, an
-append after the clone, and a symlink. Roughly seven user-visible
-entries.
+Probes prefer the smallest fixture that exercises the question.
+The proof fixture used through most of this manual contains two
+directories, a renamed file, a moved file, a hard link, a sparse
+1~MiB file, a clone, an append after the clone, and a symlink:
+roughly seven user-visible entries.
 
 That fixture is enough to surface:
 
 \begin{itemize}
-  \item the FS-tree internal-OID-vs-paddr distinction (when the tree
-    grows past one leaf node),
-  \item the xfield cursor rule (the sparse inode has three xfields, one
-    of which has a non-multiple-of-eight \texttt{x\_size}),
-  \item the logical-size precedence over ordinary, sparse, clone,
+  \item the FS-tree internal-OID-vs-paddr distinction (when the
+    tree grows past one leaf node; see chapter~\ref{ssec:fs-tree-internal}),
+  \item the xfield cursor rule (the sparse inode has three xfields,
+    one of which has a non-multiple-of-eight \texttt{x\_size}),
+  \item logical-size precedence over ordinary, sparse, clone,
     hard-linked, and symlink rows,
   \item the unique-inode aggregate policy (hard links must not
     double-count).
 \end{itemize}
 
-Larger fixtures appear only when a specific question requires a feature
-the small fixture cannot express, such as the case-insensitive vs
-case-sensitive volume comparison in chapter~9 or the compressed-file
-precedence test in chapter~8.
-
-\section{Fail Closed By Default}
-
-A parser that emits rows for cases it does not understand is worse
-than one that emits nothing. The user can recognise a missing row and
-look elsewhere; a wrong row propagates into a directory aggregate,
-into a treemap, and into the decisions the user makes from the
-treemap. Fail-closed is not an aesthetic preference. It is the only
-way to bound the cost of being wrong.
-
-Every step in the parser is wrapped in a typed validation gate. The
-single chokepoint for object-header validation is one function
-(\texttt{validate\_object\_block} in the Rust crate); every reader
-calls it before trusting any block. The single chokepoint for
-record-body validation is one function (\texttt{decode\_fs\_record});
-every emission path calls it before trusting any record. Each gate
-returns a typed error with the rule that failed.
-
-Outside the allowlist, the parser does not partially succeed. It does
-not "try its best." It returns a reason and the fallback path
-(chapter~11) takes over.
+Larger fixtures appear only when a specific question requires
+something the small fixture cannot express: the case-insensitive
+versus case-sensitive comparison of chapter~9, the
+sparse/decmpfs corpora of chapter~8, the clone-dedup fixture of
+chapter~8's ``real-size'' section.
 
 \section{The Style Of A Finding}
 
-The manual presents a finding the same way each time: a one-line
-statement, the evidence, the implementation consequence, and the
-limits of what was checked. The structure is borrowed from how working
-proofs are written: the claim must survive standing alone, but the
-proof must be present.
+Each finding is presented the same way: a one-line statement, the
+evidence, the implementation consequence, and the limits of what
+was checked. A claim must survive standing alone, and the proof
+must be present.

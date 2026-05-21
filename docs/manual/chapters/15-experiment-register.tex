@@ -193,13 +193,111 @@ landed against \texttt{TreeNode}, \texttt{NamespaceEntry},
 \texttt{VisitedDirs}, and the CLI-only aggregates Vec; net
 $-32\%$ scan wall, $-50\%$ tree wall, $-28\%$ peak RSS,
 allocator pressure roughly halved (chapter~12 §
-Structural-Density Pass). Two candidates falsified in pass:
-\texttt{getattrlistbulk} buffer sizes 32~KiB through 2~MiB
-indistinguishable (4~MiB regresses), and the EX-24 vnode-rage
-hypothesis re-confirmed at the user-space layer. The bench
-artefacts (\texttt{examples/perf\_probe},
-\texttt{APFS\_PHASE\_TIMINGS}, \texttt{APFS\_BULK\_BUF\_KIB})
-remain in-tree for re-ablation.
-& validated-structural-density-pass \\
+Structural-Density Pass). EX-26 also closed the SR-019 sparse
++ decmpfs allocated-size precedence: all sparse and decmpfs
+shapes match \texttt{st\_blocks * 512} exactly under
+\texttt{alloced\_size - sparse\_bytes} and
+$\Sigma$ stream-backed-xattr \texttt{alloced\_size}
+respectively.
+& validated-structural-density-pass; validated-sparse-and-decmpfs \\
+
+EX-27 &
+For a fixture with one or more \texttt{cp -c}-created clone
+families, can the raw parser walk the extent-reference tree,
+recover per-extent refcounts, and compute clone-deduplicated
+per-inode bytes that sum to the on-disk allocation? Yes:
+\texttt{dstream\_dedup} computed from \texttt{phys\_ext}
+records joined with \texttt{file\_extent}s keyed by
+\texttt{dstream\_id}; per-inode share is
+\texttt{dstream\_dedup / dstream.refcnt}.
+$\Sigma$ inode shares equals
+$\Sigma$ \texttt{phys\_ext.length} $\cdot$ block size modulo
+$\leq$ \texttt{(refcnt - 1)} bytes per clone-shared dstream
+(2-byte residue on the fixture). Productive discovery:
+\texttt{du -A} on macOS is apparent-size; no public per-file
+macOS oracle for clone-dedup exists. The crate ships a
+\texttt{real\_size} field on \texttt{NamespaceEntry}.
+& validated-clone-dedup \\
+
+EX-28 &
+With root privileges, does the existing raw parser produce a
+self-consistent shape on a live \texttt{/dev/diskNsM} and
+agree with the fallback walker on the same mount? macOS
+returned \texttt{EPERM} on the first \texttt{read(2)} of
+\texttt{/dev/disk3s1}'s block zero even under \texttt{sudo}.
+The kernel's storage-system security policy refuses raw block
+access to the live boot data partition independently of POSIX
+permissions; SIP and the sealed-system-volume seal both
+contribute. Live boot raw mode is not viable on stock Apple
+silicon. Contribution: the public
+\texttt{apfs\_fastindex::parity} comparator and the env-gated
+integration harness, both re-runnable on future hosts.
+& live-raw-blocked-by-kernel \\
+
+EX-29 &
+What user-visible local snapshots exist on the host, and what
+do reclaimable bytes look like? Zero user-visible TM
+snapshots; one sealed-system OS-update snapshot
+(SR-020-excluded). Reclaimable bytes have no public
+read-only macOS oracle (\texttt{tmutil thinlocalsnapshots}
+deletes the snapshot it measures), and EX-28's verdict
+blocks the raw-extent-diff alternative. Crate ships
+\texttt{snapshots::SnapshotVerdict} via
+\texttt{tmutil listlocalsnapshots} +
+\texttt{diskutil apfs listSnapshots} parsing.
+& blocked-no-user-snapshots \\
+
+EX-30 &
+Production-shape baseline for the GUI's
+\texttt{apfs-fastindex-scan} subprocess on
+\texttt{/Users/kai} (the largest single subtree the project
+owner routinely scans). Warm median 9.62~s, 162~k entries/s,
+1.56~M entries, 172~k aggregates, 392~MB msgpack payload.
+The number anchors R4 cache acceptance:
+$\leq$1.0~s on unchanged-tree rescan, $\leq$5\% regression on
+cold-miss. The R4 v1 cache (\texttt{-{}-cache} flag, ships
+this round) delivers 5--50$\times$ on stable trees and
+1.0$\times$ on \texttt{/Users/kai}-class churn (the probe
+overhead exceeds the walk; mtime churn invalidates every
+signature).
+& production-baseline-recorded \\
+
+EX-31 &
+What's the boot-root semantic the app should target? EX-28
+foreclosed the raw-System-vs-raw-Data comparison. The only
+deliverable mode is Finder-visible startup root via POSIX
+traversal --- which the existing fallback walker already
+produces, since POSIX traversal transparently follows
+firmlinks. The host's \texttt{st\_dev} reports identically
+for every path under \texttt{/} (the kernel hides the
+firmlink boundary from \texttt{stat}); the firmlink table at
+\texttt{/usr/share/firmlinks} is the authoritative source the
+walker already reads at scan-start.
+& api-only-already-correct \\
+
+EX-32 &
+Research scratchpad: what does the publicly-documented +
+reverse-engineered knowledge of APFS encryption cover, and
+what would a future feature require? Documentation of the
+keybag, per-file \texttt{crypto\_state\_t}, class keys,
+\texttt{INCOMPAT\_ENC\_ROLLED}, and the
+\texttt{wrapped\_meta\_crypto\_state\_t} of the volume
+superblock. Crate exposes \texttt{crypto\_meta} as a
+non-production decoder module against synthetic fixtures.
+No decryption path is implemented; no feature follows without
+an oracle.
+& research-scratchpad \\
+
+EX-33 &
+Profile the \texttt{apfs\_scan\_search\_names} FFI on the
+1.56~M-entry \texttt{/Users/kai} baseline; ship one lift if
+there's headroom. The pre-lift \texttt{Vec<String>} +
+\texttt{str::contains} ran 30--55~ms median per keystroke;
+the lifted flat-\texttt{Vec<u8>}-buffer +
+\texttt{memchr::memmem::Finder} runs 9--12~ms median for
+typical 4--12-character queries, $>$12$\times$ on zero-match
+queries (memory-bandwidth floor). Comfortably inside the
+``feels live'' threshold.
+& validated-flat-buffer-memchr-lift \\
 
 \end{longtable}

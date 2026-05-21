@@ -7,11 +7,11 @@ identifier as well as the prose definition.
 
 \begin{description}
   \item[Allocated size.] Bytes the filesystem has assigned to a
-    file's content. Distinct from logical size (the user-visible
-    byte length) and from exclusive size (bytes only this inode
-    owns). Validated for ordinary, clone, hard-link, symlink, and
-    directory case classes; fail-closed for sparse files and
-    decmpfs-compressed files (chapter~8). Emitted as
+    file's content (\texttt{st\_blocks * 512} oracle). Validated
+    by EX-26 for every shape the macOS write path produces:
+    ordinary, clone, hard-link, sparse, decmpfs
+    (xattr-stream-stored and resource-fork-stored), symlink, and
+    directory. Emitted as
     \texttt{allocated\_size: Option<u64>}; \texttt{None} indicates
     a deliberately-not-claimed row.
   \item[\texttt{alloced\_size}.] The
@@ -43,15 +43,15 @@ identifier as well as the prose definition.
     \texttt{apfs\_layout\_free}. One \texttt{ApfsLayout}
     represents one \texttt{(subtree-root, depth, metric,
     width$\times$height)} configuration.
-  \item[\texttt{ApfsScan}.] The Rust opaque handle the C ABI
-    returns from \texttt{apfs\_scan\_directory} (or
-    \texttt{apfs\_scan\_directory\_with\_progress}, which adds a
-    sampled progress callback at the same 250~ms cadence as the
-    CLI's \texttt{-{}-progress} stream and carries a cumulative
-    \texttt{bytes} field so the SwiftUI shell's progress bar is
-    determinate). Owns the \texttt{FallbackScanOutput} (entries,
+  \item[\texttt{ApfsScan}.] The opaque handle the C ABI returns
+    from \texttt{apfs\_scan\_directory} (or the
+    \texttt{\_with\_progress} variant, which adds a sampled
+    callback at the same 250~ms cadence as the CLI's
+    \texttt{-{}-progress} stream and carries a cumulative
+    \texttt{bytes} field so the determinate progress island has a
+    denominator). Owns the \texttt{FallbackScanOutput} (entries,
     walk-skips, \texttt{correctness\_claim}, source descriptor),
-    the indexed tree built from it, and a path-string cache the
+    the indexed tree, and a path-string cache the
     \texttt{apfs\_scan\_node\_path} accessor populates on first
     query (chapter~12, structural-density pass round 4). Released
     by \texttt{apfs\_scan\_free}.
@@ -60,6 +60,16 @@ identifier as well as the prose definition.
     \texttt{Vec<BulkEntry>} across the whole walk. The
     micro-optimisation pass introduced it to replace the
     per-directory fresh allocation.
+  \item[\texttt{-{}-cache}.] CLI flag (off by default) that
+    enables the v1 persistent fallback cache (chapter~10). The
+    cache lives under
+    \texttt{\textasciitilde/Library/Caches/apfs-fastindex/} and
+    is keyed by a probe-derived signature of the scanned
+    directory tree. Useful on stable trees (5--50$\times$
+    speedup); not recommended for active home directories
+    (mtime churn invalidates every signature; probe overhead
+    exceeds the walk on 172~k-directory trees). EX-30 records
+    the per-target numbers.
   \item[\texttt{cbindgen}.] The Rust crate that walks
     \texttt{src/ffi.rs} and emits the C header Swift imports. Run
     by the \texttt{build.rs} on every change so the C declarations
@@ -142,6 +152,14 @@ identifier as well as the prose definition.
     relationship through SIBLING\_LINK and SIBLING\_MAP records;
     the unique-inode aggregate policy ensures the inode's logical
     size is counted once per aggregate root.
+  \item[Extent-reference tree.] The standalone B-tree holding
+    \texttt{phys\_ext} records, one per shared physical extent.
+    Each record carries \texttt{(paddr\_first, length\_blocks,
+    refcnt, owning\_obj\_id)} and is the authority for the Real
+    metric (chapter~8). Storage class is
+    \texttt{OBJECT\_TYPE\_PHYSICAL} on detached
+    \texttt{.dmg} images (root OID is the paddr directly) and
+    may be virtual on live volumes (OMAP lookup at the scan XID).
   \item[Indexed tree.] The in-memory \texttt{Tree} the FFI
     builds once per scan from the flat
     \texttt{Vec<NamespaceEntry>}. One \texttt{TreeNode} per
@@ -149,10 +167,10 @@ identifier as well as the prose definition.
     density-pass, carrying name (as \texttt{Box<str>}), parent
     index, a \texttt{(children\_start, children\_count)} pair
     into a contiguous \texttt{children\_arena} shared across the
-    whole forest, own logical and allocated sizes, and post-
-    order-computed \texttt{value\_logical},
-    \texttt{value\_allocated}, and \texttt{item\_count}
-    aggregates. The path string is not stored on the node; it is
+    whole forest, own logical, allocated, and real sizes, and
+    post-order-computed \texttt{value\_logical},
+    \texttt{value\_allocated}, \texttt{value\_real}, and
+    \texttt{item\_count} aggregates. The path string is not stored on the node; it is
     lazy-computed by walking the parent chain when
     \texttt{apfs\_scan\_node\_path} first asks for it, then
     cached on the \texttt{ApfsScan}. Random-access reads by index
@@ -216,8 +234,27 @@ identifier as well as the prose definition.
   \item[Raw mode.] The native APFS-parsing backend. Used when the
     source is in the raw-mode allowlist (detached \texttt{.dmg},
     caller-supplied raw device, explicitly stable APFS source).
+  \item[Real size.] Per-inode clone-deduplicated allocated bytes
+    (chapter~8, EX-27). Computed from the extent-reference tree's
+    \texttt{phys\_ext} refcounts and the \texttt{j\_dstream\_id\_val\_t}
+    record's per-dstream refcount. Summed across all inodes on a
+    volume, the metric equals
+    $\sum \texttt{phys\_ext.length} \cdot \texttt{block\_size}$
+    modulo integer-division rounding of $\leq$
+    \texttt{refcnt - 1} bytes per clone-shared dstream. The
+    fallback walker emits
+    \texttt{real\_size = allocated\_size} (no refcount info from
+    POSIX); raw mode emits \texttt{None} when the
+    extent-reference tree did not validate.
   \item[Readable.] Source property: raw bytes can be opened and
     sampled. Cheap. Not, on its own, evidence of correctness.
+  \item[\texttt{apfs\_scan\_search\_names}.] FFI entry point
+    backing the shell's substring-search field. Takes a needle
+    pointer plus length, returns matching node indices sorted by
+    the active metric. Backed by a flat name buffer plus
+    \texttt{memchr::memmem::Finder} after EX-33's lift.
+    Per-keystroke median latency 9--12~ms on a 1.5~M-entry tree
+    for typical 4--12-character queries.
   \item[Scan XID.] The transaction identifier the parser pins for
     the duration of a run. All object resolution is performed
     against this XID. Picked as the highest checksum-valid NXSB

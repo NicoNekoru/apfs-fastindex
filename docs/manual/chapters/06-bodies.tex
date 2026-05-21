@@ -1,12 +1,10 @@
 \chapter{Record Bodies and the Xfield Cursor}
 \label{ssec:xfield-spec-vs-impl}
 
-An FS-tree leaf record has a fixed-size header and a variable-length
-tail of extended fields. The fixed header is easy. The variable tail
-is subtle: Apple's reference admits an ambiguous reading, the
-converged code is unanimous in a single direction, and the right rule
-must be applied uniformly across every record family that uses
-xfields.
+An FS-tree leaf record consists of a fixed-size header and a
+variable-length tail of extended fields. The header decoding is
+mechanical. The tail follows one cursor rule, applied uniformly
+across every record family that uses xfields.
 
 \section{The Cursor Rule}
 
@@ -29,9 +27,8 @@ from \texttt{linux-apfs-rw}, \texttt{apfs-fuse}, \texttt{dissect.apfs},
     \texttt{sum(round\_up(x\_size, 8))} for the record's xfields.
 \end{enumerate}
 
-That is the rule. It is one rule across all xfield-bearing record
-families, and a record whose \texttt{xf\_used\_data} disagrees with
-the padded sum is malformed.
+One rule across all xfield-bearing record families. A record whose
+\texttt{xf\_used\_data} disagrees with the padded sum is malformed.
 
 \begin{figure}[h]
 \centering
@@ -98,28 +95,26 @@ for entry in metadata.iter() {
 assert_eq!(padded_total, blob_header.xf_used_data as usize);
 \end{minted}
 
-\section{Why The Reference Reads Otherwise}
+\section{Where The Reference Reads Otherwise}
 
-Apple's reference describes the xfield layout in terms that admit a
-"the value area is independently eight-byte aligned" reading. Under
-that reading, the cursor would jump to the next eight-byte boundary
-after the metadata table before reading the first value. The
-difference is small and frequently invisible: when
-\texttt{xf\_num\_exts * 4} is already a multiple of eight, both
-readings agree.
+Apple's reference admits a reading under which the value area is
+independently eight-byte aligned: the cursor would jump to the next
+eight-byte boundary after the metadata table before reading the
+first value. The difference is invisible when
+\texttt{xf\_num\_exts * 4} is already a multiple of eight, but
+diverges otherwise.
 
-The converged code is uniform that no such re-alignment happens. The
-value cursor starts at the metadata-table end, full stop. Each
-value's padding to the next eight-byte multiple is performed
-\emph{after} the value, not before the first.
+The converged code performs no such re-alignment. The value cursor
+starts at the metadata-table end; each value's padding to the next
+eight-byte multiple is performed \emph{after} the value, not before
+the first.
 
-The project initially modelled four candidate layouts in EX-13,
-scoring each against the proof fixture and selecting per-record.
-That probe successfully recovered the correct values but did not
-explain why. SR-015 reviewed the converged sources and showed that
-the four candidates were a probe artefact: a single rule explains
-every record the candidates fit. EX-16 re-ran the decode under the
-single rule and confirmed it.
+EX-13 initially modelled four candidate layouts and selected
+per-record. The probe recovered the correct values but did not
+explain why. SR-015 reviewed the converged sources and showed the
+four candidates were a probe artefact: one rule explains every
+record. EX-16 re-ran the decode under the single rule and
+confirmed it.
 
 \section{Evidence From The Proof Fixture}
 
@@ -154,16 +149,15 @@ oid & family & num\_exts & x\_size set & xf\_used\_data & padded sum \\
 \end{tabular}
 \end{center}
 
-The sparse inode at OID 23 is the load-bearing row. It carries three
+The sparse inode at OID 23 is the load-bearing row. Its three
 xfields (\texttt{NAME=11}, \texttt{DSTREAM=40},
-\texttt{SPARSE\_BYTES=8}) with padded lengths summing to 64; the
-\texttt{NAME} value has a non-multiple-of-eight \texttt{x\_size} (11),
-which forces the cursor to use padded advancement.  Earlier
-candidate-scoring had needed per-record reasoning for this row;
-under the single rule it decodes cleanly.
+\texttt{SPARSE\_BYTES=8}) have padded lengths summing to 64. The
+\texttt{NAME} value's non-multiple-of-eight \texttt{x\_size}
+forces the cursor to use padded advancement. Earlier
+candidate-scoring needed per-record reasoning here; the single
+rule decodes it cleanly.
 
-No record has unused trailing bytes inside its xfield blob. The
-structural assertion holds without exception.
+No record has unused trailing bytes inside its xfield blob.
 
 \section{The Required Xfield Types}
 
@@ -189,12 +183,10 @@ tolerates others.
 
 Other types (\texttt{INO\_EXT\_TYPE\_FS\_UUID},
 \texttt{INO\_EXT\_TYPE\_PURGEABLE\_FLAGS}, and so on) appear in the
-wild but are not consumed by the indexer's emission rows. The cursor
-rule still
-reads past them correctly because the rule treats every value as
-opaque bytes of length \texttt{x\_size} padded to a multiple of
-eight; only the values the parser actually inspects need a known
-type.
+wild but are not consumed by the indexer. The cursor rule reads
+past them correctly --- every value is opaque bytes of length
+\texttt{x\_size} padded to a multiple of eight --- and only the
+values the parser inspects need a known type.
 
 \section{Field-Level Cross-Tool Equality}
 
@@ -215,24 +207,13 @@ finds zero divergent fields across \texttt{key}, \texttt{value}, every
 \texttt{key\_len}, \texttt{value\_len}, \texttt{object\_id},
 \texttt{raw\_type}, and \texttt{family}.
 
-Cross-tool field equality is the strongest oracle the body decoder
-will see until the project has a same-run \texttt{go-apfs} body dump
-to add. The Python decoder and the Rust decoder are independent
-implementations of the same source-review rules; their agreement
-makes the rules themselves testable.
+The Python decoder and the Rust decoder are independent
+implementations of the same SR-015 / SR-016 rules; their agreement
+makes the rules themselves testable. A future
+\texttt{go-apfs}-body-dump probe would add a third oracle.
 
-\section{When To Use This Chapter}
-
-A reader implementing an APFS body decoder should:
-
-\begin{enumerate}
-  \item read the fixed header for the record type from Apple's
-    reference,
-  \item apply the cursor rule above to the xfield tail,
-  \item validate against every fail-closed condition in chapter~7,
-  \item compare against an independent reference implementation, not
-    against intuition.
-\end{enumerate}
-
-Steps 3 and 4 are not optional. The next chapter is what they look
-like in practice.
+A reader implementing an APFS body decoder applies, in order: the
+fixed header for the record type (Apple reference), the cursor rule
+above to the xfield tail, every fail-closed condition in
+chapter~7, and a cross-tool comparison against an independent
+implementation.
