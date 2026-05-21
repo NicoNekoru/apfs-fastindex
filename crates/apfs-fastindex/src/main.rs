@@ -1092,6 +1092,20 @@ fn write_reply<W: std::io::Write>(out: &mut W, reply: &HelperReply<'_>) {
 fn run_server_mode() -> ExitCode {
     use std::io::{BufRead, BufReader, Write};
 
+    // Audit M4: tear down the helper if the parent goes
+    // away. The OS already closes the parent's end of our
+    // socketpair on parent exit, which makes our next
+    // `read_line` return EOF — so the loop's existing
+    // `Ok(0)` arm handles graceful + crash exit. But if the
+    // helper is blocked inside the walker (e.g. a multi-
+    // second I/O on /Users) when the parent crashes, we
+    // wouldn't notice for the duration of that scan. The
+    // kqueue watcher spawns a background thread that
+    // `NOTE_EXIT`-monitors the parent PID and aborts the
+    // helper the moment it fires. Cheap insurance: one
+    // syscall + one wait.
+    spawn_parent_death_watcher();
+
     let threads = default_fallback_threads();
 
     // Track every tempfile we hand out. On quit (or on a
@@ -1235,6 +1249,73 @@ fn cleanup_owned_paths(paths: &[std::path::PathBuf]) {
     for p in paths {
         let _ = std::fs::remove_file(p);
     }
+}
+
+/// Audit M4: spawn a background thread that watches the
+/// parent process for exit via `kqueue` + `NOTE_EXIT`. When
+/// the parent dies, the helper exits immediately rather than
+/// continuing to hold root privileges. Belt-and-suspenders
+/// to the OS's stdin-EOF-on-parent-death behaviour, which
+/// the main loop already handles — but if the helper is
+/// blocked in `fallback_scan_path_with_options` during the
+/// parent crash, kqueue is the only signal that reaches us
+/// before the scan completes.
+///
+/// Failure modes (kqueue not available, parent already gone,
+/// EVFILT_PROC race): the function returns silently and the
+/// helper falls back to stdin-EOF detection. Better than
+/// nothing.
+#[cfg(target_os = "macos")]
+fn spawn_parent_death_watcher() {
+    use std::thread;
+    let parent_pid: i32 = unsafe { libc::getppid() };
+    if parent_pid <= 1 {
+        // PID 1 (launchd) or unknown — refuse to watch.
+        return;
+    }
+    thread::spawn(move || unsafe {
+        let kq = libc::kqueue();
+        if kq < 0 {
+            return;
+        }
+        // Register interest in NOTE_EXIT on the parent PID.
+        let mut sub: libc::kevent = std::mem::zeroed();
+        sub.ident = parent_pid as libc::uintptr_t;
+        sub.filter = libc::EVFILT_PROC;
+        sub.flags = libc::EV_ADD | libc::EV_ENABLE | libc::EV_ONESHOT;
+        sub.fflags = libc::NOTE_EXIT;
+        let n = libc::kevent(kq, &sub, 1, std::ptr::null_mut(), 0, std::ptr::null());
+        if n < 0 {
+            libc::close(kq);
+            return;
+        }
+        // Block until the parent exits. `kevent` with a NULL
+        // timeout waits indefinitely; the one-shot
+        // registration auto-removes after firing.
+        let mut out: libc::kevent = std::mem::zeroed();
+        let _ = libc::kevent(
+            kq,
+            std::ptr::null(),
+            0,
+            &mut out,
+            1,
+            std::ptr::null(),
+        );
+        // Parent went away. Exit immediately — we don't have
+        // a useful action to take on a parentless root
+        // helper. Skip cleanup of `owned_paths` because we
+        // can't reach the main thread's state; the OS will
+        // unlink-on-reboot for sticky-tmp files anyway, and
+        // the parent's `quit` path is the normal cleanup
+        // route.
+        libc::_exit(0);
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+fn spawn_parent_death_watcher() {
+    // No-op on non-Darwin builds. The crate's only ship target
+    // is macOS; non-macOS builds are for unit-test convenience.
 }
 
 /// Run one scan from the server loop. Picks its own

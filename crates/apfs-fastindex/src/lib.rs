@@ -500,7 +500,11 @@ pub struct ValidatedSource {
 impl Drop for ValidatedSource {
     fn drop(&mut self) {
         if let Some(device) = &self.detach_device {
-            let _ = Command::new("hdiutil").args(["detach", device]).output();
+            // Absolute path so a user-controlled `$PATH`
+            // can't substitute a shadowing `hdiutil` (audit C3).
+            let _ = Command::new("/usr/bin/hdiutil")
+                .args(["detach", device])
+                .output();
         }
     }
 }
@@ -1023,7 +1027,9 @@ fn normalize_raw_device(device: &str) -> Result<String, SourceGateError> {
 }
 
 fn attach_dmg_source(requested_path: PathBuf) -> Result<ValidatedSource, SourceGateError> {
-    let output = Command::new("hdiutil")
+    // Absolute path so a user-controlled `$PATH` can't substitute
+    // a shadowing `hdiutil` (audit C3).
+    let output = Command::new("/usr/bin/hdiutil")
         .args(["attach", "-plist", "-nomount"])
         .arg(&requested_path)
         .output()?;
