@@ -15,6 +15,14 @@ enum AppPrefs {
     /// ≥ 2 uses the parallel walker.
     static let threadsKey = "apfs.threads"
 
+    /// Per-panel visibility for the side column. Both default
+    /// to `true` (full layout). The View menu toggles either
+    /// individually or both at once via "Treemap Only". When
+    /// both are off the top split collapses and the treemap
+    /// gets the full window.
+    static let showFolderTreeKey = "apfs.showFolderTree"
+    static let showExtensionsKey = "apfs.showExtensions"
+
     /// Hours between automatic auto-update checks. `0` means
     /// "check on every app launch and never schedule a
     /// background check"; positive values configure

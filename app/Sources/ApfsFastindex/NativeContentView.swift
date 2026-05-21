@@ -30,6 +30,12 @@ struct NativeContentView: View {
     /// rescan.
     @AppStorage(AppPrefs.depthKey) private var depth: Int = 0
     @AppStorage(AppPrefs.threadsKey) private var threads: Int = 0
+    /// View-menu toggles for the two side panels. Driven by
+    /// `ShowPanelCommands` in `ApfsFastindexApp` (⌘1 / ⌘2 /
+    /// ⌘0 / ⌘3). When both are off the treemap takes the
+    /// whole window.
+    @AppStorage(AppPrefs.showFolderTreeKey) private var showFolderTree: Bool = true
+    @AppStorage(AppPrefs.showExtensionsKey) private var showExtensions: Bool = true
     @State private var metric: Scan.Metric = .logical
     @State private var lastSize: CGSize = .zero
     @State private var currentNode: UInt32 = 0
@@ -138,25 +144,32 @@ struct NativeContentView: View {
                 .padding(.vertical, 8)
                 .background(VizPalette.panel)
             Divider().background(VizPalette.border)
-            breadcrumbBar
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(VizPalette.panel)
-            Divider().background(VizPalette.border)
-            // Nested splits matching the WizTree layout:
-            //   - VSplitView between (tree-list + ext-list) top
-            //     half and the treemap bottom half.
-            //   - The top half is itself an HSplitView so the
-            //     user can drag the boundary between the two
-            //     side panels.
+            // Global search bar (UX-1 fix). Moved here from
+            // inside the folder-tree panel so both side panels
+            // start at the same Y — without this move the
+            // folder-tree's column header sat ~40 px below the
+            // extensions panel's, which the user flagged.
+            //
+            // Visible only when (a) a scan exists and (b) the
+            // folder tree is shown (search filters that panel's
+            // contents; with the panel hidden the field would
+            // be visible-but-inert).
+            if scan != nil && showFolderTree {
+                searchField
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(VizPalette.panel)
+                Divider().background(VizPalette.border)
+            }
+            // VSplitView between (optional side panels) and the
+            // treemap. When neither side panel is shown the
+            // VSplitView has just the treemap and there's no
+            // top section at all (UX-3 "Treemap Only" mode).
             VSplitView {
-                HSplitView {
-                    treeListPanel
-                        .frame(minWidth: 220, idealWidth: 340, maxWidth: .infinity)
-                    extListPanel
-                        .frame(minWidth: 200, idealWidth: 280, maxWidth: .infinity)
+                if showFolderTree || showExtensions {
+                    sidePanels
+                        .frame(maxWidth: .infinity, minHeight: 120, idealHeight: 220)
                 }
-                .frame(maxWidth: .infinity, minHeight: 120, idealHeight: 220)
                 GeometryReader { proxy in
                     ZStack {
                         VizPalette.bg
@@ -189,6 +202,11 @@ struct NativeContentView: View {
         .background(VizPalette.bg)
         .preferredColorScheme(.dark)
         .foregroundStyle(VizPalette.text)
+        // Non-visible carrier for the ⌘↑ Up shortcut. The
+        // breadcrumb bar used to host this Button visibly;
+        // removing the bar (UX-1) cost the shortcut, so it
+        // lives here now as a zero-sized hidden control.
+        .overlay(upShortcutBacking, alignment: .bottomTrailing)
         .onReceive(NotificationCenter.default.publisher(for: .scanAsAdministratorRequested)) { _ in
             // The File > Scan as Administrator… menu item posts
             // this notification; we kick off the privileged scan
@@ -266,16 +284,38 @@ struct NativeContentView: View {
         let overflowCount: Int
     }
 
+    /// Top-section composition (UX-3). Returns whichever side
+    /// panels are toggled on, in the matching geometry. When
+    /// only one is visible, it stretches across the full
+    /// width; when both, the HSplitView lets the user drag the
+    /// divider.
+    @ViewBuilder
+    private var sidePanels: some View {
+        if showFolderTree && showExtensions {
+            HSplitView {
+                treeListPanel
+                    .frame(minWidth: 220, idealWidth: 340, maxWidth: .infinity)
+                extListPanel
+                    .frame(minWidth: 200, idealWidth: 280, maxWidth: .infinity)
+            }
+        } else if showFolderTree {
+            treeListPanel
+                .frame(maxWidth: .infinity)
+        } else if showExtensions {
+            extListPanel
+                .frame(maxWidth: .infinity)
+        }
+    }
+
     private var treeListPanel: some View {
         VStack(spacing: 0) {
             paneHeader("Folder tree")
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
                 .background(VizPalette.bg)
-            searchField
-                .padding(.horizontal, 10)
-                .padding(.bottom, 6)
-                .background(VizPalette.bg)
+            // searchField moved to the global slot above the
+            // VSplitView so both side panels start at the same
+            // Y (UX-2 alignment fix).
             colHeader
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)
@@ -492,7 +532,15 @@ struct NativeContentView: View {
                     // collapses hierarchy so just the leaf
                     // name would be ambiguous.
                     let name: String = {
-                        if row.nodeIndex == 0 { return "/" }
+                        // Root row (UX-4): show the scan's
+                        // actual target path rather than a
+                        // bare "/". Falls back to "/" only
+                        // when the source path is unavailable
+                        // (e.g. a pre-scan state).
+                        if row.nodeIndex == 0 {
+                            let src = scan?.sourceRequestedPath ?? ""
+                            return src.isEmpty ? "/" : src
+                        }
                         if searchMatches != nil {
                             let raw = scan?.path(of: row.nodeIndex) ?? "?"
                             return DisplaySanitizer.sanitiseDisplay(
@@ -1082,92 +1130,25 @@ struct NativeContentView: View {
         }
     }
 
-    // MARK: - Breadcrumb
-
-    /// Path chain from root → currentNode, clickable in either
-    /// direction. Reconstructed via `Scan.parent(of:)` walks; the
-    /// chain is bounded by tree depth so this is cheap.
-    private var breadcrumbBar: some View {
-        HStack(spacing: 0) {
-            if scan == nil {
-                Text("(no scan loaded)")
-                    .font(AppFont.ui(12))
-                    .foregroundStyle(VizPalette.muted)
-            } else {
-                let chain = breadcrumbChain
-                ForEach(0..<chain.count, id: \.self) { i in
-                    let node = chain[i]
-                    Button {
-                        guard node.index != currentNode else { return }
-                        currentNode = node.index
-                        updateLayout()
-                    } label: {
-                        Text(node.label)
-                            .font(AppFont.ui(12)).monospacedDigit()
-                            .foregroundStyle(
-                                node.index == currentNode
-                                    ? VizPalette.text
-                                    : VizPalette.accent
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(node.index == currentNode)
-                    if i < chain.count - 1 {
-                        Text("›")
-                            .foregroundStyle(VizPalette.muted)
-                            .padding(.horizontal, 6)
-                    }
-                }
-                Spacer(minLength: 8)
-                if currentNode != 0 {
-                    Button {
-                        if let parent = scan?.parent(of: currentNode) {
-                            currentNode = parent
-                            updateLayout()
-                        }
-                    } label: {
-                        Label("Up", systemImage: "chevron.up")
-                            .labelStyle(.iconOnly)
-                            .padding(.horizontal, 4)
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Up to parent directory (⌘↑)")
-                    .keyboardShortcut(.upArrow, modifiers: .command)
-                }
-            }
+    // MARK: - Up-navigation shortcut
+    //
+    // UX-1: the original breadcrumb bar was removed (path was
+    // already in the toolbar + status bar; bar was redundant).
+    // The bar's only non-display affordance was the "Up" button
+    // (⌘↑); preserve that shortcut here as an invisible Button
+    // so users keep the keyboard navigation muscle memory.
+    @ViewBuilder
+    private var upShortcutBacking: some View {
+        Button("Up") {
+            guard let scan, currentNode != 0,
+                  let parent = scan.parent(of: currentNode) else { return }
+            currentNode = parent
+            updateLayout()
         }
-        .frame(height: 22)
-    }
-
-    private struct BreadcrumbNode {
-        let index: UInt32
-        let label: String
-    }
-
-    private var breadcrumbChain: [BreadcrumbNode] {
-        guard let scan else { return [] }
-        var chain: [BreadcrumbNode] = []
-        var cursor: UInt32? = currentNode
-        // Walk parents up to root.
-        while let c = cursor {
-            let label: String
-            if c == 0 {
-                // Synthetic root — show "/" plus the scan's
-                // requested path so the user has context. The
-                // requested path came from the user (typed into
-                // the toolbar), not from a parser, so no
-                // sanitisation needed here.
-                let root = scan.sourceRequestedPath
-                label = root.isEmpty ? "/" : root
-            } else {
-                // Parser-supplied name; sanitise before
-                // rendering into the breadcrumb (audit #App-2).
-                label = DisplaySanitizer.sanitiseDisplay(scan.name(of: c) ?? "?")
-            }
-            chain.append(BreadcrumbNode(index: c, label: label))
-            cursor = scan.parent(of: c)
-        }
-        return chain.reversed()
+        .keyboardShortcut(.upArrow, modifiers: .command)
+        .hidden()
+        .frame(width: 0, height: 0)
+        .accessibilityHidden(true)
     }
 
     // MARK: - Status bar

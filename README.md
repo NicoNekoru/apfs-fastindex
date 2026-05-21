@@ -121,7 +121,6 @@ Ultimately, I started working on this project because I missed WizTree, and want
 
 - Better coverage (?)
 - A live/watch mode (watch cache visualization during development)
-- Filtering/searching
 
 ### Permanently blocked by macOS policy (not us)
   - Live raw scanning (kernel returns EPERM on /dev/disk3s* even as root with FDA).

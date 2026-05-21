@@ -171,6 +171,15 @@ struct ApfsFastindexApp: App {
                 }
                 .keyboardShortcut("f", modifiers: .command)
             }
+
+            // View menu: per-panel visibility + a "Treemap Only"
+            // convenience that collapses both side panels. State
+            // lives in `@AppStorage` (see `AppPrefs`); the menu
+            // items bind directly to the same keys via the
+            // `ShowPanelCommands` helper below.
+            CommandMenu("View") {
+                ShowPanelCommands()
+            }
             // Help-menu entry → opens the Rust panic-hook log
             // file in the user's default editor. The file lives
             // under `~/Library/Logs/apfs-fastindex.log`; this
@@ -238,5 +247,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // — `AdminSession.shutdown()` is idempotent on the
         // already-not-running state.
         AdminSession.shared.shutdown()
+    }
+}
+
+/// View-menu items that bind directly to `@AppStorage` so
+/// toggling persists across launches. Lives next to the
+/// `.commands { }` block rather than inside it because the
+/// `@AppStorage` property wrapper needs a View context to
+/// observe — putting the bindings here keeps them within a
+/// `View` body.
+private struct ShowPanelCommands: View {
+    @AppStorage(AppPrefs.showFolderTreeKey) private var showFolderTree: Bool = true
+    @AppStorage(AppPrefs.showExtensionsKey) private var showExtensions: Bool = true
+
+    var body: some View {
+        Toggle("Folder Tree", isOn: $showFolderTree)
+            .keyboardShortcut("1", modifiers: .command)
+        Toggle("Extensions", isOn: $showExtensions)
+            .keyboardShortcut("2", modifiers: .command)
+        Divider()
+        Button("Treemap Only") {
+            showFolderTree = false
+            showExtensions = false
+        }
+        .keyboardShortcut("0", modifiers: .command)
+        Button("Show All Panels") {
+            showFolderTree = true
+            showExtensions = true
+        }
+        .keyboardShortcut("3", modifiers: .command)
     }
 }
