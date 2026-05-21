@@ -78,6 +78,49 @@ if [ "$PUBLISH" = "1" ] && [ "$PROFILE" != "release" ]; then
 fi
 
 # ---------------------------------------------------------------
+# Cargo.toml version bump (publish path only).
+#
+# Why this happens here, before the build: the crate's
+# Cargo.toml is the canonical version source. APP_VERSION
+# (computed below at bundle-assembly time) reads from it. The
+# build bakes APP_VERSION into Info.plist. The appcast item
+# (later, in the publish section) carries the same number as
+# `<sparkle:version>`. All three must agree, so we bump the
+# canonical source first, then everything downstream reads
+# the new value automatically.
+#
+# Triggers only when:
+#   --publish is set, AND
+#   --tag vX.Y.Z is given, AND
+#   the current Cargo.toml version != X.Y.Z
+#
+# Without --tag the script uses whatever's already in
+# Cargo.toml (dev / re-release of the current version).
+# ---------------------------------------------------------------
+if [ "$PUBLISH" = "1" ] && [ -n "$RELEASE_TAG" ]; then
+    TARGET_VERSION="${RELEASE_TAG#v}"
+    CRATE_TOML="$REPO_ROOT/crates/apfs-fastindex/Cargo.toml"
+    CURRENT_VERSION="$(awk -F'"' '/^version[[:space:]]*=/ { print $2; exit }' "$CRATE_TOML")"
+    if [ "$CURRENT_VERSION" != "$TARGET_VERSION" ]; then
+        echo "==> [0/6] bump Cargo.toml: $CURRENT_VERSION -> $TARGET_VERSION"
+        # Targeted sed: only the first `version = "..."` line
+        # (the `[package].version` field). `-i.bak` is required
+        # for BSD sed compatibility; the .bak file is removed
+        # immediately after.
+        sed -i.bak \
+            "0,/^version = \"$CURRENT_VERSION\"/s//version = \"$TARGET_VERSION\"/" \
+            "$CRATE_TOML"
+        rm -f "$CRATE_TOML.bak"
+        # Refresh Cargo.lock so its `apfs-fastindex` entry
+        # matches the new manifest version. `cargo update -p`
+        # is the minimum-impact way to do this; it touches
+        # only the one package's entry in the lockfile.
+        cargo update -p apfs-fastindex --offline 2>/dev/null \
+            || cargo update -p apfs-fastindex
+    fi
+fi
+
+# ---------------------------------------------------------------
 # Step 1 — Rust crate.
 # The build.rs hook regenerates the cbindgen header on every build,
 # so we don't need a separate header-generation step. Output lands
@@ -396,126 +439,103 @@ if [ "$PUBLISH" != "1" ]; then
 fi
 
 # ---------------------------------------------------------------
-# Step 6 — Publish a GitHub release with the .app bundle.
+# Step 6 — Single-command release.
 #
-# Resolve the tag, then zip the bundle (a tar archive would strip
-# extended attributes and the ad-hoc codesignature, so zip is the
-# only macOS-friendly choice). `gh release create` is idempotent
-# the way we use it: if the release already exists we fall through
-# to `gh release upload --clobber` so a re-run replaces the asset.
+# `make-release.sh --publish --tag v0.2.2` does everything:
+#
+#   1. Zip the bundle (already built above with APP_VERSION baked
+#      in, which the earlier-in-the-script bump path set up).
+#   2. Sign the zip via `sign_update` (reads private key from
+#      Keychain).
+#   3. Append a new <item> to appcast.xml with the deterministic
+#      GitHub release-asset URL and the signature.
+#   4. Commit Cargo.toml + appcast.xml as "release: vX.Y.Z".
+#   5. Create the annotated tag locally.
+#   6. Push the commit and tag.
+#   7. `gh release create` the release with the zip attached.
+#
+# The Cargo.toml version bump happened earlier (before the
+# build) when --publish + --tag was detected — see the
+# `bump_cargo_version_for_publish` block.
+#
+# Pre-flight: every dependency we'll touch must be ready, and
+# the working tree must be clean enough that we won't sweep
+# unrelated changes into the release commit.
 # ---------------------------------------------------------------
-if [ -z "$RELEASE_TAG" ]; then
-    # APP_VERSION was already resolved above (CLI tag, then
-    # GITHUB_REF_NAME, then Cargo.toml). Reuse it so the tag the
-    # release lands under matches the version baked into the
-    # bundle's Info.plist — without that match, Sparkle's version
-    # comparison would treat the new release as the same as the
-    # currently-running app and never offer the update.
-    RELEASE_TAG="v$APP_VERSION"
-fi
-
 if ! command -v gh >/dev/null 2>&1; then
     echo "make-release.sh: gh CLI not found; install from https://cli.github.com/" >&2
     exit 1
 fi
+if [ ! -f "$SPARKLE_PUBKEY_FILE" ]; then
+    echo "make-release.sh: app/sparkle-public-key.txt missing." >&2
+    echo "  Run app/.build/artifacts/sparkle/Sparkle/bin/generate_keys once," >&2
+    echo "  then echo -n the printed public key into app/sparkle-public-key.txt." >&2
+    exit 1
+fi
+SIGN_UPDATE_BIN="$(
+    find "$REPO_ROOT/app/.build/artifacts/sparkle/Sparkle/bin" \
+        -name sign_update -type f 2>/dev/null | head -1
+)"
+if [ -z "$SIGN_UPDATE_BIN" ]; then
+    echo "make-release.sh: sign_update not found under app/.build." >&2
+    echo "  Did 'swift build' run? Sparkle should unpack its tools there." >&2
+    exit 1
+fi
 
-echo "==> [6/6] publish GitHub release $RELEASE_TAG"
+RELEASE_TAG="v$APP_VERSION"
 ARCH="$(uname -m)"
 ASSET_NAME="ApfsFastindex-$RELEASE_TAG-macos-$ARCH.zip"
 ASSET_PATH="$REPO_ROOT/app/$ASSET_NAME"
 
-rm -f "$ASSET_PATH"
-# `ditto -c -k --sequesterRsrc --keepParent` is Apple's recommended
-# way to zip a .app: it preserves resource forks, symlinks, and the
-# codesignature; plain `zip -r` mangles all three.
-ditto -c -k --sequesterRsrc --keepParent "$BUNDLE" "$ASSET_PATH"
-
-if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-    echo "    release $RELEASE_TAG exists; uploading asset with --clobber"
-    gh release upload "$RELEASE_TAG" "$ASSET_PATH" --clobber
-else
-    echo "    creating release $RELEASE_TAG"
-    gh release create "$RELEASE_TAG" "$ASSET_PATH" \
-        --title "$RELEASE_TAG" \
-        --generate-notes
-fi
-
-echo
-echo "Published $ASSET_NAME to release $RELEASE_TAG."
-
-# ---------------------------------------------------------------
-# Sparkle appcast update.
-#
-# Sign the zip with `sign_update` (Sparkle's CLI tool, ships
-# inside the Sparkle SwiftPM checkout under
-# artifacts/Sparkle/bin/) and append a new <item> to
-# appcast.xml. The maintainer then commits + pushes
-# appcast.xml so the next user-side daily check picks up the
-# release.
-#
-# Locating `sign_update`: SwiftPM unzips Sparkle's xcframework
-# under .build/artifacts/. The exact path varies by Sparkle
-# version, so we glob for the binary and fall back to a
-# clear error if we can't find it.
-#
-# When the EdDSA public-key file is missing (dev hasn't done
-# the one-time `sign_update --generate-keys` setup), skip the
-# appcast update entirely. The GitHub release still lands; the
-# release just isn't yet visible to auto-updaters until the
-# maintainer signs it manually.
-# ---------------------------------------------------------------
-if [ ! -f "$SPARKLE_PUBKEY_FILE" ]; then
-    echo
-    echo "    Sparkle: app/sparkle-public-key.txt missing — skipping appcast."
-    echo "    One-time setup:"
-    echo "      1. find .build -name sign_update -type f   # in app/"
-    echo "      2. <path-to-sign_update> --generate-keys"
-    echo "      3. The public key prints to stdout; write it to"
-    echo "         app/sparkle-public-key.txt (single line, no newline)."
-    echo "      4. Re-run make-release.sh --publish."
-    exit 0
-fi
-
-SIGN_UPDATE_BIN="$(
-    find "$REPO_ROOT/app/.build" -name sign_update -type f -perm +u+x 2>/dev/null | head -1
+# Make sure the only files dirty in the working tree are ones
+# we know how to handle (Cargo.toml from our pre-build bump
+# and any earlier-staged but unrelated changes are blocked).
+DIRTY="$(
+    git -C "$REPO_ROOT" status --porcelain \
+        | grep -vE '(^.. Cargo\.lock|^.. crates/apfs-fastindex/Cargo\.toml|^.. appcast\.xml|^\?\?)'
 )"
-if [ -z "$SIGN_UPDATE_BIN" ]; then
-    echo
-    echo "    Sparkle: sign_update binary not found under app/.build."
-    echo "    swift build should have unpacked it from the Sparkle SwiftPM"
-    echo "    artifact. The GitHub release was uploaded but the appcast was"
-    echo "    NOT updated; auto-update clients won't see this version until"
-    echo "    you re-run make-release.sh --publish after a clean build."
+if [ -n "$DIRTY" ]; then
+    echo "make-release.sh: working tree has unrelated changes; commit or stash first:" >&2
+    echo "$DIRTY" >&2
     exit 1
 fi
 
-echo
-echo "==> Sparkle: sign + appcast update"
+# Repo owner/name for the deterministic asset URL. We don't
+# need a network round-trip for this — GitHub's release-asset
+# download URL is a stable function of (owner, repo, tag,
+# filename) and gh repo view reads from the local .git/config
+# remote.
+REPO_FULL_NAME="$(
+    gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null
+)"
+if [ -z "$REPO_FULL_NAME" ]; then
+    echo "make-release.sh: could not resolve repo owner/name via gh." >&2
+    exit 1
+fi
+ASSET_URL="https://github.com/$REPO_FULL_NAME/releases/download/$RELEASE_TAG/$ASSET_NAME"
+
+echo "==> [6/6] release $RELEASE_TAG"
+
+# 1. Zip.
+rm -f "$ASSET_PATH"
+# `ditto -c -k --sequesterRsrc --keepParent` is Apple's
+# recommended way to zip a .app: preserves resource forks,
+# symlinks, and the codesignature; plain `zip -r` mangles all
+# three.
+ditto -c -k --sequesterRsrc --keepParent "$BUNDLE" "$ASSET_PATH"
+
+# 2. Sign the zip. sign_update prints one line in the shape
+#    `sparkle:edSignature="..." length="..."`.
 SIGN_OUTPUT="$("$SIGN_UPDATE_BIN" "$ASSET_PATH")"
-# `sign_update` prints one line like:
-#   sparkle:edSignature="..." length="12345"
-# Parse out the signature and length so we can drop them into
-# the appcast item.
 ED_SIG="$(echo "$SIGN_OUTPUT" | sed -n 's/.*sparkle:edSignature="\([^"]*\)".*/\1/p')"
 ASSET_LEN="$(echo "$SIGN_OUTPUT" | sed -n 's/.*length="\([^"]*\)".*/\1/p')"
 if [ -z "$ED_SIG" ] || [ -z "$ASSET_LEN" ]; then
-    echo "    sign_update output not in the expected shape; got:"
-    echo "    $SIGN_OUTPUT"
+    echo "make-release.sh: sign_update output unexpected: $SIGN_OUTPUT" >&2
     exit 1
 fi
 
-# Build the new appcast item. Released URL is the GitHub
-# release-asset download URL — gh release returns it via the
-# `gh release view` JSON view.
-ASSET_URL="$(
-    gh release view "$RELEASE_TAG" --json assets \
-        --jq ".assets[] | select(.name == \"$ASSET_NAME\") | .url" 2>/dev/null
-)"
-if [ -z "$ASSET_URL" ]; then
-    echo "    Could not resolve asset URL for $ASSET_NAME on release $RELEASE_TAG."
-    exit 1
-fi
-
+# 3. Append <item> to appcast.xml. Inserted right after
+#    </language> so the newest entry is first under <channel>.
 PUB_DATE="$(date -u +'%a, %d %b %Y %H:%M:%S +0000')"
 NEW_ITEM=$(cat <<XML
         <item>
@@ -533,10 +553,6 @@ NEW_ITEM=$(cat <<XML
         </item>
 XML
 )
-
-# Insert the new item right after `<channel>...</description>`
-# header block. The marker we splice on is `</language>` so
-# new items consistently land at the top (newest-first).
 APPCAST="$REPO_ROOT/appcast.xml"
 APPCAST_TMP="$APPCAST.tmp"
 awk -v item="$NEW_ITEM" '
@@ -549,10 +565,45 @@ awk -v item="$NEW_ITEM" '
     { print }
 ' "$APPCAST" > "$APPCAST_TMP"
 mv "$APPCAST_TMP" "$APPCAST"
+echo "    appcast.xml: prepended <item> for $RELEASE_TAG"
 
-echo "    appcast.xml updated with $RELEASE_TAG."
+# 4. Commit Cargo.toml (already bumped above) + appcast.xml.
+git -C "$REPO_ROOT" add \
+    crates/apfs-fastindex/Cargo.toml \
+    Cargo.lock \
+    appcast.xml
+git -C "$REPO_ROOT" commit -m "release: $RELEASE_TAG" \
+    --quiet
+echo "    git: committed Cargo.toml + appcast.xml"
+
+# 5. Annotated tag pointing at the commit we just made.
+if git -C "$REPO_ROOT" rev-parse "$RELEASE_TAG" >/dev/null 2>&1; then
+    echo "make-release.sh: tag $RELEASE_TAG already exists locally." >&2
+    echo "  Delete it (git tag -d $RELEASE_TAG) or pick a different tag." >&2
+    exit 1
+fi
+git -C "$REPO_ROOT" tag -a "$RELEASE_TAG" -m "$RELEASE_TAG"
+echo "    git: tagged $RELEASE_TAG"
+
+# 6. Push commit + tag. The user is expected to be on a branch
+#    that's tracking the upstream they want to push to (usually
+#    main). git push --follow-tags ensures the new tag rides
+#    along with the commit.
+BRANCH="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD)"
+git -C "$REPO_ROOT" push --follow-tags origin "$BRANCH"
+echo "    git: pushed $BRANCH + $RELEASE_TAG to origin"
+
+# 7. gh release create — uploads the zip atomically with the
+#    release creation. `gh release create` accepts the tag
+#    we just pushed and refuses if the tag doesn't exist on
+#    the remote, which we just handled.
+gh release create "$RELEASE_TAG" "$ASSET_PATH" \
+    --title "$RELEASE_TAG" \
+    --generate-notes
+echo "    gh: created release $RELEASE_TAG with $ASSET_NAME"
+
 echo
-echo "    Next step: commit appcast.xml and push to main so the"
-echo "    daily background check on existing installations sees"
-echo "    the new release:"
-echo "      git add appcast.xml && git commit -m 'release: $RELEASE_TAG' && git push"
+echo "✅ Released $RELEASE_TAG."
+echo "   Existing v$( awk -F'"' '/^version/ { print $2; exit }' \
+    "$REPO_ROOT/crates/apfs-fastindex/Cargo.toml" )+ installs"
+echo "   will see the update on their next daily check."
