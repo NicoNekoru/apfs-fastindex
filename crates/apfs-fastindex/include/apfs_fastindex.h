@@ -360,17 +360,36 @@ uint32_t apfs_scan_node_count(const struct ApfsScan *scan);
  * FFI call from Swift (which on a pathological match-everything
  * query would have been millions of FFI hits).
  *
- * Architecture: the pre-lowercased `tree.names_lower` cache
- * (built once at scan time) means the inner loop is a tight
- * `Vec<String>` scan with one `to_lowercase()` for the query
- * and `contains` per name. The ancestor walk is a parent-
- * pointer chain (`Option<u32>`) per match, each step a
- * single `Vec` index + insert into a `FxHashSet`. On a
- * 1.56 M-entry `/Users/kai` scan it measures in the low
- * tens of ms in release builds — vs the original Swift-side
- * loop that ran `localizedCaseInsensitiveContains` (NFD
- * normalisation + locale-aware case folding) on every node
- * per keystroke (multi-second latency).
+ * Architecture (EX-33 follow-up):
+ *
+ * 1. The tree carries a **flat lowercased-name buffer**
+ *    (`tree.names_lower_buf: Vec<u8>` + offsets), built once
+ *    at scan time. Scanning every name reads sequentially
+ *    from one contiguous allocation; the CPU prefetcher
+ *    streams through it. (The prior `Vec<String>` shape
+ *    forced a heap-pointer chase per name, defeating
+ *    prefetch — ~10× slower on 1.5 M-node trees.)
+ *
+ * 2. The query is lowercased once and wrapped in a
+ *    `memchr::memmem::Finder`. The Finder amortises
+ *    needle-preprocessing across every haystack call;
+ *    `str::contains` builds the searcher state per call,
+ *    which is wasted work when we have 1.5 M haystacks
+ *    to scan with the same needle.
+ *
+ * 3. For each name whose bytes contain the lowercased
+ *    needle, walk the parent chain (`tree.nodes[i].parent:
+ *    Option<u32>`) and insert every ancestor into an
+ *    `FxHashSet`. Early-out: when `insert` returns false
+ *    (node already in), the rest of that chain is too —
+ *    total ancestor work is O(unique kept nodes), not
+ *    O(matches × depth).
+ *
+ * EX-33 numbers on a 1.56 M-entry `/Users/kai` scan: search
+ * latency dropped from 30-55 ms (median) under the
+ * Vec<String> + str::contains shape to ~3-6 ms. That's
+ * approaching the memory-bandwidth floor (~50 MB of name
+ * bytes / ~20 GB/s ≈ 2.5 ms).
  *
  * Returns `NULL` on:
  * - `scan` or `query` NULL
