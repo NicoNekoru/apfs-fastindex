@@ -1,0 +1,476 @@
+{
+  "experiment": "EX-32",
+  "title": "APFS encryption host state survey",
+  "date": "2026-05-20",
+  "host": {
+    "platform": "macOS-26.3.1-arm64-arm-64bit-Mach-O",
+    "kernel": "25.3.0"
+  },
+  "apfs_containers": [
+    {
+      "container_uuid": "3387C3A2-6E9B-467B-8AAF-437AF3B8CFD7",
+      "container_ref": "disk1",
+      "physical_stores": [
+        {
+          "device_id": "disk0s1",
+          "size": 524288000
+        }
+      ],
+      "capacity_ceiling": 524288000,
+      "capacity_free": 504242176,
+      "fusion": false,
+      "volumes": [
+        {
+          "device": "disk1s1",
+          "volume_uuid": "8D721355-AB5D-4EA0-877B-DBA214BD2DA2",
+          "name": "iSCPreboot",
+          "role": [
+            "Preboot"
+          ],
+          "mount_point": "",
+          "encrypted": false,
+          "filevault": false,
+          "locked": false,
+          "encryption_progress": null,
+          "encryption_rolling_state": null,
+          "crypto_users": null,
+          "personal_recovery_key": null,
+          "institutional_recovery_key": null,
+          "capacity_in_use": 5918720
+        },
+        {
+          "device": "disk1s2",
+          "volume_uuid": "1F4F9C24-F965-4B23-A3A1-7681DBDDBABB",
+          "name": "xART",
+          "role": [
+            "xART"
+          ],
+          "mount_point": "",
+          "encrypted": false,
+          "filevault": false,
+          "locked": false,
+          "encryption_progress": null,
+          "encryption_rolling_state": null,
+          "crypto_users": null,
+          "personal_recovery_key": null,
+          "institutional_recovery_key": null,
+          "capacity_in_use": 6311936
+        },
+        {
+          "device": "disk1s3",
+          "volume_uuid": "1613327F-A81E-4ACA-91A5-E496A0DE4834",
+          "name": "Hardware",
+          "role": [
+            "Hardware"
+          ],
+          "mount_point": "",
+          "encrypted": false,
+          "filevault": false,
+          "locked": false,
+          "encryption_progress": null,
+          "encryption_rolling_state": null,
+          "crypto_users": null,
+          "personal_recovery_key": null,
+          "institutional_recovery_key": null,
+          "capacity_in_use": 2838528
+        },
+        {
+          "device": "disk1s4",
+          "volume_uuid": "1A5EC81E-BF88-45F8-B791-AF6EB202F000",
+          "name": "Recovery",
+          "role": [
+            "Recovery"
+          ],
+          "mount_point": "",
+          "encrypted": false,
+          "filevault": false,
+          "locked": false,
+          "encryption_progress": null,
+          "encryption_rolling_state": null,
+          "crypto_users": null,
+          "personal_recovery_key": null,
+          "institutional_recovery_key": null,
+          "capacity_in_use": 20480
+        }
+      ]
+    },
+    {
+      "container_uuid": "D36EDCBD-DBA8-4878-A7C6-7625724FA881",
+      "container_ref": "disk2",
+      "physical_stores": [
+        {
+          "device_id": "disk0s3",
+          "size": 5368664064
+        }
+      ],
+      "capacity_ceiling": 5368664064,
+      "capacity_free": 3238764544,
+      "fusion": false,
+      "volumes": [
+        {
+          "device": "disk2s1",
+          "volume_uuid": "8E7A6C77-7397-4AAB-901A-61CE8BE850C0",
+          "name": "Recovery",
+          "role": [
+            "Recovery"
+          ],
+          "mount_point": "",
+          "encrypted": false,
+          "filevault": false,
+          "locked": false,
+          "encryption_progress": null,
+          "encryption_rolling_state": null,
+          "crypto_users": null,
+          "personal_recovery_key": null,
+          "institutional_recovery_key": null,
+          "capacity_in_use": 2108944384
+        },
+        {
+          "device": "disk2s2",
+          "volume_uuid": "6845F3F0-7DED-4904-9DCE-57692770030D",
+          "name": "Update",
+          "role": [
+            "Update"
+          ],
+          "mount_point": "",
+          "encrypted": false,
+          "filevault": false,
+          "locked": false,
+          "encryption_progress": null,
+          "encryption_rolling_state": null,
+          "crypto_users": null,
+          "personal_recovery_key": null,
+          "institutional_recovery_key": null,
+          "capacity_in_use": 1208320
+        }
+      ]
+    },
+    {
+      "container_uuid": "64FA8341-D30E-46FE-8534-6A05944414DF",
+      "container_ref": "disk3",
+      "physical_stores": [
+        {
+          "device_id": "disk0s2",
+          "size": 494384795648
+        }
+      ],
+      "capacity_ceiling": 494384795648,
+      "capacity_free": 231286353920,
+      "fusion": false,
+      "volumes": [
+        {
+          "device": "disk3s1",
+          "volume_uuid": "6CBF0324-4E27-4AD6-BB70-375E403282E7",
+          "name": "Macintosh HD",
+          "role": [
+            "System"
+          ],
+          "mount_point": "",
+          "encrypted": true,
+          "filevault": true,
+          "locked": false,
+          "encryption_progress": null,
+          "encryption_rolling_state": null,
+          "crypto_users": null,
+          "personal_recovery_key": null,
+          "institutional_recovery_key": null,
+          "capacity_in_use": 12455800832
+        },
+        {
+          "device": "disk3s2",
+          "volume_uuid": "EC8A5BEA-0B1B-43E5-86F6-3089DE73E847",
+          "name": "Preboot",
+          "role": [
+            "Preboot"
+          ],
+          "mount_point": "",
+          "encrypted": false,
+          "filevault": false,
+          "locked": false,
+          "encryption_progress": null,
+          "encryption_rolling_state": null,
+          "crypto_users": null,
+          "personal_recovery_key": null,
+          "institutional_recovery_key": null,
+          "capacity_in_use": 8776839168
+        },
+        {
+          "device": "disk3s3",
+          "volume_uuid": "D314D03A-3E1A-4A31-A9A8-DD9B9E7BE104",
+          "name": "Recovery",
+          "role": [
+            "Recovery"
+          ],
+          "mount_point": "",
+          "encrypted": false,
+          "filevault": false,
+          "locked": false,
+          "encryption_progress": null,
+          "encryption_rolling_state": null,
+          "crypto_users": null,
+          "personal_recovery_key": null,
+          "institutional_recovery_key": null,
+          "capacity_in_use": 1292111872
+        },
+        {
+          "device": "disk3s4",
+          "volume_uuid": "4FF2C0C2-EEC6-461D-8CDD-65D7F1E7C068",
+          "name": "Update",
+          "role": [
+            "Update"
+          ],
+          "mount_point": "",
+          "encrypted": false,
+          "filevault": false,
+          "locked": false,
+          "encryption_progress": null,
+          "encryption_rolling_state": null,
+          "crypto_users": null,
+          "personal_recovery_key": null,
+          "institutional_recovery_key": null,
+          "capacity_in_use": 23793664
+        },
+        {
+          "device": "disk3s5",
+          "volume_uuid": "53C3C11B-267E-44AA-ADCF-6934D89D8654",
+          "name": "Data",
+          "role": [
+            "Data"
+          ],
+          "mount_point": "",
+          "encrypted": true,
+          "filevault": true,
+          "locked": false,
+          "encryption_progress": null,
+          "encryption_rolling_state": null,
+          "crypto_users": null,
+          "personal_recovery_key": null,
+          "institutional_recovery_key": null,
+          "capacity_in_use": 240389505024
+        },
+        {
+          "device": "disk3s6",
+          "volume_uuid": "442A8BA2-B475-47C0-98B8-2494012FA239",
+          "name": "VM",
+          "role": [
+            "VM"
+          ],
+          "mount_point": "",
+          "encrypted": false,
+          "filevault": false,
+          "locked": false,
+          "encryption_progress": null,
+          "encryption_rolling_state": null,
+          "crypto_users": null,
+          "personal_recovery_key": null,
+          "institutional_recovery_key": null,
+          "capacity_in_use": 20480
+        }
+      ]
+    }
+  ],
+  "per_volume_info": {
+    "disk1s1": {
+      "writable": true,
+      "readonly_media": null,
+      "smart_status": "Verified",
+      "encrypted": false,
+      "filevault_master": null,
+      "boot_snapshot": false,
+      "snapshot_name": null
+    },
+    "disk1s2": {
+      "writable": true,
+      "readonly_media": null,
+      "smart_status": "Verified",
+      "encrypted": false,
+      "filevault_master": null,
+      "boot_snapshot": false,
+      "snapshot_name": null
+    },
+    "disk1s3": {
+      "writable": true,
+      "readonly_media": null,
+      "smart_status": "Verified",
+      "encrypted": false,
+      "filevault_master": null,
+      "boot_snapshot": false,
+      "snapshot_name": null
+    },
+    "disk1s4": {
+      "writable": true,
+      "readonly_media": null,
+      "smart_status": "Verified",
+      "encrypted": false,
+      "filevault_master": null,
+      "boot_snapshot": false,
+      "snapshot_name": null
+    },
+    "disk2s1": {
+      "writable": true,
+      "readonly_media": null,
+      "smart_status": "Verified",
+      "encrypted": false,
+      "filevault_master": null,
+      "boot_snapshot": false,
+      "snapshot_name": null
+    },
+    "disk2s2": {
+      "writable": true,
+      "readonly_media": null,
+      "smart_status": "Verified",
+      "encrypted": false,
+      "filevault_master": null,
+      "boot_snapshot": false,
+      "snapshot_name": null
+    },
+    "disk3s1": {
+      "writable": true,
+      "readonly_media": null,
+      "smart_status": "Verified",
+      "encrypted": true,
+      "filevault_master": null,
+      "boot_snapshot": false,
+      "snapshot_name": null
+    },
+    "disk3s2": {
+      "writable": true,
+      "readonly_media": null,
+      "smart_status": "Verified",
+      "encrypted": false,
+      "filevault_master": null,
+      "boot_snapshot": false,
+      "snapshot_name": null
+    },
+    "disk3s3": {
+      "writable": true,
+      "readonly_media": null,
+      "smart_status": "Verified",
+      "encrypted": false,
+      "filevault_master": null,
+      "boot_snapshot": false,
+      "snapshot_name": null
+    },
+    "disk3s4": {
+      "writable": true,
+      "readonly_media": null,
+      "smart_status": "Verified",
+      "encrypted": false,
+      "filevault_master": null,
+      "boot_snapshot": false,
+      "snapshot_name": null
+    },
+    "disk3s5": {
+      "writable": true,
+      "readonly_media": null,
+      "smart_status": "Verified",
+      "encrypted": true,
+      "filevault_master": null,
+      "boot_snapshot": false,
+      "snapshot_name": null
+    },
+    "disk3s6": {
+      "writable": true,
+      "readonly_media": null,
+      "smart_status": "Verified",
+      "encrypted": false,
+      "filevault_master": null,
+      "boot_snapshot": false,
+      "snapshot_name": null
+    }
+  },
+  "crypto_users_per_volume": {
+    "disk3s1": [
+      {
+        "uuid": "FB44E4E1-0B54-4FA5-839D-27D0046C8E1C",
+        "type": "Local Open Directory User",
+        "volume_owner": "Yes"
+      },
+      {
+        "uuid": "EC1C2AD9-B618-4ED6-BD8D-50F361C27507",
+        "type": "iCloud Recovery User",
+        "volume_owner": "Yes"
+      },
+      {
+        "uuid": "64C0C6EB-0000-11AA-AA11-00306543ECAC",
+        "well_known_role": "iCloud Recovery External Key",
+        "type": "iCloud Recovery External Key"
+      },
+      {
+        "uuid": "EBC6C064-0000-11AA-AA11-00306543ECAC",
+        "well_known_role": "Personal Recovery User",
+        "type": "Personal Recovery User",
+        "volume_owner": "Yes"
+      }
+    ],
+    "disk3s5": [
+      {
+        "uuid": "FB44E4E1-0B54-4FA5-839D-27D0046C8E1C",
+        "type": "Local Open Directory User",
+        "volume_owner": "Yes"
+      },
+      {
+        "uuid": "EC1C2AD9-B618-4ED6-BD8D-50F361C27507",
+        "type": "iCloud Recovery User",
+        "volume_owner": "Yes"
+      },
+      {
+        "uuid": "64C0C6EB-0000-11AA-AA11-00306543ECAC",
+        "well_known_role": "iCloud Recovery External Key",
+        "type": "iCloud Recovery External Key"
+      },
+      {
+        "uuid": "EBC6C064-0000-11AA-AA11-00306543ECAC",
+        "well_known_role": "Personal Recovery User",
+        "type": "Personal Recovery User",
+        "volume_owner": "Yes"
+      }
+    ]
+  },
+  "fdesetup_status": "FileVault is On.",
+  "notes": [
+    "Volume keybag location (apfs_keybag_loc in the volume superblock) is not exposed by diskutil. Reading it requires a raw read of the volume's checkpoint blocks, which is EX-28-blocked on the live data volume under SIP. A detached encrypted .dmg could be read raw, but we don't have one in the fixture set.",
+    "diskutil's `Encryption: bool` reflects the on-disk fs_flags ~APFS_FS_UNENCRYPTED state. During an encryption rollover (FileVault being turned on for the first time, or a key rotation in progress) the EncryptionRollingState field is populated.",
+    "Apple silicon Macs always have Data Protection on the data volume even if FileVault is off \u2014 the class keys are wrapped by Secure Enclave hardware keys. FileVault adds a user-password-derived wrapping layer on top."
+  ],
+  "references_archived": [
+    "Apple File System Reference (2020) - https://developer.apple.com/support/downloads/Apple-File-System-Reference.pdf",
+    "Apple Platform Security (Dec 2024) - https://help.apple.com/pdf/security/en-us/apple-platform-security-guide.pdf",
+    "apfs-fuse - https://github.com/sgan81/apfs-fuse",
+    "linux-apfs-rw - https://github.com/linux-apfs/linux-apfs-rw"
+  ],
+  "summary": {
+    "counts": {
+      "total_volumes": 12,
+      "encrypted": 2,
+      "filevault": 2,
+      "locked": 0,
+      "boot_snapshot": 0,
+      "rolling": 0
+    },
+    "volumes_of_interest": [
+      {
+        "device": "disk3s1",
+        "name": "Macintosh HD",
+        "role": [
+          "System"
+        ],
+        "encrypted": true,
+        "filevault": true,
+        "locked": false,
+        "rolling_state": null
+      },
+      {
+        "device": "disk3s5",
+        "name": "Data",
+        "role": [
+          "Data"
+        ],
+        "encrypted": true,
+        "filevault": true,
+        "locked": false,
+        "rolling_state": null
+      }
+    ]
+  }
+}

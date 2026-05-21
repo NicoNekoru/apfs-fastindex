@@ -12,6 +12,12 @@ mod block_io;
 mod btree;
 pub mod cache;
 mod container;
+/// EX-32 research scratchpad: encryption-metadata decoders.
+/// Not yet wired into the production `ContainerSummary` /
+/// `VolumeSummary` output. Public because the experiment's
+/// follow-up probes (and any future feature) want to call
+/// in directly.
+pub mod crypto_meta;
 /// Diagnostic helpers — panic hook writing to
 /// `~/Library/Logs/apfs-fastindex.log` and the thread-local
 /// last-error slot the FFI exposes to Swift. See `diag.rs` for
