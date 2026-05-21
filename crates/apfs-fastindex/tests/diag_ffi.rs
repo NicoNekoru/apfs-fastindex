@@ -104,6 +104,16 @@ fn last_error_clears_after_read() {
 /// the test itself, which the harness allows independently.
 #[test]
 fn synthetic_panic_in_catch_unwind_records_last_error() {
+    // Prime the panic hook install. `apfs_last_error` deliberately
+    // skips `ffi_guard` (no recursion into panic capture), so it
+    // doesn't install the hook by itself. The other tests in this
+    // binary do install it via their FFI calls, but `cargo test`
+    // runs tests in parallel with non-deterministic order — this
+    // test might run before any of them. `apfs_log_path` runs
+    // through `ffi_guard` and installs the hook idempotently via
+    // the `Once` inside `diag`. Cheap; the call itself just
+    // returns a `*const c_char` we don't need.
+    let _ = apfs_log_path();
     let _ = cstr_to_string(apfs_last_error()); // drain
     let _ = std::panic::catch_unwind(|| {
         std::panic::panic_any("synthetic panic for diag_ffi");

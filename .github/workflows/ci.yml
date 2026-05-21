@@ -65,7 +65,23 @@ jobs:
             -A clippy::too_many_arguments \
             -A clippy::manual_is_multiple_of
       - name: cargo test
-        run: cargo test -p apfs-fastindex --release
+        # Run tests in the dev profile (not `--release`). The
+        # workspace `[profile.release] panic = "abort"` setting
+        # (see top-level Cargo.toml) makes release artifacts
+        # incompatible with cargo test's default unwind strategy
+        # — when clippy `--release` runs first in this same job,
+        # the cache fills with abort-strategy libs and a
+        # subsequent `cargo test --release` errors out with
+        # `requires panic strategy abort which is incompatible
+        # with this crate's strategy of unwind`. Dev profile
+        # lands in `target/debug/`, separate from clippy's
+        # `target/release/`, so no conflict.
+        #
+        # The dev profile builds slower than release but the
+        # tests themselves take < 1 s; the build cost dominates
+        # and is comparable either way. Correctness-only tests
+        # don't benefit from `-O` anyway.
+        run: cargo test -p apfs-fastindex
 
   cargo-audit:
     name: cargo audit
