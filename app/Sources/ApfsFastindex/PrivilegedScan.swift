@@ -101,13 +101,18 @@ enum PrivilegedScan {
             return bundleSibling
         }
 
-        // 2. Dev-mode walk: the SwiftPM binary lives at
-        //    `<repo>/app/.build/<triple>/debug/ApfsFastindex`.
-        //    Walk up until we find a Cargo.toml, then try
-        //    `target/release/apfs-fastindex-scan` and
-        //    `target/debug/apfs-fastindex-scan` (release first
-        //    because that's what `cargo build --release`
-        //    produces and matches the bundled binary).
+        // 2. Dev-mode walk-up-to-Cargo.toml fallback. Audit M1:
+        //    the walk runs `target/<profile>/apfs-fastindex-scan`
+        //    as the privileged helper. A dev who launches the
+        //    app from a directory whose ancestors contain an
+        //    attacker-controlled Cargo.toml ships the
+        //    attacker's `target/release/apfs-fastindex-scan` to
+        //    root on the next "Scan as Administrator…". Gated
+        //    behind DEBUG so release builds never enter this
+        //    code path; release builds rely on the bundle
+        //    siblings (steps 1, 1a) being correctly populated
+        //    by `make-release.sh`.
+        #if DEBUG
         if let exec = Bundle.main.executableURL {
             var dir: URL? = exec.deletingLastPathComponent()
             for _ in 0..<8 {
@@ -130,10 +135,13 @@ enum PrivilegedScan {
                 dir = parent
             }
         }
+        #endif
 
-        // 3. Anything on PATH. Costs one `which` subprocess; only
-        //    runs once at app start (cached by SwiftUI in the
-        //    menu's `.disabled` predicate evaluation).
+        // 3. Anything on PATH. Audit M1: same threat model as
+        //    step 2 — running root code from a user-controlled
+        //    PATH entry. Gated behind DEBUG so release builds
+        //    never resolve the helper via `which`.
+        #if DEBUG
         let which = Process()
         which.executableURL = URL(fileURLWithPath: "/usr/bin/which")
         which.arguments = ["apfs-fastindex-scan"]
@@ -152,6 +160,7 @@ enum PrivilegedScan {
                 }
             }
         }
+        #endif
 
         return nil
     }

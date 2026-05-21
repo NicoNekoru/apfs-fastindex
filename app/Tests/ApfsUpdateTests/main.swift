@@ -324,6 +324,12 @@ final class CapturingUserDriver: NSObject, SPUUserDriver {
     }
     func dismissUpdateInstallation() {}
     func showSendingTerminationSignal() {}
+    // SPUUserDriver gained `showUpdateInFocus()` in Sparkle
+    // 2.7.x — surfaces an "already-installed" hint when the
+    // user clicks Check-for-Updates while an in-progress
+    // update is queued. No-op for Tier B because we never
+    // get to install: we capture `showUpdateFound` and bail.
+    func showUpdateInFocus() {}
 
     // Release-notes & post-install hooks (required by
     // SPUUserDriver but unreachable in Tier B's flow because we

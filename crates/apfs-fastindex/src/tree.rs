@@ -244,9 +244,15 @@ impl Tree {
                     continue;
                 }
                 let is_last = at_end;
-                // SAFETY: `path` is UTF-8; segment boundaries are
-                // ASCII `/`, so slicing on byte indices is safe.
-                let name = unsafe { std::str::from_utf8_unchecked(&bytes[seg_start..i]) };
+                // Audit M3: was `from_utf8_unchecked`. Sound at
+                // every current call site (`path` is `&str`,
+                // segments split on ASCII `/`) but the checked
+                // variant costs ~nothing on a UTF-8-validated
+                // input and removes the foot-gun for future
+                // refactors. `expect` is fine here — a non-UTF-8
+                // sub-slice of a `&str` is impossible.
+                let name = std::str::from_utf8(&bytes[seg_start..i])
+                    .expect("segment of &str is UTF-8");
 
                 if is_last {
                     match entry.entry_kind {
@@ -563,9 +569,12 @@ impl Tree {
                 i += 1;
                 continue;
             }
-            // SAFETY: caller passes a UTF-8 path; ASCII '/'
-            // boundaries leave each segment UTF-8-valid.
-            let name = unsafe { std::str::from_utf8_unchecked(&bytes[seg_start..i]) };
+            // Audit M3: see the matching note in `build`. Checked
+            // variant — never fails on `&str` sub-slices, but
+            // catches any future refactor that introduces an
+            // unchecked input path.
+            let name = std::str::from_utf8(&bytes[seg_start..i])
+                .expect("segment of &str is UTF-8");
             let mut found: Option<u32> = None;
             for &child_idx in self.children_of(cursor) {
                 if &*self.nodes[child_idx as usize].name == name {
