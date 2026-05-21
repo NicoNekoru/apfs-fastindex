@@ -632,7 +632,21 @@ if ! grep -q "<title>$RELEASE_TAG</title>" "$APPCAST"; then
     echo "make-release.sh: appcast.xml splice failed — file has no <item> for $RELEASE_TAG." >&2
     exit 1
 fi
-echo "    appcast.xml: prepended <item> for $RELEASE_TAG"
+# Validate the resulting appcast parses as XML. Sparkle uses
+# libxml under the hood; if `xmllint` rejects the file with
+# something like "Double hyphen within comment" (XML 1.0
+# forbids `--` inside XML comments), Sparkle will reject it
+# too and surface "could not parse update feed" on every
+# check. Catching this here means a bad splice never gets
+# committed, tagged, or pushed.
+if ! xmllint --noout "$APPCAST" 2>/tmp/appcast-lint-err; then
+    echo "make-release.sh: appcast.xml fails XML validation:" >&2
+    cat /tmp/appcast-lint-err >&2
+    rm -f /tmp/appcast-lint-err
+    exit 1
+fi
+rm -f /tmp/appcast-lint-err
+echo "    appcast.xml: prepended <item> for $RELEASE_TAG (xmllint OK)"
 
 # 4. Commit Cargo.toml (already bumped above) + appcast.xml.
 git -C "$REPO_ROOT" add \
