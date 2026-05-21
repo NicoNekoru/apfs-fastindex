@@ -52,6 +52,20 @@
         <link>https://github.com/NicoNekoru/apfs-fastindex</link>
         <description>Release feed for the apfs-fastindex macOS app.</description>
         <language>en</language>
+
+        <item>
+            <title>v0.2.2</title>
+            <pubDate>Thu, 21 May 2026 02:06:05 +0000</pubDate>
+            <sparkle:version>0.2.2</sparkle:version>
+            <sparkle:shortVersionString>0.2.2</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <enclosure
+                url="https://github.com/NicoNekoru/apfs-fastindex/releases/download/v0.2.2/ApfsFastindex-v0.2.2-macos-arm64.zip"
+                length="2397560"
+                type="application/octet-stream"
+                sparkle:edSignature="5hT2AAuqoojWbFDlTk7QFmD9HTFFkSbEwfKcv1aKpKYXJAS3S7HRK8/hYBgnL6x1up7Lt069PJ4+cQ6Rf/30BA=="
+            />
+        </item>
         <!--
           First real entry will be added by
           `make-release.sh --publish` once the maintainer has
