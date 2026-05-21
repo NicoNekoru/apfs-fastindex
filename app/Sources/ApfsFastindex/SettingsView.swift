@@ -23,6 +23,14 @@ enum AppPrefs {
     static let showFolderTreeKey = "apfs.showFolderTree"
     static let showExtensionsKey = "apfs.showExtensions"
 
+    /// Whether the user has dismissed the "Grant Full Disk
+    /// Access?" explainer. Sticky after they pick
+    /// "Don't Ask Again" — at that point the app falls back
+    /// to mid-scan TCC prompts for any folders the user
+    /// hasn't already authorised. Resettable by toggling
+    /// the equivalent option in Settings.
+    static let fdaPromptDismissedKey = "apfs.fdaPromptDismissed"
+
     /// Hours between automatic auto-update checks. `0` means
     /// "check on every app launch and never schedule a
     /// background check"; positive values configure
