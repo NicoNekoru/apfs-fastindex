@@ -119,12 +119,25 @@ final class TreemapView: NSView {
         // = `.copy` overwrites any previous frame pixels — the
         // image is opaque (bg fill in phase 1) so this is
         // equivalent to filling+drawing in one step.
+        //
+        // `respectFlipped: true` is critical: the image was
+        // rendered with `lockFocusFlipped(true)` (its internal
+        // representation has the y-flip baked in) AND the
+        // destination (this view) has `isFlipped = true`. The
+        // 4-arg `draw(in:from:operation:fraction:)` overload
+        // doesn't honour the image's flip state, so the two
+        // cancellations don't line up — the result is upside-
+        // down. The 6-arg overload with `respectFlipped: true`
+        // correctly cancels the image's flip against the
+        // destination's flip and renders right-side-up.
         if let img = cachedStatic {
             img.draw(
                 in: bounds,
                 from: NSRect(origin: .zero, size: bounds.size),
                 operation: .copy,
-                fraction: 1.0
+                fraction: 1.0,
+                respectFlipped: true,
+                hints: nil
             )
         } else {
             // No layout yet — paint the bg colour so the view
