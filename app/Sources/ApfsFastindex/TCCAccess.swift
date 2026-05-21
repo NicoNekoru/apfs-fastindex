@@ -65,19 +65,48 @@ enum TCCAccess {
         return (try? FileManager.default.contentsOfDirectory(atPath: fallback)) != nil
     }
 
-    /// Open System Settings to the Full Disk Access pane via
-    /// the documented `x-apple.systempreferences:` URL scheme.
-    /// Drops the user one click away from adding the app to
-    /// the FDA allowlist; we can't drag the app entry in for
-    /// them (System Settings won't accept programmatic
-    /// authorisation), but this minimises friction.
+    /// Launch System Settings, with a best-effort deep-link
+    /// to the Full Disk Access pane.
+    ///
+    /// **macOS schema drift**: the `?Privacy_AllFiles` query
+    /// string worked through Sonoma + Sequoia but on macOS 26
+    /// (Tahoe) System Settings was restructured — the legacy
+    /// pane bundles are gone, the new app loads extensions
+    /// dynamically, and the deep-link query is silently
+    /// ignored (the app launches to General). We still send
+    /// the deep-link URL because it works on older systems,
+    /// but the explainer text in `showFullDiskAccessExplainer`
+    /// carries the step-by-step navigation so the user can
+    /// reach the FDA pane even when the deep-link drops them
+    /// on the wrong page.
+    ///
+    /// Uses `NSWorkspace.shared.open(_:configuration:)` with
+    /// `activates = true` so System Settings comes to the
+    /// foreground. The async completion handler falls back to
+    /// launching System Settings bare if the URL scheme is
+    /// outright refused by LaunchServices (older macOS where
+    /// the scheme was different, or a stripped-down OS install).
     static func openFullDiskAccessSettings() {
-        // The query string after the bundle identifier is
-        // case-sensitive in current macOS releases.
-        guard let url = URL(string:
+        let config = NSWorkspace.OpenConfiguration()
+        config.activates = true
+        config.addsToRecentItems = false
+
+        let deepLink = URL(string:
             "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
-        ) else { return }
-        NSWorkspace.shared.open(url)
+        )!
+
+        NSWorkspace.shared.open(deepLink, configuration: config) { _, error in
+            guard error != nil else { return }
+            // Fallback: launch System Settings as a bare app.
+            // The user navigates manually from the explainer's
+            // instructions.
+            let appPath = URL(fileURLWithPath: "/System/Applications/System Settings.app")
+            NSWorkspace.shared.openApplication(
+                at: appPath,
+                configuration: config,
+                completionHandler: nil
+            )
+        }
     }
 
     /// Decision returned from `showFullDiskAccessExplainer`.
@@ -104,16 +133,31 @@ enum TCCAccess {
     static func showFullDiskAccessExplainer() -> ExplainerOutcome {
         let alert = NSAlert()
         alert.messageText = "Grant Full Disk Access for smooth scans?"
+        // Step-by-step navigation in the body so users land
+        // correctly even when the deep-link query string
+        // doesn't honour the FDA pane (macOS 26 / Tahoe
+        // ignores it; the legacy URL was reliable on older
+        // releases). Restart-after-grant is called out
+        // because the kernel caches each process's TCC state
+        // at launch — granting FDA mid-session doesn't take
+        // effect until the next launch.
         alert.informativeText = """
         Without Full Disk Access, macOS will ask permission \
         for individual folders (Documents, Downloads, every \
         app's container, every cloud provider's folder, …) \
-        as the scan walks the tree. You'll see one prompt per \
-        protected folder.
+        as the scan walks the tree.
 
-        Granting Full Disk Access once covers all of them \
-        forever. The app needs to be restarted after granting \
-        for the permission to take effect.
+        Granting Full Disk Access once covers everything for \
+        this app, forever.
+
+        How to grant:
+        1.  Click "Open System Settings…" below.
+        2.  Navigate to Privacy & Security → Full Disk Access.
+        3.  Click the '+' button, find ApfsFastindex, and \
+        add it.
+        4.  Quit and relaunch ApfsFastindex (macOS reads each \
+        app's TCC state at launch, so the grant takes effect \
+        on the next start).
         """
         alert.alertStyle = .informational
         // Button order matters — leftmost is default; macOS
