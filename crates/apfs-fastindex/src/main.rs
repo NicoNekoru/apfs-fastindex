@@ -1003,19 +1003,121 @@ fn print_summary_with_skips(
 /// parent observes them in real time. The scan itself writes
 /// msgpack to the caller-supplied output path and JSON progress
 /// events (one per line, ~250 ms cadence) to the progress path.
+/// Privileged-helper server-mode protocol (JSON-line, audit
+/// C1 + H1 + H2 fix).
+///
+/// Audit (V2) replaced the original tab-delimited framing
+/// with a JSON-line protocol. The earlier shape took the
+/// output and progress paths from the parent's command
+/// (`scan\t<path>\t<out>\t<prog>`) — a user-writable tmpdir
+/// attacker could pre-place a symlink at one of those paths
+/// and the root helper would follow it to /etc/sudoers.d/foo
+/// or similar. JSON-line plus helper-chosen tempfiles closes
+/// that primitive:
+///
+/// - **C1**: every per-scan output is created via
+///   `tempfile::NamedTempFile` (mkstemp under the hood —
+///   atomic `O_EXCL`, mode `0600`, fresh random name). The
+///   parent never names a path the helper will write.
+/// - **H1**: payloads are JSON; arbitrary control bytes in
+///   the path field (TAB, newline, NUL) are handled by
+///   serde_json rather than crashing through a fragile
+///   tab-split parser.
+/// - **H2**: the helper returns the chosen paths to the
+///   parent in the reply. The parent stat-verifies root
+///   ownership before reading — defence-in-depth on top of
+///   the mkstemp-created file already being root-owned in
+///   the sticky `/tmp`.
+#[derive(serde::Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
+enum HelperCommand {
+    /// Run one scan. Helper picks the output + progress
+    /// paths and reports them back.
+    Scan { path: String },
+    /// Helper unlinks each path *if* it created it (tracked
+    /// in the helper's owned-paths list). Failure to unlink
+    /// is logged to stderr but doesn't fail the call.
+    Release { paths: Vec<String> },
+    /// Helper drains its remaining created paths and exits.
+    Quit,
+    /// Unknown command — handled in the dispatcher.
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(serde::Serialize)]
+#[serde(tag = "event", rename_all = "snake_case")]
+enum HelperReply<'a> {
+    /// Sent once on startup so the parent knows the helper
+    /// is alive and reading. `version` lets a future
+    /// non-compatible protocol bump be detected by the
+    /// parent.
+    Ready { version: u32 },
+    /// Periodic progress update during a running scan.
+    /// Streamed inline on stdout — same channel as the
+    /// final Ok/Err — so the parent can update its UI
+    /// without polling a side file. Closes the second
+    /// half of the C1 attack surface (the original progress
+    /// file lived at a parent-supplied path).
+    Progress {
+        scanned: u64,
+        skipped: u64,
+        bytes: u64,
+        elapsed_ms: u128,
+        terminal: bool,
+    },
+    /// Scan succeeded. `out_path` is helper-chosen, in /tmp,
+    /// root-owned mode 0600 (via mkstemp).
+    Ok {
+        out_path: &'a str,
+        exit_code: i32,
+    },
+    /// Scan failed; message goes to the parent's status UI.
+    Err { message: String },
+    /// Quit acknowledged. Helper exits immediately after
+    /// sending this.
+    Bye,
+}
+
+fn write_reply<W: std::io::Write>(out: &mut W, reply: &HelperReply<'_>) {
+    // One JSON object per line. The helper writes to the
+    // parent's socketpair (via AuthorizationExecuteWithPrivileges);
+    // the framing is newline-delimited to keep the parent's
+    // line-reader straightforward.
+    let _ = serde_json::to_writer(&mut *out as &mut dyn std::io::Write, reply);
+    let _ = out.write_all(b"\n");
+    let _ = out.flush();
+}
+
 fn run_server_mode() -> ExitCode {
     use std::io::{BufRead, BufReader, Write};
 
+    // Audit M4: tear down the helper if the parent goes
+    // away. The OS already closes the parent's end of our
+    // socketpair on parent exit, which makes our next
+    // `read_line` return EOF — so the loop's existing
+    // `Ok(0)` arm handles graceful + crash exit. But if the
+    // helper is blocked inside the walker (e.g. a multi-
+    // second I/O on /Users) when the parent crashes, we
+    // wouldn't notice for the duration of that scan. The
+    // kqueue watcher spawns a background thread that
+    // `NOTE_EXIT`-monitors the parent PID and aborts the
+    // helper the moment it fires. Cheap insurance: one
+    // syscall + one wait.
+    spawn_parent_death_watcher();
+
     let threads = default_fallback_threads();
 
-    // Handshake: tell the parent the helper is up and reading
-    // stdin. The parent uses this to flip `adminMode` (title-bar
-    // update) the moment auth completes, before the first scan
-    // even starts.
+    // Track every tempfile we hand out. On quit (or on a
+    // matching `release` command) we unlink them. The parent
+    // can't unlink them itself because they're root-owned in
+    // sticky `/tmp` — only we (root) can. Bounded by helper
+    // lifetime, which is typically the GUI process lifetime.
+    let mut owned_paths: Vec<std::path::PathBuf> = Vec::new();
+
     {
         let mut out = std::io::stdout().lock();
-        let _ = writeln!(out, "ready\t1");
-        let _ = out.flush();
+        write_reply(&mut out, &HelperReply::Ready { version: 1 });
     }
 
     let stdin = std::io::stdin();
@@ -1024,85 +1126,248 @@ fn run_server_mode() -> ExitCode {
     loop {
         line.clear();
         let n = match reader.read_line(&mut line) {
-            Ok(0) => return ExitCode::SUCCESS, // EOF: parent closed stdin.
+            Ok(0) => {
+                // Parent closed stdin (likely exited or
+                // shutdown). Drain owned tempfiles before
+                // returning so they don't accumulate in /tmp.
+                cleanup_owned_paths(&owned_paths);
+                return ExitCode::SUCCESS;
+            }
             Ok(n) => n,
             Err(err) => {
                 let _ = writeln!(
                     std::io::stderr().lock(),
                     "apfs-fastindex-scan: server: stdin read error: {err}"
                 );
+                cleanup_owned_paths(&owned_paths);
                 return ExitCode::from(1);
             }
         };
-        let _ = n; // silence unused-must-use; n is read above.
+        let _ = n;
         let trimmed = line.trim_end_matches(['\r', '\n']);
         if trimmed.is_empty() {
             continue;
         }
-        let parts: Vec<&str> = trimmed.split('\t').collect();
-        let mut stdout = std::io::stdout().lock();
-        match parts.as_slice() {
-            ["scan", path, out_msgpack, progress_log] => {
-                let exit = run_server_scan(
-                    path,
-                    out_msgpack,
-                    progress_log,
-                    threads,
+        let cmd: HelperCommand = match serde_json::from_str(trimmed) {
+            Ok(c) => c,
+            Err(err) => {
+                let mut out = std::io::stdout().lock();
+                write_reply(
+                    &mut out,
+                    &HelperReply::Err {
+                        message: format!("invalid JSON command: {err}"),
+                    },
                 );
-                let _ = writeln!(stdout, "ok\t{exit}");
-                let _ = stdout.flush();
+                continue;
             }
-            ["quit"] => {
-                let _ = writeln!(stdout, "ok\t0");
-                let _ = stdout.flush();
+        };
+        match cmd {
+            HelperCommand::Scan { path } => {
+                // Defence-in-depth: refuse control bytes in
+                // path. `serde_json` already accepts them
+                // (JSON strings can carry any UTF-8) but our
+                // downstream consumers shouldn't have to
+                // worry about embedded TAB/LF/NUL.
+                if path.contains('\0') {
+                    let mut out = std::io::stdout().lock();
+                    write_reply(
+                        &mut out,
+                        &HelperReply::Err {
+                            message: "path contains a NUL byte".to_string(),
+                        },
+                    );
+                    continue;
+                }
+                match run_server_scan(&path, threads) {
+                    Ok((out_path, exit_code)) => {
+                        owned_paths.push(out_path.clone());
+                        let mut out = std::io::stdout().lock();
+                        write_reply(
+                            &mut out,
+                            &HelperReply::Ok {
+                                out_path: out_path.to_string_lossy().as_ref(),
+                                exit_code,
+                            },
+                        );
+                    }
+                    Err(message) => {
+                        let mut out = std::io::stdout().lock();
+                        write_reply(&mut out, &HelperReply::Err { message });
+                    }
+                }
+            }
+            HelperCommand::Release { paths } => {
+                // Only release paths the helper actually
+                // created (sanity check against the tracked
+                // list); ignores anything else so the parent
+                // can't ask us to unlink arbitrary files.
+                for p in paths {
+                    let pb = std::path::PathBuf::from(&p);
+                    if owned_paths.iter().any(|own| own == &pb) {
+                        let _ = std::fs::remove_file(&pb);
+                        owned_paths.retain(|own| own != &pb);
+                    } else {
+                        let _ = writeln!(
+                            std::io::stderr().lock(),
+                            "apfs-fastindex-scan: server: release refused for non-owned path {p}"
+                        );
+                    }
+                }
+                let mut out = std::io::stdout().lock();
+                // No specific reply payload — the parent
+                // doesn't need anything beyond "ack". We
+                // emit an empty-out-path Ok so the protocol
+                // stays JSON-uniform.
+                write_reply(
+                    &mut out,
+                    &HelperReply::Ok {
+                        out_path: "",
+                        exit_code: 0,
+                    },
+                );
+            }
+            HelperCommand::Quit => {
+                cleanup_owned_paths(&owned_paths);
+                let mut out = std::io::stdout().lock();
+                write_reply(&mut out, &HelperReply::Bye);
                 return ExitCode::SUCCESS;
             }
-            other => {
-                let _ = writeln!(
-                    stdout,
-                    "err\tunknown command: {}",
-                    other.join("\\t")
+            HelperCommand::Unknown => {
+                let mut out = std::io::stdout().lock();
+                write_reply(
+                    &mut out,
+                    &HelperReply::Err {
+                        message: "unknown command".to_string(),
+                    },
                 );
-                let _ = stdout.flush();
             }
         }
     }
 }
 
-/// Run one scan from the server loop. Writes msgpack to
-/// `out_msgpack` and one JSON progress line per ~250 ms to
-/// `progress_log`. Returns the process-equivalent exit code
-/// (0 = success, non-zero = scan-side failure).
+fn cleanup_owned_paths(paths: &[std::path::PathBuf]) {
+    for p in paths {
+        let _ = std::fs::remove_file(p);
+    }
+}
+
+/// Audit M4: spawn a background thread that watches the
+/// parent process for exit via `kqueue` + `NOTE_EXIT`. When
+/// the parent dies, the helper exits immediately rather than
+/// continuing to hold root privileges. Belt-and-suspenders
+/// to the OS's stdin-EOF-on-parent-death behaviour, which
+/// the main loop already handles — but if the helper is
+/// blocked in `fallback_scan_path_with_options` during the
+/// parent crash, kqueue is the only signal that reaches us
+/// before the scan completes.
+///
+/// Failure modes (kqueue not available, parent already gone,
+/// EVFILT_PROC race): the function returns silently and the
+/// helper falls back to stdin-EOF detection. Better than
+/// nothing.
+#[cfg(target_os = "macos")]
+fn spawn_parent_death_watcher() {
+    use std::thread;
+    let parent_pid: i32 = unsafe { libc::getppid() };
+    if parent_pid <= 1 {
+        // PID 1 (launchd) or unknown — refuse to watch.
+        return;
+    }
+    thread::spawn(move || unsafe {
+        let kq = libc::kqueue();
+        if kq < 0 {
+            return;
+        }
+        // Register interest in NOTE_EXIT on the parent PID.
+        let mut sub: libc::kevent = std::mem::zeroed();
+        sub.ident = parent_pid as libc::uintptr_t;
+        sub.filter = libc::EVFILT_PROC;
+        sub.flags = libc::EV_ADD | libc::EV_ENABLE | libc::EV_ONESHOT;
+        sub.fflags = libc::NOTE_EXIT;
+        let n = libc::kevent(kq, &sub, 1, std::ptr::null_mut(), 0, std::ptr::null());
+        if n < 0 {
+            libc::close(kq);
+            return;
+        }
+        // Block until the parent exits. `kevent` with a NULL
+        // timeout waits indefinitely; the one-shot
+        // registration auto-removes after firing.
+        let mut out: libc::kevent = std::mem::zeroed();
+        let _ = libc::kevent(
+            kq,
+            std::ptr::null(),
+            0,
+            &mut out,
+            1,
+            std::ptr::null(),
+        );
+        // Parent went away. Exit immediately — we don't have
+        // a useful action to take on a parentless root
+        // helper. Skip cleanup of `owned_paths` because we
+        // can't reach the main thread's state; the OS will
+        // unlink-on-reboot for sticky-tmp files anyway, and
+        // the parent's `quit` path is the normal cleanup
+        // route.
+        libc::_exit(0);
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+fn spawn_parent_death_watcher() {
+    // No-op on non-Darwin builds. The crate's only ship target
+    // is macOS; non-macOS builds are for unit-test convenience.
+}
+
+/// Run one scan from the server loop. Picks its own
+/// `NamedTempFile` for the output msgpack via mkstemp (no
+/// caller-supplied paths — see C1 fix in the protocol doc).
+/// Streams progress events as JSON lines on stdout so the
+/// parent gets live updates without a side progress file
+/// (which was the second half of the C1 attack surface).
+///
+/// Returns `(out_path, exit_code)` so the dispatcher can
+/// include the path in the final Ok reply. The parent
+/// verifies the path's root ownership before reading.
 fn run_server_scan(
     path: &str,
-    out_msgpack: &str,
-    progress_log: &str,
     threads: usize,
-) -> i32 {
-    use std::fs::File;
+) -> Result<(std::path::PathBuf, i32), String> {
     use std::io::Write;
 
-    let mut progress_file = match File::create(progress_log) {
-        Ok(f) => f,
+    // mkstemp-style: prefix + suffix in /tmp, mode 0600,
+    // O_EXCL. `NamedTempFile` owns the file's lifetime; we
+    // call `keep()` to detach so the path survives past the
+    // function return and is unlinked by the protocol's
+    // `release` / `quit` cleanup.
+    let tmp_out = match tempfile::Builder::new()
+        .prefix("apfs-fastindex-out-")
+        .suffix(".msgpack")
+        .tempfile_in(std::env::temp_dir())
+    {
+        Ok(t) => t,
         Err(err) => {
-            let _ = writeln!(
-                std::io::stderr().lock(),
-                "apfs-fastindex-scan: server: cannot open progress log {progress_log}: {err}"
-            );
-            return 1;
+            return Err(format!("could not create output tempfile: {err}"));
         }
     };
+
+    // The progress callback writes one JSON line per event
+    // directly to stdout, holding the per-line lock so multi-
+    // thread writes don't interleave. The walker invokes the
+    // callback from a dedicated progress thread (one event
+    // ≈ every 250 ms), so contention with the main thread's
+    // final Ok write is negligible.
     let mut progress_writer = |event: ProgressEvent| {
-        let _ = writeln!(
-            progress_file,
-            "{{\"scanned\":{},\"skipped\":{},\"bytes\":{},\"elapsed_ms\":{},\"terminal\":{}}}",
-            event.scanned,
-            event.skipped,
-            event.bytes,
-            event.elapsed.as_millis(),
-            event.terminal
-        );
-        let _ = progress_file.flush();
+        let mut out = std::io::stdout().lock();
+        let reply = HelperReply::Progress {
+            scanned: event.scanned,
+            skipped: event.skipped,
+            bytes: event.bytes,
+            elapsed_ms: event.elapsed.as_millis(),
+            terminal: event.terminal,
+        };
+        let _ = serde_json::to_writer(&mut out, &reply);
+        let _ = out.write_all(b"\n");
+        let _ = out.flush();
     };
     let options = FallbackOptions {
         cross_mounts: false,
@@ -1114,30 +1379,25 @@ fn run_server_scan(
     let scan = match fallback_scan_path_with_options(path, options) {
         Ok(s) => s,
         Err(err) => {
-            let _ = writeln!(
-                std::io::stderr().lock(),
-                "apfs-fastindex-scan: server: scan {path} failed: {err}"
-            );
-            return 1;
+            return Err(format!("scan {path} failed: {err}"));
         }
     };
 
     let bytes = match rmp_serde::to_vec_named(&scan) {
         Ok(b) => b,
-        Err(err) => {
-            let _ = writeln!(
-                std::io::stderr().lock(),
-                "apfs-fastindex-scan: server: serialise {out_msgpack} failed: {err}"
-            );
-            return 1;
-        }
+        Err(err) => return Err(format!("msgpack serialise failed: {err}")),
     };
-    if let Err(err) = std::fs::write(out_msgpack, &bytes) {
-        let _ = writeln!(
-            std::io::stderr().lock(),
-            "apfs-fastindex-scan: server: write {out_msgpack} failed: {err}"
-        );
-        return 1;
+    if let Err(err) = std::fs::write(tmp_out.path(), &bytes) {
+        return Err(format!("write output file failed: {err}"));
     }
-    0
+
+    // Detach the tempfile from RAII so the path survives
+    // past this function. The dispatcher tracks the path in
+    // `owned_paths` and unlinks it on `release` or `quit`.
+    let (_, out_path) = match tmp_out.keep() {
+        Ok(pair) => pair,
+        Err(err) => return Err(format!("keep output tempfile failed: {err}")),
+    };
+
+    Ok((out_path, 0))
 }

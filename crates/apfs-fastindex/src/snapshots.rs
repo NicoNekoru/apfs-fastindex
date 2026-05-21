@@ -180,7 +180,11 @@ pub struct SnapshotEnumeration {
 /// Run `tmutil listlocalsnapshots <mount>` and parse. Returns
 /// `Err(reason)` if the binary is not present or exits non-zero.
 pub fn list_tmutil_snapshots(mount: &Path) -> Result<Vec<SnapshotEntry>, String> {
-    let output = Command::new("tmutil")
+    // Absolute path so a user-controlled `$PATH` can't substitute
+    // a shadowing `tmutil` when this helper runs as root (audit
+    // C3). All three system tools live in stable locations across
+    // macOS releases.
+    let output = Command::new("/usr/bin/tmutil")
         .args(["listlocalsnapshots", &mount.to_string_lossy()])
         .output()
         .map_err(|e| format!("tmutil invocation failed: {e}"))?;
@@ -197,7 +201,9 @@ pub fn list_tmutil_snapshots(mount: &Path) -> Result<Vec<SnapshotEntry>, String>
 
 /// Run `diskutil apfs listSnapshots <mount>` and parse.
 pub fn list_diskutil_snapshots(mount: &Path) -> Result<Vec<SnapshotEntry>, String> {
-    let output = Command::new("diskutil")
+    // Absolute path: same reasoning as `list_tmutil_snapshots`
+    // above (audit C3).
+    let output = Command::new("/usr/sbin/diskutil")
         .args(["apfs", "listSnapshots", &mount.to_string_lossy()])
         .output()
         .map_err(|e| format!("diskutil invocation failed: {e}"))?;

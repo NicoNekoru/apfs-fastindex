@@ -483,6 +483,40 @@ final class Scan {
         return idx == Scan.nodeInvalid ? nil : idx
     }
 
+    /// Case-insensitive substring search. Returns just the
+    /// matched node indices (NOT including ancestors) — the
+    /// shape the flat "search results" panel renders.
+    ///
+    /// Empty / whitespace query returns `[]`. All heavy work
+    /// (lowercased-name cache, memchr Finder, parent walks)
+    /// lives in Rust; this Swift wrapper is one FFI round-trip.
+    /// EX-33 measured the FFI at ~5-12 ms on a 1.56 M-entry
+    /// `/Users/kai` scan for typical 4-12 char queries; the
+    /// search filter and ancestor walk are both inside that.
+    ///
+    /// Callers that need the full keep-set (matches + every
+    /// ancestor — for a hierarchical tree-walk renderer) can
+    /// add a parallel `searchKeepSet(query:)` accessor; the
+    /// underlying FFI already holds both views in a single
+    /// `ApfsSearchResults` handle, so the cost overlaps. The
+    /// flat-list UI shipping today only needs matches.
+    func searchMatches(query: String) -> [UInt32] {
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return [] }
+        return trimmed.withCString { cQuery -> [UInt32] in
+            guard let results = apfs_scan_search_names(handle, cQuery) else {
+                return []
+            }
+            defer { apfs_search_results_free(results) }
+            let count = apfs_search_results_match_count(results)
+            guard count > 0, let ptr = apfs_search_results_match_indices(results) else {
+                return []
+            }
+            let buffer = UnsafeBufferPointer(start: ptr, count: Int(count))
+            return Array(buffer)
+        }
+    }
+
     /// Immediate-child count for a node.
     func childCount(of nodeIndex: UInt32) -> UInt32 {
         apfs_scan_node_child_count(handle, nodeIndex)

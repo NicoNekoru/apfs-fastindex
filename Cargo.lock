@@ -64,6 +64,7 @@ version = "0.2.5"
 dependencies = [
  "cbindgen",
  "libc",
+ "memchr",
  "plist",
  "rmp-serde",
  "rustc-hash",

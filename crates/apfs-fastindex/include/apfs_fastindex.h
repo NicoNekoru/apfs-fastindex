@@ -82,6 +82,26 @@ typedef struct ApfsLayout ApfsLayout;
 typedef struct ApfsScan ApfsScan;
 
 /**
+ * Search result handle returned by `apfs_scan_search_names`.
+ * Carries two parallel views into the same search:
+ *
+ * - `indices`: the **full keep-set** — every matching node
+ *   plus every ancestor plus the root, sorted. This is what
+ *   a hierarchical tree-list UI needs to render matches in
+ *   context.
+ * - `matches`: just the nodes whose name matched the query,
+ *   sorted. A flat-list "search results" UI uses this to
+ *   render matches without forcing an auto-expansion of the
+ *   entire ancestor chain (which on a single-letter query
+ *   like `"n"` can be 1 M+ nodes, blowing up any
+ *   tree-walking renderer).
+ *
+ * The Swift bridge reads both via dedicated accessors and
+ * must call `apfs_search_results_free` exactly once.
+ */
+typedef struct ApfsSearchResults ApfsSearchResults;
+
+/**
  * C ABI signature for the progress callback the Swift side
  * hands to `apfs_scan_directory_with_progress`. The Rust
  * fallback walker fires events from a dedicated background
@@ -340,6 +360,89 @@ bool apfs_scan_real_available(const struct ApfsScan *scan);
  * tree also has synthesized intermediate directories.
  */
 uint32_t apfs_scan_node_count(const struct ApfsScan *scan);
+
+/**
+ * Case-insensitive substring search across every node's
+ * display name. Returns a handle wrapping the **full
+ * keep-set**: every matching node index plus every ancestor
+ * of every match, plus the root. This is the set the UI
+ * renders as the visible tree under an active search;
+ * pushing the ancestor-walk into Rust avoids a per-ancestor
+ * FFI call from Swift (which on a pathological match-everything
+ * query would have been millions of FFI hits).
+ *
+ * Architecture (EX-33 follow-up):
+ *
+ * 1. The tree carries a **flat lowercased-name buffer**
+ *    (`tree.names_lower_buf: Vec<u8>` + offsets), built once
+ *    at scan time. Scanning every name reads sequentially
+ *    from one contiguous allocation; the CPU prefetcher
+ *    streams through it. (The prior `Vec<String>` shape
+ *    forced a heap-pointer chase per name, defeating
+ *    prefetch — ~10× slower on 1.5 M-node trees.)
+ *
+ * 2. The query is lowercased once and wrapped in a
+ *    `memchr::memmem::Finder`. The Finder amortises
+ *    needle-preprocessing across every haystack call;
+ *    `str::contains` builds the searcher state per call,
+ *    which is wasted work when we have 1.5 M haystacks
+ *    to scan with the same needle.
+ *
+ * 3. For each name whose bytes contain the lowercased
+ *    needle, walk the parent chain (`tree.nodes[i].parent:
+ *    Option<u32>`) and insert every ancestor into an
+ *    `FxHashSet`. Early-out: when `insert` returns false
+ *    (node already in), the rest of that chain is too —
+ *    total ancestor work is O(unique kept nodes), not
+ *    O(matches × depth).
+ *
+ * EX-33 numbers on a 1.56 M-entry `/Users/kai` scan: search
+ * latency dropped from 30-55 ms (median) under the
+ * Vec<String> + str::contains shape to ~3-6 ms. That's
+ * approaching the memory-bandwidth floor (~50 MB of name
+ * bytes / ~20 GB/s ≈ 2.5 ms).
+ *
+ * Returns `NULL` on:
+ * - `scan` or `query` NULL
+ * - `query` not valid UTF-8
+ * - `query` empty (caller treats "" as "no filter" and skips
+ *   this call entirely; returning a sentinel handle would be
+ *   wasteful)
+ *
+ * The result handle owns its indices buffer; Swift must call
+ * `apfs_search_results_free` when done.
+ */
+struct ApfsSearchResults *apfs_scan_search_names(const struct ApfsScan *scan, const char *query);
+
+/**
+ * Number of matching node indices in `results`. `0` on NULL.
+ */
+uintptr_t apfs_search_results_count(const struct ApfsSearchResults *results);
+
+/**
+ * Pointer to the matching-node-indices buffer. Length given
+ * by `apfs_search_results_count`. Buffer is valid until
+ * `apfs_search_results_free` is called.
+ */
+const uint32_t *apfs_search_results_indices(const struct ApfsSearchResults *results);
+
+/**
+ * Drop the search-results handle. Idempotent on NULL.
+ */
+void apfs_search_results_free(struct ApfsSearchResults *results);
+
+/**
+ * Number of nodes whose name matched the query (i.e. the
+ * "real" matches, not the inflated keep-set). `0` on NULL.
+ */
+uintptr_t apfs_search_results_match_count(const struct ApfsSearchResults *results);
+
+/**
+ * Pointer to the matches buffer (`u32` per entry, length
+ * from `apfs_search_results_match_count`). Sorted in tree
+ * (node-index) order. Valid until `apfs_search_results_free`.
+ */
+const uint32_t *apfs_search_results_match_indices(const struct ApfsSearchResults *results);
 
 /**
  * Look up a node by its absolute logical path. The empty string

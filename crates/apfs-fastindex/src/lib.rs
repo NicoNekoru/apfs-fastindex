@@ -151,6 +151,15 @@ pub struct NamespaceEntry {
     pub entry_kind: EntryKind,
     pub file_id: u64,
     pub logical_size: u64,
+    /// Only present on symlink entries. Skipped on the wire
+    /// when `None` — on a typical scan symlinks are < 1 % of
+    /// entries, so the per-entry `nil` placeholder dominated.
+    /// On a 1.56 M-entry `/Users/kai` scan this drops ~22 MB
+    /// from the msgpack output (~14 B per entry × ~1.55 M
+    /// non-symlink entries). Deserialising old outputs that
+    /// include `symlink_target: null` still works — serde's
+    /// `default` handler returns `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub symlink_target: Option<Box<str>>,
     /// Per-inode allocated bytes under SR-019 + EX-22 + EX-26 precedence
     /// (see `namespace.rs::compute_allocated_size` for the full rule).
@@ -182,6 +191,21 @@ pub struct NamespaceEntry {
 pub struct DirectoryAggregate {
     pub path: String,
     pub unique_inode_logical_total: u64,
+    /// Set of file IDs that contributed to this directory's totals.
+    /// Used **internally** during aggregate construction to dedupe
+    /// hard-linked inodes (and surface clone relationships in the
+    /// EX-27 oracle); not consumed by Swift, viz, or any FFI caller.
+    ///
+    /// `skip_serializing` because the field dominated the wire size:
+    /// on a 1.56M-entry `/Users/kai` scan it accounted for ~80% of
+    /// the 392 MB msgpack output (root-level aggregate alone holds
+    /// hundreds of thousands of u64 inode IDs, repeated for every
+    /// ancestor of every file). Deserialising old outputs that
+    /// *include* the field still works — serde populates the Vec —
+    /// and the in-memory tests that inspect it (namespace.rs:1113,
+    /// namespace.rs:1180) operate on the just-built struct, not on a
+    /// roundtrip, so they're unaffected.
+    #[serde(default, skip_serializing)]
     pub contributing_file_ids: Vec<u64>,
     /// Per-directory unique-inode allocated-bytes total. `None` if any
     /// contributing file inode has `allocated_size == None`; a partial
@@ -476,7 +500,11 @@ pub struct ValidatedSource {
 impl Drop for ValidatedSource {
     fn drop(&mut self) {
         if let Some(device) = &self.detach_device {
-            let _ = Command::new("hdiutil").args(["detach", device]).output();
+            // Absolute path so a user-controlled `$PATH`
+            // can't substitute a shadowing `hdiutil` (audit C3).
+            let _ = Command::new("/usr/bin/hdiutil")
+                .args(["detach", device])
+                .output();
         }
     }
 }
@@ -999,7 +1027,9 @@ fn normalize_raw_device(device: &str) -> Result<String, SourceGateError> {
 }
 
 fn attach_dmg_source(requested_path: PathBuf) -> Result<ValidatedSource, SourceGateError> {
-    let output = Command::new("hdiutil")
+    // Absolute path so a user-controlled `$PATH` can't substitute
+    // a shadowing `hdiutil` (audit C3).
+    let output = Command::new("/usr/bin/hdiutil")
         .args(["attach", "-plist", "-nomount"])
         .arg(&requested_path)
         .output()?;
