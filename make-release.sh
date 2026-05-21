@@ -257,7 +257,12 @@ BUNDLE_ID="com.apfsfastindex.app"
 APP_VERSION=""
 if [ -n "$RELEASE_TAG" ]; then
     APP_VERSION="${RELEASE_TAG#v}"
-elif [ -n "$GITHUB_REF_NAME" ] && [[ "$GITHUB_REF_NAME" =~ ^v[0-9] ]]; then
+# `${VAR:-}` defaults to empty when unset — the script runs
+# under `set -u`, so a bare `$GITHUB_REF_NAME` reference
+# explodes on dev builds. The error fired at this exact line
+# *before* the bundle assembly ran, leaving `app/ApfsFastindex.app`
+# stale across every "make-release.sh" the user ran locally.
+elif [ -n "${GITHUB_REF_NAME:-}" ] && [[ "${GITHUB_REF_NAME:-}" =~ ^v[0-9] ]]; then
     APP_VERSION="${GITHUB_REF_NAME#v}"
 fi
 if [ -z "$APP_VERSION" ]; then
