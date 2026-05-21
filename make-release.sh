@@ -669,8 +669,54 @@ gh release create "$RELEASE_TAG" "$ASSET_PATH" "$DMG_PATH" \
     --generate-notes
 echo "    gh: created release $RELEASE_TAG with $ASSET_NAME + $DMG_NAME"
 
+# 8. Homebrew Cask sync (only if the `homebrew/` submodule is
+#    wired up — i.e. user has created the tap repo on GitHub
+#    and the submodule clone is initialised). Updates
+#    Casks/apfs-fastindex.rb with the new version + DMG sha256,
+#    commits, and pushes the tap repo. Brew users see the
+#    update on their next `brew update && brew upgrade --cask
+#    apfs-fastindex`.
+HOMEBREW_DIR="$REPO_ROOT/homebrew"
+CASK_FILE="$HOMEBREW_DIR/Casks/apfs-fastindex.rb"
+if [ -d "$HOMEBREW_DIR/.git" ] && [ -f "$CASK_FILE" ]; then
+    DMG_SHA256="$(shasum -a 256 "$DMG_PATH" | awk '{print $1}')"
+    # Replace the version + sha256 lines in the cask. BSD-sed
+    # compatible: both pattern and replacement are spelled out
+    # (no `s//repl/` shorthand).
+    sed -i.bak \
+        -e "s|^  version \".*\"|  version \"$APP_VERSION\"|" \
+        -e "s|^  sha256 \"[^\"]*\"|  sha256 \"$DMG_SHA256\"|" \
+        "$CASK_FILE"
+    rm -f "$CASK_FILE.bak"
+    # Sanity-check both lines actually got rewritten.
+    if ! grep -q "version \"$APP_VERSION\"" "$CASK_FILE" || \
+       ! grep -q "sha256 \"$DMG_SHA256\"" "$CASK_FILE"; then
+        echo "make-release.sh: cask update failed; expected version/sha256 not in file." >&2
+        exit 1
+    fi
+    git -C "$HOMEBREW_DIR" add Casks/apfs-fastindex.rb
+    git -C "$HOMEBREW_DIR" commit -q -m "release: $RELEASE_TAG"
+    if git -C "$HOMEBREW_DIR" push origin main 2>/dev/null; then
+        echo "    homebrew: pushed $RELEASE_TAG (sha256 $DMG_SHA256)"
+    else
+        echo "    homebrew: cask committed locally but push failed —"
+        echo "      check the tap-repo remote on github.com/NicoNekoru/homebrew-apfs-fastindex."
+    fi
+    # Record the new submodule commit in the main repo's tree.
+    git -C "$REPO_ROOT" add homebrew
+    git -C "$REPO_ROOT" commit -q --amend --no-edit
+    git -C "$REPO_ROOT" push --force-with-lease origin "$BRANCH"
+else
+    echo "    homebrew: tap submodule not initialised — skipping."
+    echo "      One-time setup:"
+    echo "        1. Create https://github.com/NicoNekoru/homebrew-apfs-fastindex (empty)."
+    echo "        2. cd homebrew && git push -u origin main"
+    echo "        3. Re-run this release; the cask file will sync automatically."
+fi
+
 echo
 echo "✅ Released $RELEASE_TAG."
-echo "   Existing v$( awk -F'"' '/^version/ { print $2; exit }' \
-    "$REPO_ROOT/crates/apfs-fastindex/Cargo.toml" )+ installs"
-echo "   will see the update on their next daily check."
+echo "   Sparkle users: update arrives on next daily check."
+if [ -d "$HOMEBREW_DIR/.git" ]; then
+    echo "   Brew users:    brew update && brew upgrade --cask apfs-fastindex"
+fi
