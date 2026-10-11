@@ -1,7 +1,8 @@
 [package]
 name = "apfs-fastindex"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
+rust-version = "1.88"
 description = "Fail-closed APFS checkpoint scanner for detached sources"
 
 [lib]
@@ -19,7 +20,7 @@ name = "apfs-fastindex-scan"
 path = "src/main.rs"
 
 [dependencies]
-plist = "1.8.0"
+plist = "1.10.1"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 # MessagePack output for the viz integration. Keyed maps (named

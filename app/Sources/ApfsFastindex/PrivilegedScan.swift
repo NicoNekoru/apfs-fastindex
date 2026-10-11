@@ -32,29 +32,11 @@ extension Notification.Name {
 /// `EPERM`), but `sudo` on the fallback walker still bypasses TCC
 /// and surfaces those paths.
 ///
-/// Implementation:
-///
-/// 1. Locate the CLI binary inside the .app bundle
-///    (`Bundle.main.url(forAuxiliaryExecutable:)`). `make-release.sh`
-///    copies it to `Contents/MacOS/apfs-fastindex-scan` alongside the
-///    GUI binary.
-/// 2. Pick a temp output path for the msgpack blob.
-/// 3. Compose a one-line shell command:
-///    `<cli> --format msgpack <user-path> > <temp-out>`.
-/// 4. Run that command via `osascript` with `do shell script ... with
-///    administrator privileges`. macOS pops the auth dialog; if the
-///    user cancels, osascript exits non-zero and we return
-///    `.cancelled`.
-/// 5. On success, hand the temp file to `Scan.fromPrivilegedMsgpack`,
-///    which calls the new Rust FFI `apfs_scan_from_msgpack_file`.
-/// 6. Always remove the temp file, even on failure.
-///
-/// macOS-paths-with-quotes: every component (CLI path, user path,
-/// temp output path) is double-quoted in the shell command. Each
-/// quote-relevant character is escaped with `\` so a user-supplied
-/// directory named `Documents/with"weird/name` doesn't break the
-/// command. The `osascript` string itself is also escaped, since
-/// osascript runs through its own AppleScript parser.
+/// `AdminSession` starts the bundled CLI once through Authorization
+/// Services and reuses its JSON-line server protocol. The helper
+/// chooses each output path, writes through an `mkstemp` descriptor,
+/// transfers the completed mode-0600 file to the GUI's UID, and
+/// removes it after the GUI decodes the msgpack result.
 enum PrivilegedScan {
     /// Result of an attempted privileged scan.
     enum Outcome {
@@ -81,8 +63,8 @@ enum PrivilegedScan {
     /// 3. Anything on the user's `PATH` (last-resort —
     ///    `cargo install`-style setups).
     ///
-    /// Every candidate is `fileExists`-verified so we never hand
-    /// a phantom path to osascript.
+    /// Every candidate is `fileExists`-verified before it is handed
+    /// to Authorization Services.
     static var bundledCliURL: URL? {
         let fm = FileManager.default
 
@@ -169,7 +151,7 @@ enum PrivilegedScan {
     /// In that case the in-process fallback walker already sees
     /// every TCC-restricted path (the kernel checks EUID, not
     /// whether the call came from a freshly-spawned subprocess),
-    /// so the osascript escalation prompt is unnecessary.
+    /// so the Authorization Services prompt is unnecessary.
     /// Typical paths to this state: `sudo open …` rarely works
     /// for sandboxed GUI apps but `sudo
     /// /path/to/App.app/Contents/MacOS/ApfsFastindex` does, and a
@@ -181,11 +163,11 @@ enum PrivilegedScan {
     /// Synchronous; intended to be called from a background queue.
     ///
     /// Thin delegate to `AdminSession.shared.requestScan`. The
-    /// session manages the long-lived osascript-under-admin
+    /// session manages the long-lived privileged
     /// helper so successive scans don't re-prompt for auth.
     ///
     /// `onSessionReady` fires the moment auth completes (after
-    /// the helper sends its `ready\t1` handshake) — wire this to
+    /// the helper sends its version-2 `ready` event). Wire this to
     /// flip the UI's admin-mode flag immediately so the title
     /// bar updates before the scan finishes.
     ///

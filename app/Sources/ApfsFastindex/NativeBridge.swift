@@ -1,4 +1,5 @@
 import Foundation
+import ApfsCore
 import CApfsFastindex
 import os.log
 
@@ -250,7 +251,7 @@ private func runNativeBench(path: String) {
 /// Phase 2 exposes the totals + provenance fields the existing
 /// SwiftUI status bar reads. Phase 3 grows render-cells +
 /// hit-test FFI on top of the same handle.
-final class Scan {
+final class Scan: BrowserTree {
     /// Sentinel matching `APFS_ALLOCATED_TOTAL_UNCLAIMED` on the
     /// Rust side. Stays in sync with `u64::MAX`; if the Rust
     /// constant changes, the Swift mapping changes here too.
@@ -595,13 +596,7 @@ final class Scan {
     }
 
     /// Entry kind for the node.
-    enum NodeKind: UInt32 {
-        case dir = 0
-        case file = 1
-        case symlink = 2
-        case other = 3
-        case invalid = 0xff
-    }
+    typealias NodeKind = BrowserNodeKind
     func kind(of nodeIndex: UInt32) -> NodeKind {
         NodeKind(rawValue: apfs_scan_node_kind(handle, nodeIndex)) ?? .invalid
     }
@@ -632,10 +627,7 @@ final class Scan {
     /// Treemap metric the renderer should size cells by.
     /// `0 = logical`, `1 = allocated` (matches the Rust enum
     /// discriminants in `apfs_render_cells`).
-    enum Metric: UInt32 {
-        case logical = 0
-        case allocated = 1
-    }
+    typealias Metric = BrowserMetric
 
     /// Owning wrapper around an `ApfsLayout` — the Rust handle
     /// that holds both the laid-out cells and the spatial-hash
@@ -721,6 +713,7 @@ final class Scan {
             let valueLogical: UInt64
             let valueAllocated: UInt64?
             let fileCount: UInt32
+            let fillRGB: UInt32
         }
 
         fileprivate init(handle: OpaquePointer) {
@@ -750,7 +743,8 @@ final class Scan {
                 ext: ext,
                 valueLogical: r.value_logical,
                 valueAllocated: allocated,
-                fileCount: r.file_count
+                fileCount: r.file_count,
+                fillRGB: r.fill_rgb
             )
         }
 

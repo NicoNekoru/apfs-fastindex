@@ -9,18 +9,24 @@ is the build and code-tour reference for working inside `app/`.
 
 ## What's in the build
 
-- **Toolbar.** Target-path field, folder-picker, mode picker
-  (Auto / Raw / Fallback), cross-mounts toggle, Scan / Cancel,
-  metric picker (Logical / Allocated), depth stepper (in
-  settings).
+- **Toolbar.** Target-path field, folder picker, Scan, and
+  Logical / Allocated metric picker. Depth and worker count live
+  in Settings. Scan as Administrator is in the File menu.
 - **Breadcrumb header.** Click any segment to focus that subtree;
   back-arrow undoes one step.
-- **Tree-list panel** (left). Largest immediate children of the
-  current subtree, sorted by the active metric; click a row to
-  drill in. Resizable.
+- **Folder tree** (left). Expand folders or click to focus their
+  subtree. Files select and reveal their parent in the treemap.
+  Rows have the same context menu as treemap cells. Show more
+  loads another 400 children or search results.
 - **Ext-list panel** (right). Per-extension aggregate (entry
-  count + total size) computed by a Rust aggregator that walks
-  the indexed tree once. Resizable.
+  count + total size) computed by Rust. Click a row to filter
+  files within the current subtree and highlight matching cells.
+  Click again or press Escape to clear. Chip colours come from
+  the same Rust palette as the treemap.
+- **Search.** Cmd-F reveals the folder tree and focuses the name
+  search. Name-only searches cover the scan. With an extension
+  selected, names narrow that category within the current subtree.
+  Results sort by the active size metric and support pagination.
 - **Treemap.** Squarified layout (Bruls / Huijzen / van Wijk
   2000, in the d3-hierarchy variant), Core Graphics fillRect per
   cell. A 64×64 spatial hash sits over the cell array for
@@ -30,9 +36,11 @@ is the build and code-tour reference for working inside `app/`.
   cumulative logical bytes against `volume.used`, m:ss
   stopwatch. Driven by the FFI's
   `apfs_scan_directory_with_progress` callback at 250 ms cadence.
-- **Right-click context menu.** Real `NSMenu` → `NSWorkspace`:
-  Open, Reveal in Finder, Copy Path, confirm-then-Trash. Inherits
-  the OS's permission and recovery semantics.
+- **Context menus.** Reveal in Finder, Copy Path and confirmed
+  Move to Trash share path checks and action handlers. The scan
+  root and snapshot contents cannot be trashed. After a successful
+  Trash operation, a rescan notice prevents stale sizes from
+  appearing current. Restore items through Finder's Trash.
 - **Hover tooltip.** Path + size for the deepest cell under the
   cursor.
 - **Initial-view stats card.** Volume name + total / used / free
@@ -46,6 +54,11 @@ milliseconds sooner on a whole-machine scan; the deferred cells
 fill in on a follow-up tick.
 
 ## Build & run
+
+Use Rust 1.88 or newer and the macOS Command Line Tools. Distribution
+builds need a Rust standard library compatible with macOS 13. If the
+linker reports that Rust objects require a newer macOS version, use
+a compatible rustup toolchain before publishing.
 
 ```sh
 # From the repo root: one script does the whole pipeline —
@@ -93,10 +106,14 @@ app/
     ApfsFastindex/
       ApfsFastindexApp.swift             # @main, App scene, Settings
       NativeContentView.swift            # SwiftUI shell + state
+      BrowserPanels.swift                # tree, extension list and search views
+      FileActions.swift                  # shared context-menu actions and checks
       TreemapView.swift                  # NSView, Core Graphics draw
       NativeBridge.swift                 # Swift wrapper over C ABI
       SettingsView.swift                 # ⌘, scene (@AppStorage)
-      VizPalette.swift                   # extension → colour family
+      VizPalette.swift                   # typography and app colours
+    ApfsCore/
+      BrowserModel.swift                 # navigation, pagination and cancellable filters
 
 make-release.sh (in repo root)           # end-to-end build script
 ```
@@ -149,10 +166,22 @@ through `layout.hitTest(point:)`, which the 64×64 spatial hash
 turns into a few-cell comparison even on `/`-scan layouts. The
 tracking-area is registered on `viewDidMoveToWindow`.
 
-`right-click → menu(for:)` builds an `NSMenu` whose actions
-postMessage equivalents are direct `NSWorkspace` calls — no JS
-bridge, no marshalled message types. Cmd-Z and Move-to-Trash
-inherit the OS's recovery semantics.
+`menu(for:)` delegates to `FileActions`, also used by SwiftUI's
+folder-tree context menu. Restore trashed items in Finder. The
+app does not register an Undo action for file operations.
+
+## Interaction tests
+
+```sh
+swift run --package-path app apfs-browser-tests
+swift run --package-path app apfs-ffi-tests
+cargo test -p apfs-fastindex
+```
+
+The browser tests exercise navigation, both kinds of pagination,
+filter cancellation, metric changes and scan replacement without
+AppKit. The FFI suite checks extension classification and colour
+parity against a real scan. See `Tests/README.md` for UI checks.
 
 ## Not in this build
 

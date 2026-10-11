@@ -394,13 +394,12 @@ pub extern "C" fn apfs_is_snapshot_path(path: *const c_char) -> i32 {
 /// Load an ApfsScan from a previously-emitted msgpack file.
 ///
 /// The privileged-subprocess "Scan as Administrator…" flow
-/// spawns `apfs-fastindex-scan --format msgpack ...` via
-/// osascript with administrator privileges. The subprocess
-/// writes its `FallbackScanOutput` as a msgpack blob to a temp
-/// file the parent app picks; on subprocess exit, the parent
-/// calls this FFI to rehydrate an `ApfsScan` from that file —
-/// identical to the in-process scan handle the Swift renderer
-/// normally reads.
+/// runs the CLI's JSON-line server through Authorization
+/// Services. The helper writes its `FallbackScanOutput` to a
+/// helper-chosen tempfile, transfers the completed mode-0600
+/// file to the GUI's UID, and returns the path. The GUI calls
+/// this FFI to build the same `ApfsScan` handle as an in-process
+/// scan.
 ///
 /// Returns `NULL` on:
 /// - `path` is NULL or not valid UTF-8
@@ -1202,7 +1201,8 @@ pub struct ApfsExtRow {
     pub value_logical: u64,
     pub value_allocated: u64,
     pub file_count: u32,
-    pub _pad: u32,
+    /// Treemap palette colour, packed as 0xRRGGBB. Uses the former padding slot.
+    pub fill_rgb: u32,
 }
 
 /// Construct the ext-list summary for the subtree rooted at
@@ -1298,7 +1298,7 @@ pub extern "C" fn apfs_scan_ext_summary_row(
             value_logical: 0,
             value_allocated: APFS_ALLOCATED_TOTAL_UNCLAIMED,
             file_count: 0,
-            _pad: 0,
+            fill_rgb: 0,
         },
         move || {
             let zero = ApfsExtRow {
@@ -1309,7 +1309,7 @@ pub extern "C" fn apfs_scan_ext_summary_row(
                 value_logical: 0,
                 value_allocated: APFS_ALLOCATED_TOTAL_UNCLAIMED,
                 file_count: 0,
-                _pad: 0,
+                fill_rgb: 0,
             };
             let Some(h) = (unsafe { handle.as_ref() }) else {
                 return zero;
@@ -1330,7 +1330,7 @@ pub extern "C" fn apfs_scan_ext_summary_row(
                 value_logical: row.value_logical,
                 value_allocated: allocated,
                 file_count: row.file_count,
-                _pad: 0,
+                fill_rgb: crate::render::category_color(&row.ext),
             }
         },
     )

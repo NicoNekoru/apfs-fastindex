@@ -179,12 +179,13 @@ fn admin_mode_server_loop_scans_and_quits() {
     reader.read_line(&mut line).expect("read ready");
     let ready = parse_event(&line);
     assert_eq!(ready["event"], "ready", "unexpected handshake: {line:?}");
-    assert_eq!(ready["version"], 1);
+    assert_eq!(ready["version"], 2);
 
     // Send scan command as JSON-line.
     let cmd = serde_json::json!({
         "op": "scan",
         "path": scan_target.to_string_lossy(),
+        "owner_uid": unsafe { libc::geteuid() },
     });
     let bytes = serde_json::to_vec(&cmd).expect("encode scan");
     stdin.write_all(&bytes).expect("write scan");
@@ -219,6 +220,12 @@ fn admin_mode_server_loop_scans_and_quits() {
     let meta = std::fs::metadata(&out_path).expect("stat out_path");
     assert!(meta.is_file(), "out_path is not a regular file");
     assert!(meta.len() > 0, "out_path is empty");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        assert_eq!(meta.uid(), unsafe { libc::geteuid() });
+        assert_eq!(meta.permissions().mode() & 0o777, 0o600);
+    }
 
     // The output msgpack should rehydrate cleanly via the
     // existing FFI — same shape as a non-server-mode scan.
@@ -244,6 +251,10 @@ fn admin_mode_server_loop_scans_and_quits() {
     reader.read_line(&mut line).expect("read release ack");
     let ack = parse_event(&line);
     assert_eq!(ack["event"], "ok");
+    assert!(
+        !std::path::Path::new(&out_path).exists(),
+        "release did not remove the output file"
+    );
 
     // Quit.
     let quit = serde_json::json!({ "op": "quit" });

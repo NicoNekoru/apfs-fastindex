@@ -296,6 +296,62 @@ test("DisplaySanitizer: idempotent") {
     expect(once == twice, "must be idempotent; once=\(once) twice=\(twice)")
 }
 
+test("Extension filters and chips agree with the Rust summary and treemap") {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("apfs-browser-\(UUID().uuidString)")
+    do {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        for name in ["photo.JPG", "photo.jpg.backup", "other.BACKUP", ".hidden", "README", "file.", ".config.JSON", "file.ÄBC"] {
+            try Data(repeating: 65, count: 4096).write(to: directory.appendingPathComponent(name))
+        }
+        try FileManager.default.createSymbolicLink(atPath: directory.appendingPathComponent("link.jpg").path, withDestinationPath: "photo.JPG")
+        guard let scan = directory.path.withCString({ apfs_scan_directory_with_progress($0, 1, false, nil, nil) }) else {
+            expect(false, "Fixture scan failed")
+            return
+        }
+        defer { apfs_scan_free(scan) }
+        func string(_ ref: ApfsPathRef) -> String {
+            guard let bytes = ref.bytes else { return "" }
+            return String(decoding: UnsafeBufferPointer(start: bytes, count: Int(ref.len)), as: UTF8.self)
+        }
+        var counts: [String: UInt32] = [:]
+        var categories: [UInt32: String] = [:]
+        for node in 0..<apfs_scan_node_count(scan) {
+            let kind = BrowserNodeKind(rawValue: apfs_scan_node_kind(scan, node)) ?? .invalid
+            guard kind != .dir else { continue }
+            let category = FileCategory.key(name: string(apfs_scan_node_name(scan, node)), kind: kind)
+            counts[category, default: 0] += 1
+            categories[node] = category
+        }
+        guard let summary = apfs_scan_ext_summary_new(scan, 0, 0) else {
+            expect(false, "Summary was nil")
+            return
+        }
+        defer { apfs_scan_ext_summary_free(summary) }
+        var colors: [String: UInt32] = [:]
+        expect(Int(apfs_scan_ext_summary_count(summary)) == counts.count, "Category counts differ")
+        for index in 0..<apfs_scan_ext_summary_count(summary) {
+            let row = apfs_scan_ext_summary_row(summary, index)
+            let category = string(row.ext)
+            expect(row.file_count == counts[category], "Category mismatch for \(category)")
+            colors[category] = row.fill_rgb
+        }
+        guard let layout = apfs_layout_new(scan, 0, 0, 0, 1200, 800) else {
+            expect(false, "Layout was nil")
+            return
+        }
+        defer { apfs_layout_free(layout) }
+        let slice = apfs_layout_cells(layout)
+        for cell in UnsafeBufferPointer(start: slice.cells, count: Int(slice.count)) {
+            if let category = categories[cell.node_index] {
+                expect(cell.fill_rgb == colors[category], "Chip and leaf colors differ for \(category)")
+            }
+        }
+    } catch {
+        expect(false, "Fixture failed: \(error)")
+    }
+}
+
 // MARK: - Wrap up
 
 print("")

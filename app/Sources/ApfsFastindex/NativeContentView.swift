@@ -2,141 +2,44 @@ import AppKit
 import ApfsCore
 import SwiftUI
 
-/// Phase-5b SwiftUI shell over the native renderer. Path field
-/// + scan trigger live up top; the centre is the treemap; a
-/// breadcrumb sits above it for navigation; the status bar
-/// reports totals and the source descriptor.
-///
-/// Opt-in via `APFS_NATIVE=1`. Phase 5c lands the tree-list /
-/// ext-list side panels; phase 6 drops the WKWebView path.
+// Select the property wrapper, not the SDK 27 State macro. Command Line Tools
+// does not ship that macro's SwiftUIMacros plugin. This also supports older SDKs.
+private typealias ViewState<Value> = SwiftUI.State<Value>
+
+@MainActor
 struct NativeContentView: View {
-    @State private var pathInput: String = NSHomeDirectory()
-    @State private var scan: Scan?
-    @State private var layout: Scan.Layout?
-    @State private var scanError: String?
-    @State private var scanning: Bool = false
-    /// Sticky admin mode (per user request): once the user
-    /// successfully runs File > Scan as Administrator…, every
-    /// subsequent scan (including the regular Scan button) uses
-    /// the privileged flow. The flag stays true until the app
-    /// quits; there is no "exit admin mode" affordance today.
-    /// The Scan button's label updates to reflect this so the
-    /// user knows clicking will surface another auth prompt.
-    @State private var adminMode: Bool = false
-    /// Treemap depth + worker count live in `Settings` (⌘,). The
-    /// `@AppStorage` binding here keeps them reactive: editing
-    /// the value in the settings panel re-fires the depth
-    /// `onChange` below and re-lays the visible cells without a
-    /// rescan.
+    @ViewState private var pathInput: String = NSHomeDirectory()
+    @ViewState private var scan: Scan?
+    @ViewState private var layout: Scan.Layout?
+    @ViewState private var scanError: String?
+    @ViewState private var scanning: Bool = false
+    @ViewState private var adminMode: Bool = false
     @AppStorage(AppPrefs.depthKey) private var depth: Int = 0
     @AppStorage(AppPrefs.threadsKey) private var threads: Int = 0
-    /// View-menu toggles for the two side panels. Driven by
-    /// `ShowPanelCommands` in `ApfsFastindexApp` (⌘1 / ⌘2 /
-    /// ⌘0 / ⌘3). When both are off the treemap takes the
-    /// whole window.
     @AppStorage(AppPrefs.showFolderTreeKey) private var showFolderTree: Bool = true
     @AppStorage(AppPrefs.showExtensionsKey) private var showExtensions: Bool = true
     @AppStorage(AppPrefs.fdaPromptDismissedKey) private var fdaPromptDismissed: Bool = false
-    @State private var metric: Scan.Metric = .logical
-    @State private var lastSize: CGSize = .zero
-    @State private var currentNode: UInt32 = 0
-    @State private var lastClickedPath: String = ""
-    /// Set of node indices whose tree-list rows are expanded.
-    /// On a fresh scan we seed with `{0}` so the root's
-    /// top-level children are visible without a click.
-    @State private var expandedNodes: Set<UInt32> = [0]
-    /// Cached flattened tree-list rows. Recomputed when scan /
-    /// currentNode / expandedNodes / metric change so the
-    /// SwiftUI list view doesn't re-walk the tree on every
-    /// view body re-evaluation.
-    @State private var treeRows: [TreeListRow] = []
-    /// Search query as typed. The debounced + cancellable
-    /// Task chain in `onSearchQueryChanged` converts this into
-    /// `searchMatches` after the user pauses; intermediate
-    /// keystrokes are discarded so a fast typer doesn't pile
-    /// up backed-up walks.
-    @State private var searchQuery: String = ""
-    /// Sorted matching-node indices for the **flat search-
-    /// results list**. `nil` = no active search → render the
-    /// full hierarchical tree with normal expand/collapse.
-    /// Non-nil → render a flat list of matches (cap applied
-    /// to the visible row count; see `searchMatchCap`).
-    ///
-    /// Flat list (not hierarchical) is deliberate: the old
-    /// "auto-expand every ancestor of every match" behaviour
-    /// blew up on pathological short queries like "n" — the
-    /// keep-set hit 1 M+ ancestors and the tree-walk had to
-    /// make ~5 FFI calls per ancestor, totalling seconds of
-    /// main-thread blocking. Flat list visits matches and
-    /// nothing else; matches per typical query are in the
-    /// thousands at most.
-    @State private var searchMatches: [UInt32]? = nil
-    /// Total match count before the cap, for status display
-    /// ("Showing 500 of 14 762"). 0 when no search active.
-    @State private var searchTotalMatches: Int = 0
-    /// Last query the matches array was computed against —
-    /// short-circuits redundant rebuilds when the trimmed
-    /// query didn't change (e.g. spurious .onChange firing).
-    @State private var searchMatchesQuery: String = ""
-    /// "I'm searching now" indicator for the UI. Toggled by
-    /// the search Task across its async boundaries.
-    @State private var searchInFlight: Bool = false
-    /// Most-recent in-flight search Task. Stored so a new
-    /// keystroke can cancel the prior one before scheduling
-    /// the next debounced run.
-    @State private var searchTask: Task<Void, Never>? = nil
+    @ViewState private var metric: Scan.Metric = .logical
+    @ViewState private var lastSize: CGSize = .zero
+    @StateObject private var browser = BrowserModel()
+    @StateObject private var fileActions = FileActions()
     @FocusState private var searchFieldFocused: Bool
+    @ViewState private var extSummary: Scan.ExtSummary?
 
-    /// Debounce window. Keystrokes within this interval
-    /// collapse into one search. 200 ms is the
-    /// "feels-responsive" threshold (the user perceives the
-    /// filter as following their typing) without being so
-    /// short that "node_modules" still fires 12 searches.
-    private static let searchDebounceNs: UInt64 = 200_000_000
-    /// Minimum query length before we actually search. Single
-    /// characters match millions of names ("e" matches ~70 %
-    /// of `/Users/kai`); the flat-list cap saves the render
-    /// but the FFI still does the work. Two characters is the
-    /// shortest query that meaningfully narrows the result
-    /// set on a typical home directory.
-    private static let searchMinQueryLength: Int = 2
-    /// Max rows we render in flat search-list mode. Sorted by
-    /// the active metric descending so the user sees the
-    /// biggest hits first; over-cap matches get a "+ N more"
-    /// row.
-    private static let searchMatchCap: Int = 500
-    /// Per-(node, metric) ext-list summary for the right-hand
-    /// side panel. Computed in Rust via `Scan.extSummary` and
-    /// rebuilt whenever `currentNode` or `metric` changes; on a
-    /// typical /Applications-class scan that's well under
-    /// 10 ms so we don't bother caching across navigations.
-    @State private var extSummary: Scan.ExtSummary?
-    /// Walker-side skips reported by the FFI (audit r3 #F1):
-    /// permission-denied subtrees, depth-cap truncations,
-    /// DREC cycles, etc. Snapshotted once at scan finalize so
-    /// the status-bar banner doesn't re-walk the FFI on every
-    /// redraw.
-    @State private var walkSkips: [Scan.WalkSkip] = []
+    private var currentNode: UInt32 { browser.currentNode }
+    private var lastClickedPath: String {
+        guard let scan, browser.selectedNode != 0 else { return "" }
+        return DisplaySanitizer.sanitiseDisplay(scan.path(of: browser.selectedNode) ?? "")
+    }
 
-    // Live scan progress. While `scanning` is true the centered
-    // overlay shows `scanPhaseLabel` + the counters below. Phase
-    // labels flow:
-    //   "Scanning"   — receiving per-tick progress events
-    //   "Indexing"   — terminal event fired, tree-build in Rust
-    //                  still running (`apfs_scan_directory`
-    //                  returns once the tree is built)
-    //   "Rendering"  — scan returned; squarify/cells running on
-    //                  the main thread
-    @State private var scanPhaseLabel: String = "Scanning"
-    @State private var scanProgressScanned: UInt64 = 0
-    @State private var scanProgressSkipped: UInt64 = 0
-    @State private var scanProgressBytes: UInt64 = 0
-    @State private var scanProgressElapsedMs: UInt64 = 0
-    /// Volume's used-bytes captured at scan start — the
-    /// denominator for the determinate progress fraction
-    /// (`scanProgressBytes / scanProgressBytesTotal`). When this
-    /// is 0 (no volume info) the bar falls back to indeterminate.
-    @State private var scanProgressBytesTotal: UInt64 = 0
+    @ViewState private var walkSkips: [Scan.WalkSkip] = []
+
+    @ViewState private var scanPhaseLabel: String = "Scanning"
+    @ViewState private var scanProgressScanned: UInt64 = 0
+    @ViewState private var scanProgressSkipped: UInt64 = 0
+    @ViewState private var scanProgressBytes: UInt64 = 0
+    @ViewState private var scanProgressElapsedMs: UInt64 = 0
+    @ViewState private var scanProgressBytesTotal: UInt64 = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -145,16 +48,6 @@ struct NativeContentView: View {
                 .padding(.vertical, 8)
                 .background(VizPalette.panel)
             Divider().background(VizPalette.border)
-            // Global search bar (UX-1 fix). Moved here from
-            // inside the folder-tree panel so both side panels
-            // start at the same Y — without this move the
-            // folder-tree's column header sat ~40 px below the
-            // extensions panel's, which the user flagged.
-            //
-            // Visible only when (a) a scan exists and (b) the
-            // folder tree is shown (search filters that panel's
-            // contents; with the panel hidden the field would
-            // be visible-but-inert).
             if scan != nil && showFolderTree {
                 searchField
                     .padding(.horizontal, 12)
@@ -162,16 +55,6 @@ struct NativeContentView: View {
                     .background(VizPalette.panel)
                 Divider().background(VizPalette.border)
             }
-            // Breadcrumb. Shown only when the user has
-            // navigated *below* the scan root (UX feedback:
-            // the old always-visible bar was redundant —
-            // showed the same path the toolbar already had —
-            // but the navigate-back affordance it provided was
-            // genuinely needed, especially when the
-            // folder-tree panel is hidden and the user clicked
-            // into a deep cell on the treemap). Now: invisible
-            // at root, appears the moment you go in, with
-            // clickable segments + an "Up" button.
             if scan != nil && currentNode != 0 {
                 breadcrumbBar
                     .padding(.horizontal, 12)
@@ -179,10 +62,6 @@ struct NativeContentView: View {
                     .background(VizPalette.panel)
                 Divider().background(VizPalette.border)
             }
-            // VSplitView between (optional side panels) and the
-            // treemap. When neither side panel is shown the
-            // VSplitView has just the treemap and there's no
-            // top section at all (UX-3 "Treemap Only" mode).
             VSplitView {
                 if showFolderTree || showExtensions {
                     sidePanels
@@ -195,12 +74,24 @@ struct NativeContentView: View {
                             scan: scan,
                             layout: layout,
                             metric: metric,
+                            fileActions: fileActions,
+                            selectedNode: browser.selectedNode,
+                            highlightedNodes: browser.highlightedNodes,
                             onClick: { nodeIndex in
                                 handleClick(nodeIndex: nodeIndex)
                             }
                         )
                         if scan == nil && !scanning {
                             initialStatsCard
+                        }
+                        if let scan, !scanning, scan.itemCount(of: currentNode) == 0 {
+                            Text("This folder contains no files.")
+                                .foregroundStyle(VizPalette.muted)
+                                .allowsHitTesting(false)
+                        } else if scan != nil, !scanning, layout?.count == 0 {
+                            Text("No items have a size to display for this metric.")
+                                .foregroundStyle(VizPalette.muted)
+                                .allowsHitTesting(false)
                         }
                         if scanning {
                             progressOverlay
@@ -210,6 +101,20 @@ struct NativeContentView: View {
                     .onChange(of: proxy.size) { newSize in resize(to: newSize) }
                 }
                 .frame(minHeight: 200)
+            }
+            if fileActions.needsRescan {
+                HStack {
+                    Text("Files changed. Rescan to update sizes and remove stale entries.")
+                    Spacer()
+                    Button("Rescan") {
+                        if let scan { pathInput = scan.sourceRequestedPath }
+                        startScan()
+                    }
+                    .disabled(scanning)
+                }
+                .font(AppFont.ui(11))
+                .padding(8)
+                .background(VizPalette.panel)
             }
             Divider().background(VizPalette.border)
             statusBar
@@ -221,859 +126,69 @@ struct NativeContentView: View {
         .preferredColorScheme(.dark)
         .foregroundStyle(VizPalette.text)
         .onReceive(NotificationCenter.default.publisher(for: .scanAsAdministratorRequested)) { _ in
-            // The File > Scan as Administrator… menu item posts
-            // this notification; we kick off the privileged scan
-            // here so the menu command doesn't need a reference to
-            // SwiftUI state. The path comes from `pathInput`,
-            // matching the regular Scan button's flow.
             startPrivilegedScan()
         }
         .onReceive(NotificationCenter.default.publisher(for: .findRequested)) { _ in
-            // Edit > Find (⌘F) → focus the tree-list search
-            // field. If a scan hasn't run yet there's nothing to
-            // search, but focusing the field is still fine —
-            // the placeholder explains what it does and the
-            // typing won't filter anything until rows exist.
-            searchFieldFocused = true
+            guard scan != nil else { return }
+            showFolderTree = true
+            DispatchQueue.main.async { searchFieldFocused = true }
         }
         .onChange(of: adminMode) { _ in
-            // adminMode flips the moment auth completes
-            // (AdminSession's ready handshake); refresh the
-            // title and chip immediately. Routes through NSApp
-            // because SwiftUI's `.navigationTitle` is per-toolbar
-            // on macOS rather than per-window.
             applyWindowTitle()
         }
         .onAppear { applyWindowTitle() }
-        .onChange(of: scan?.entryCount) { _ in
-            // New scan = node indices in any cached search
-            // results are stale (they belonged to the previous
-            // scan). Cancel any in-flight search, drop the
-            // cache, and rebuild against the new tree.
-            searchTask?.cancel()
-            searchTask = nil
-            searchMatches = nil
-            searchTotalMatches = 0
-            searchMatchesQuery = ""
-            searchInFlight = false
-            rebuildTreeRows()
-            rebuildExtSummary()
-        }
         .onChange(of: currentNode) { _ in
-            rebuildTreeRows()
+            updateLayout()
             rebuildExtSummary()
         }
-        .onChange(of: metric) { _ in
-            rebuildTreeRows()
+        .onChange(of: metric) { value in
+            browser.setMetric(value)
+            updateLayout()
             rebuildExtSummary()
         }
-        .onChange(of: expandedNodes) { _ in rebuildTreeRows() }
-        // Settings panel writes both of these; depth re-fires the
-        // layout pass without a rescan, threads picks up on the
-        // *next* scan.
         .onChange(of: depth) { _ in updateLayout() }
     }
 
-    // MARK: - Tree-list panel
-
-    /// Soft cap on visible children per directory in the tree-
-    /// list — matches the JS canvas-era constant. Beyond this
-    /// the row build adds a "… and N more" placeholder; the
-    /// user can drill into the directory to see the rest.
-    private static let treeListChildrenCap = 400
-
-    private struct TreeListRow: Identifiable {
-        // Stable identity: a (nodeIndex, depth) pair survives
-        // re-renders without re-issuing implicit identifiers.
-        let id: UInt64
-        let nodeIndex: UInt32
-        let depth: Int
-        let hasChildren: Bool
-        let isExpanded: Bool
-        let isCurrent: Bool
-        /// Special "+N more" row that doesn't correspond to a
-        /// real node. `nodeIndex == APFS_NODE_INVALID`.
-        let isOverflow: Bool
-        let overflowCount: Int
-    }
-
-    /// Top-section composition (UX-3). Returns whichever side
-    /// panels are toggled on, in the matching geometry. When
-    /// only one is visible, it stretches across the full
-    /// width; when both, the HSplitView lets the user drag the
-    /// divider.
-    @ViewBuilder
-    private var sidePanels: some View {
+    @ViewBuilder private var sidePanels: some View {
         if showFolderTree && showExtensions {
             HSplitView {
-                treeListPanel
-                    .frame(minWidth: 220, idealWidth: 340, maxWidth: .infinity)
-                extListPanel
-                    .frame(minWidth: 200, idealWidth: 280, maxWidth: .infinity)
+                treeListPanel.frame(minWidth: 300, idealWidth: 420, maxWidth: .infinity)
+                extListPanel.frame(minWidth: 300, idealWidth: 380, maxWidth: .infinity)
             }
         } else if showFolderTree {
-            treeListPanel
-                .frame(maxWidth: .infinity)
+            treeListPanel.frame(maxWidth: .infinity)
         } else if showExtensions {
-            extListPanel
-                .frame(maxWidth: .infinity)
+            extListPanel.frame(maxWidth: .infinity)
         }
     }
 
     private var treeListPanel: some View {
-        VStack(spacing: 0) {
-            paneHeader("Folder tree")
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(VizPalette.bg)
-            // searchField moved to the global slot above the
-            // VSplitView so both side panels start at the same
-            // Y (UX-2 alignment fix).
-            colHeader
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(VizPalette.bg)
-            Divider().background(VizPalette.border)
-            // ScrollViewReader so we can scroll-to-row when
-            // `currentNode` changes (treemap → tree-list sync).
-            // Each row gets `.id(row.id)` for the lookup.
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(treeRows) { row in
-                            treeListRowView(row)
-                                .id(row.id)
-                        }
-                    }
-                    .padding(.vertical, 2)
-                }
-                .onChange(of: currentNode) { newNode in
-                    // Find the visible row for the new
-                    // currentNode and bring it into view.
-                    // The treemap-click path also auto-
-                    // expands ancestors in `navigate(to:)` so
-                    // the row should always be visible (modulo
-                    // the overflow cap).
-                    if let id = treeRows.first(where: {
-                        !$0.isOverflow && $0.nodeIndex == newNode
-                    })?.id {
-                        withAnimation(.easeOut(duration: 0.18)) {
-                            proxy.scrollTo(id, anchor: .center)
-                        }
-                    }
-                }
-            }
-        }
-        .background(VizPalette.panel)
+        FolderTreePanel(scan: scan, browser: browser, actions: fileActions)
     }
-
-    /// Search-by-name input. ⌘F focuses it (handled in
-    /// `ApfsFastindexApp` via the standard `.find` command
-    /// notification → `.findRequested` listener below).
-    /// Case-insensitive substring match on each node's display
-    /// name (the last path component). Empty = no filter.
-    private var searchField: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass")
-                .font(AppFont.ui(11))
-                .foregroundStyle(VizPalette.muted)
-            TextField("Filter names (⌘F)", text: $searchQuery)
-                .textFieldStyle(.plain)
-                .font(AppFont.ui(12))
-                .focused($searchFieldFocused)
-                .onChange(of: searchQuery) { newValue in
-                    onSearchQueryChanged(newValue)
-                }
-                .onChange(of: metric) { _ in
-                    // Re-sort search results when the user
-                    // flips logical/allocated. Otherwise the
-                    // top-N picked by the old metric stays
-                    // stuck even though the user clearly
-                    // wants the new metric's biggest hits.
-                    if searchMatches != nil {
-                        // Force re-run; clear cache key so the
-                        // same query triggers fresh work.
-                        searchMatchesQuery = ""
-                        onSearchQueryChanged(searchQuery)
-                    }
-                }
-            // Status text. Three states:
-            //  - Searching → "Searching…" while the Task is
-            //    debouncing + computing off-main.
-            //  - Has matches → "M / N matches" (or just "N")
-            //  - Sub-min-length → "Type 2+ chars" hint.
-            if searchInFlight {
-                Text("Searching…")
-                    .font(AppFont.ui(10))
-                    .foregroundStyle(VizPalette.muted)
-            } else if let matches = searchMatches {
-                let shown = matches.count
-                let total = searchTotalMatches
-                if total > shown {
-                    Text("\(shown) of \(total)")
-                        .font(AppFont.ui(10)).monospacedDigit()
-                        .foregroundStyle(VizPalette.muted)
-                        .help("Showing the \(shown) largest matches (sorted by the active metric). Use a longer query to narrow.")
-                } else if total > 0 {
-                    Text("\(total)")
-                        .font(AppFont.ui(10)).monospacedDigit()
-                        .foregroundStyle(VizPalette.muted)
-                        .help("\(total) matches.")
-                } else {
-                    Text("0")
-                        .font(AppFont.ui(10)).monospacedDigit()
-                        .foregroundStyle(VizPalette.warning)
-                        .help("No matches.")
-                }
-            } else if !searchQuery.isEmpty
-                && searchQuery.trimmingCharacters(in: .whitespaces).count
-                    < NativeContentView.searchMinQueryLength
-            {
-                Text("Type 2+")
-                    .font(AppFont.ui(10))
-                    .foregroundStyle(VizPalette.muted)
-                    .help("Single-character queries match too much; type at least 2 characters to filter.")
-            }
-            if !searchQuery.isEmpty {
-                Button {
-                    searchQuery = ""
-                    searchFieldFocused = false
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(AppFont.ui(12))
-                        .foregroundStyle(VizPalette.muted)
-                }
-                .buttonStyle(.plain)
-                .help("Clear search")
-                .keyboardShortcut(.cancelAction)
-            }
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background(VizPalette.panel)
-        .overlay(
-            RoundedRectangle(cornerRadius: 5)
-                .stroke(searchFieldFocused
-                        ? VizPalette.accent.opacity(0.6)
-                        : VizPalette.border, lineWidth: 1)
-        )
-    }
-
-    @ViewBuilder
-    private func paneHeader(_ title: String) -> some View {
-        HStack {
-            Text(title.uppercased())
-                .font(AppFont.ui(10, weight: .semibold))
-                .foregroundStyle(VizPalette.muted)
-                .tracking(0.4)
-            Spacer()
-        }
-    }
-
-    private var colHeader: some View {
-        HStack(spacing: 0) {
-            // 22 pt indent column for the disclosure triangle.
-            Spacer().frame(width: 22)
-            Text("Name")
-                .font(AppFont.ui(9, weight: .semibold))
-                .foregroundStyle(VizPalette.muted)
-                .tracking(0.4)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Text("% / parent")
-                .font(AppFont.ui(9, weight: .semibold))
-                .foregroundStyle(VizPalette.muted)
-                .frame(width: 80, alignment: .trailing)
-            Text("Size")
-                .font(AppFont.ui(9, weight: .semibold))
-                .foregroundStyle(VizPalette.muted)
-                .frame(width: 70, alignment: .trailing)
-                .padding(.leading, 4)
-        }
-    }
-
-    @ViewBuilder
-    private func treeListRowView(_ row: TreeListRow) -> some View {
-        if row.isOverflow {
-            HStack {
-                Spacer().frame(width: CGFloat(14 * (row.depth + 1) + 8))
-                Text("… and \(row.overflowCount) more")
-                    .font(AppFont.ui(11)).monospacedDigit()
-                    .foregroundStyle(VizPalette.muted)
-                Spacer()
-            }
-            .padding(.vertical, 1)
-        } else {
-            let scan = self.scan
-            HStack(spacing: 0) {
-                Spacer().frame(width: CGFloat(14 * row.depth + 4))
-                // Disclosure triangle (or invisible placeholder
-                // when this row has no children — keeps the
-                // name column lined up).
-                Button {
-                    toggleExpansion(of: row.nodeIndex)
-                } label: {
-                    Image(systemName: row.isExpanded ? "chevron.down" : "chevron.right")
-                        .font(AppFont.ui(9))
-                        .foregroundStyle(row.hasChildren ? VizPalette.muted : .clear)
-                        .frame(width: 14, height: 14, alignment: .center)
-                }
-                .buttonStyle(.plain)
-                .disabled(!row.hasChildren)
-
-                // Kind icon — quick visual telling files,
-                // symlinks, dirs apart.
-                let kind = scan?.kind(of: row.nodeIndex) ?? .invalid
-                Image(systemName: rowIconName(kind: kind))
-                    .font(AppFont.ui(11))
-                    .foregroundStyle(rowIconColor(kind: kind))
-                    .frame(width: 14)
-                    .padding(.trailing, 4)
-
-                // Name (or "/" for the root). Tap-anywhere area:
-                // wrap in a Button so SwiftUI catches the click
-                // without us having to hand-roll gesture
-                // tracking.
-                Button {
-                    navigate(to: row.nodeIndex)
-                } label: {
-                    // Sanitise parser-supplied names before
-                    // they hit the tree-list row (audit #App-2).
-                    //
-                    // Search mode shows the full path so the
-                    // user can tell `Cache/Foo.txt` apart from
-                    // `Cache/Bar/Foo.txt` — the flat list
-                    // collapses hierarchy so just the leaf
-                    // name would be ambiguous.
-                    let name: String = {
-                        // Root row (UX-4): show the scan's
-                        // actual target path rather than a
-                        // bare "/". Falls back to "/" only
-                        // when the source path is unavailable
-                        // (e.g. a pre-scan state).
-                        if row.nodeIndex == 0 {
-                            let src = scan?.sourceRequestedPath ?? ""
-                            return src.isEmpty ? "/" : src
-                        }
-                        if searchMatches != nil {
-                            let raw = scan?.path(of: row.nodeIndex) ?? "?"
-                            return DisplaySanitizer.sanitiseDisplay(
-                                raw.isEmpty ? "/" : raw
-                            )
-                        }
-                        let raw = scan?.name(of: row.nodeIndex) ?? "?"
-                        return DisplaySanitizer.sanitiseDisplay(raw)
-                    }()
-                    HStack(spacing: 0) {
-                        Text(name)
-                            .font(AppFont.ui(12)).monospacedDigit()
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        Text(percentText(for: row))
-                            .font(AppFont.ui(10)).monospacedDigit()
-                            .foregroundStyle(VizPalette.muted)
-                            .frame(width: 80, alignment: .trailing)
-                        Text(sizeText(for: row))
-                            .font(AppFont.ui(10)).monospacedDigit()
-                            .foregroundStyle(VizPalette.text)
-                            .frame(width: 70, alignment: .trailing)
-                            .padding(.leading, 4)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 1)
-            .background(row.isCurrent
-                        ? VizPalette.accent.opacity(0.22)
-                        : Color.clear)
-        }
-    }
-
-    private func rowIconName(kind: Scan.NodeKind) -> String {
-        switch kind {
-        case .dir: return "folder.fill"
-        case .file: return "doc"
-        case .symlink: return "arrow.forward.circle"
-        default: return "questionmark.circle"
-        }
-    }
-
-    private func rowIconColor(kind: Scan.NodeKind) -> Color {
-        switch kind {
-        case .dir: return Color(red: 0xf4 / 255, green: 0xd3 / 255, blue: 0x5e / 255)
-        case .symlink: return Color(red: 0x7d / 255, green: 0x8a / 255, blue: 0x99 / 255)
-        default: return VizPalette.muted
-        }
-    }
-
-    private func percentText(for row: TreeListRow) -> String {
-        guard let scan, row.nodeIndex != 0 else { return "—" }
-        let parent = scan.parent(of: row.nodeIndex) ?? 0
-        let parentValue = metricValue(for: parent, scan: scan)
-        guard parentValue > 0 else { return "—" }
-        let ownValue = metricValue(for: row.nodeIndex, scan: scan)
-        let pct = Double(ownValue) / Double(parentValue) * 100.0
-        return String(format: "%.1f%%", pct)
-    }
-
-    private func sizeText(for row: TreeListRow) -> String {
-        guard let scan else { return "" }
-        let value = metricValue(for: row.nodeIndex, scan: scan)
-        if metric == .allocated && scan.valueAllocated(of: row.nodeIndex) == nil {
-            return "unclaimed"
-        }
-        return ByteCountFormatter.string(fromByteCount: Int64(value), countStyle: .binary)
-    }
-
-    private func metricValue(for nodeIndex: UInt32, scan: Scan) -> UInt64 {
-        if metric == .allocated {
-            return scan.valueAllocated(of: nodeIndex) ?? 0
-        }
-        return scan.valueLogical(of: nodeIndex)
-    }
-
-    private func toggleExpansion(of nodeIndex: UInt32) {
-        if expandedNodes.contains(nodeIndex) {
-            expandedNodes.remove(nodeIndex)
-        } else {
-            expandedNodes.insert(nodeIndex)
-        }
-    }
-
-    private func navigate(to nodeIndex: UInt32) {
-        guard let scan else { return }
-        currentNode = nodeIndex
-        // `lastClickedPath` is rendered in the status bar; route
-        // parser bytes through the display sanitiser before they
-        // become UI text (audit #App-2). The unsanitised string
-        // is never used for any FS action — that path goes
-        // through `PathContainment` in `TreemapView`.
-        let path = scan.path(of: nodeIndex) ?? ""
-        lastClickedPath = DisplaySanitizer.sanitiseDisplay(path.isEmpty ? "/" : path)
-        // Expand the path so the highlighted row is visible.
-        // We don't auto-expand subtrees — only ancestors of the
-        // navigated node.
-        var c: UInt32? = scan.parent(of: nodeIndex)
-        while let cur = c {
-            expandedNodes.insert(cur)
-            c = scan.parent(of: cur)
-        }
-        // Clicking a search result means "go to that file."
-        // Exit search mode so the user lands in the regular
-        // hierarchical view with their target highlighted.
-        if searchMatches != nil {
-            searchTask?.cancel()
-            searchTask = nil
-            searchMatches = nil
-            searchTotalMatches = 0
-            searchMatchesQuery = ""
-            searchInFlight = false
-            searchQuery = ""
-            // Force a tree-rows rebuild *before* updateLayout
-            // so the row corresponding to `nodeIndex` exists in
-            // `treeRows` when the ScrollViewReader tries to
-            // bring it into view.
-            rebuildTreeRows()
-        }
-        updateLayout()
-    }
-
-    // MARK: - Ext-list panel
 
     private var extListPanel: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 6) {
-                Text("BY EXTENSION")
-                    .font(AppFont.ui(10, weight: .semibold))
-                    .foregroundStyle(VizPalette.muted)
-                    .tracking(0.4)
-                if let summary = extSummary, summary.count > 0 {
-                    Text(extSubtitle(summary: summary))
-                        .font(AppFont.ui(11))
-                        .foregroundStyle(VizPalette.muted)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-                Spacer()
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(VizPalette.bg)
-            HStack(spacing: 0) {
-                Spacer().frame(width: 18)
-                Text("Extension")
-                    .font(AppFont.ui(9, weight: .semibold))
-                    .foregroundStyle(VizPalette.muted)
-                    .tracking(0.4)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Text("% / view")
-                    .font(AppFont.ui(9, weight: .semibold))
-                    .foregroundStyle(VizPalette.muted)
-                    .frame(width: 70, alignment: .trailing)
-                Text("Size")
-                    .font(AppFont.ui(9, weight: .semibold))
-                    .foregroundStyle(VizPalette.muted)
-                    .frame(width: 70, alignment: .trailing)
-                    .padding(.leading, 4)
-                Text("Files")
-                    .font(AppFont.ui(9, weight: .semibold))
-                    .foregroundStyle(VizPalette.muted)
-                    .frame(width: 50, alignment: .trailing)
-                    .padding(.leading, 4)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-            .background(VizPalette.bg)
-            Divider().background(VizPalette.border)
-            if let summary = extSummary {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(summary.allRows()) { row in
-                            extListRowView(row, total: summary.totalValue)
-                        }
-                    }
-                    .padding(.vertical, 2)
-                }
-            } else {
-                Spacer()
-                Text("(scan a folder to see breakdown)")
-                    .font(AppFont.ui(11))
-                    .foregroundStyle(VizPalette.muted)
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                Spacer()
-            }
+        ExtensionPanel(summary: extSummary, browser: browser) { category in
+            showFolderTree = true
+            browser.toggleExtension(category)
         }
-        .background(VizPalette.panel)
     }
 
-    private func extSubtitle(summary: Scan.ExtSummary) -> String {
-        let total = ByteCountFormatter.string(
-            fromByteCount: Int64(summary.totalValue),
-            countStyle: .binary
-        )
-        if summary.anyUnclaimed {
-            return "\(summary.count) ext · \(total) · some unclaimed"
-        }
-        return "\(summary.count) ext · \(total)"
-    }
-
-    @ViewBuilder
-    private func extListRowView(_ row: Scan.ExtSummary.Row, total: UInt64) -> some View {
-        HStack(spacing: 0) {
-            // Colour chip matching the JS canvas leaf palette so
-            // the panel chip → treemap rect colour-binds for
-            // the user.
-            Rectangle()
-                .fill(extChipColor(ext: row.ext))
-                .frame(width: 10, height: 10)
-                .padding(.leading, 6)
-                .padding(.trailing, 6)
-            Text(row.ext)
-                .font(AppFont.ui(11)).monospacedDigit()
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Text(extPercentText(row: row, total: total))
-                .font(AppFont.ui(10)).monospacedDigit()
-                .foregroundStyle(VizPalette.muted)
-                .frame(width: 70, alignment: .trailing)
-            Text(extSizeText(row: row))
-                .font(AppFont.ui(10)).monospacedDigit()
-                .foregroundStyle(VizPalette.text)
-                .frame(width: 70, alignment: .trailing)
-                .padding(.leading, 4)
-            Text(row.fileCount.formatted())
-                .font(AppFont.ui(10)).monospacedDigit()
-                .foregroundStyle(VizPalette.muted)
-                .frame(width: 50, alignment: .trailing)
-                .padding(.leading, 4)
-        }
-        .padding(.horizontal, 4)
-        .padding(.vertical, 2)
-    }
-
-    private func extPercentText(row: Scan.ExtSummary.Row, total: UInt64) -> String {
-        guard total > 0 else { return "—" }
-        let v: UInt64 = metric == .allocated
-            ? (row.valueAllocated ?? 0)
-            : row.valueLogical
-        let pct = Double(v) / Double(total) * 100.0
-        return String(format: "%.1f%%", pct)
-    }
-
-    private func extSizeText(row: Scan.ExtSummary.Row) -> String {
-        if metric == .allocated {
-            guard let alloc = row.valueAllocated else { return "unclaimed" }
-            return ByteCountFormatter.string(fromByteCount: Int64(alloc), countStyle: .binary)
-        }
-        return ByteCountFormatter.string(fromByteCount: Int64(row.valueLogical),
-                                         countStyle: .binary)
-    }
-
-    /// Subset of the JS `EXT_COLORS` palette so the chip beside
-    /// each row reads the same colour the leaf rects render
-    /// in the treemap. Unknown extensions hash to grey for now
-    /// (a future commit can FNV-1a → HSL like the canvas-era
-    /// `hashColor` for full colour parity).
-    private func extChipColor(ext: String) -> Color {
-        let key = ext.hasPrefix(".") ? String(ext.dropFirst()) : ext
-        switch key.lowercased() {
-        case "txt", "md": return Color(red: 0xa0/255, green: 0xc4/255, blue: 0xff/255)
-        case "rs": return Color(red: 0xff/255, green: 0xc0/255, blue: 0x9f/255)
-        case "py": return Color(red: 0xff/255, green: 0xd6/255, blue: 0xa5/255)
-        case "js", "ts", "tsx", "jsx": return Color(red: 0xff/255, green: 0xe0/255, blue: 0x66/255)
-        case "json": return Color(red: 0xf4/255, green: 0xd3/255, blue: 0x5e/255)
-        case "html": return Color(red: 0xff/255, green: 0x8f/255, blue: 0xab/255)
-        case "css": return Color(red: 0xca/255, green: 0xff/255, blue: 0xbf/255)
-        case "c", "cpp", "h", "hpp": return Color(red: 0xbd/255, green: 0xb2/255, blue: 0xff/255)
-        case "swift": return Color(red: 0xfd/255, green: 0xb5/255, blue: 0xa5/255)
-        case "go": return Color(red: 0x9b/255, green: 0xf6/255, blue: 0xff/255)
-        case "rb": return Color(red: 0xff/255, green: 0xb3/255, blue: 0xc1/255)
-        case "png", "jpg", "jpeg", "gif", "webp", "heic", "svg", "icns":
-            return Color(red: 0x8e/255, green: 0xca/255, blue: 0xe6/255)
-        case "mp4", "mov", "mp3", "wav", "m4a", "flac":
-            return Color(red: 0xb3/255, green: 0x88/255, blue: 0xeb/255)
-        case "pdf", "doc", "docx", "pages":
-            return Color(red: 0xef/255, green: 0x47/255, blue: 0x6f/255)
-        case "zip", "tar", "gz", "bz2", "dmg", "iso":
-            return Color(red: 0xad/255, green: 0xb5/255, blue: 0xbd/255)
-        case "app", "framework", "dylib", "so":
-            return Color(red: 0xff/255, green: 0xaf/255, blue: 0xcc/255)
-        default:
-            return VizPalette.muted
-        }
+    private var searchField: some View {
+        BrowserSearchField(browser: browser, focus: $searchFieldFocused)
     }
 
     private func rebuildExtSummary() {
-        guard let scan else { extSummary = nil; return }
-        extSummary = scan.extSummary(rootedAt: currentNode, metric: metric)
+        extSummary = scan?.extSummary(rootedAt: currentNode, metric: metric)
     }
 
-    private func rebuildTreeRows() {
-        guard let scan else { treeRows = []; return }
-        var out: [TreeListRow] = []
-        walkForRows(scan: scan, nodeIndex: 0, depth: 0, out: &out)
-        treeRows = out
-    }
-
-    /// Called on every keystroke in the search field.
-    ///
-    /// Schedules a debounced + cancellable search Task:
-    /// - Empty / sub-min-length query: clears search state
-    ///   synchronously (the user just hit Backspace; no
-    ///   reason to make them wait).
-    /// - Otherwise: cancels any prior in-flight Task, sleeps
-    ///   `searchDebounceNs`, runs the FFI on a background
-    ///   `DispatchQueue.global(qos: .userInitiated)`, then
-    ///   sorts + caps the results and publishes back to
-    ///   `@State` on the main actor.
-    ///
-    /// Why background dispatch: the Rust FFI itself runs in
-    /// the low tens of ms on a 1.5 M-entry scan, but the
-    /// post-FFI work in Swift (allocating the `[UInt32]`,
-    /// sorting it by metric value via more FFI calls,
-    /// re-rendering the LazyVStack) historically blocked the
-    /// main thread for ~5+ s on single-letter queries because
-    /// every per-node sort triggered another FFI hop. Off-
-    /// main keeps the input field responsive.
-    ///
-    /// Cancellation makes "node_modules" produce one search
-    /// run instead of twelve: each keystroke cancels the
-    /// pending Task, the next keystroke's sleep starts fresh,
-    /// only the user's last pause-of-200ms-or-more wins.
-    private func onSearchQueryChanged(_ newValue: String) {
-        // Always cancel the prior task. Even if the new query
-        // is empty (so we won't schedule a new one), an
-        // in-flight one needs to stop publishing.
-        searchTask?.cancel()
-        searchTask = nil
-
-        let trimmed = newValue.trimmingCharacters(in: .whitespaces)
-        // Empty or too-short query: clear search state
-        // immediately and rebuild the regular tree. Don't
-        // wait for the debounce — Backspace should feel
-        // instant.
-        if trimmed.count < NativeContentView.searchMinQueryLength {
-            if searchMatches != nil || !searchMatchesQuery.isEmpty {
-                searchMatches = nil
-                searchTotalMatches = 0
-                searchMatchesQuery = ""
-                searchInFlight = false
-                rebuildTreeRows()
-            } else {
-                // No prior state to clear; just make sure the
-                // flight indicator is off.
-                searchInFlight = false
-            }
-            return
-        }
-
-        // Skip work if the trimmed query matches the one
-        // we last computed against (e.g. user deleted a
-        // trailing space).
-        if trimmed == searchMatchesQuery, searchMatches != nil {
-            return
-        }
-
-        guard let scan else { return }
-        // Capture by value so the detached task doesn't pin
-        // SwiftUI state.
-        let metricSnapshot = self.metric
-        let cap = NativeContentView.searchMatchCap
-
-        searchInFlight = true
-        searchTask = Task { @MainActor in
-            // Debounce: a fresh keystroke comes through and
-            // cancels us; the next one schedules its own
-            // sleep. Try/catch swallows the cancellation
-            // CancellationError.
-            do {
-                try await Task.sleep(nanoseconds: NativeContentView.searchDebounceNs)
-            } catch {
-                return
-            }
-            if Task.isCancelled { return }
-
-            // Heavy work off the main thread. Scan is a
-            // reference; the FFI it forwards into is
-            // thread-safe (see `apfs_scan_search_names`).
-            // Sorting calls `valueLogical`/`valueAllocated`
-            // FFIs which read pre-computed subtree totals —
-            // also thread-safe.
-            let sortedCapped: (rows: [(UInt32, UInt64)], total: Int) = await Task.detached(
-                priority: .userInitiated
-            ) {
-                let matches = scan.searchMatches(query: trimmed)
-                let total = matches.count
-                if matches.isEmpty {
-                    return ([], 0)
-                }
-                // Score every match by the active metric. One
-                // FFI hop per match — for the worst-case
-                // single-letter query that's ~1 M hops; the
-                // background-thread placement keeps the UI
-                // alive while it runs.
-                let scored: [(UInt32, UInt64)] = matches.map { idx -> (UInt32, UInt64) in
-                    let v: UInt64 = (metricSnapshot == .allocated)
-                        ? (scan.valueAllocated(of: idx) ?? 0)
-                        : scan.valueLogical(of: idx)
-                    return (idx, v)
-                }
-                // Sort by metric desc, cap. `sorted` is
-                // ~O(N log N); for 1 M elements that's ~20 M
-                // comparisons. Still under a second off-main.
-                let sortedAll = scored.sorted { $0.1 > $1.1 }
-                let visible = Array(sortedAll.prefix(cap))
-                return (visible, total)
-            }.value
-
-            if Task.isCancelled { return }
-
-            // Publish back to the main actor.
-            searchMatches = sortedCapped.rows.map { $0.0 }
-            searchTotalMatches = sortedCapped.total
-            searchMatchesQuery = trimmed
-            searchInFlight = false
-            rebuildTreeRows()
-        }
-    }
-
-    private func walkForRows(scan: Scan, nodeIndex: UInt32, depth: Int, out: inout [TreeListRow]) {
-        // Search mode is rendered as a flat results list, not
-        // a hierarchical tree (see comments on `searchMatches`
-        // for the rationale). When `searchMatches` is set
-        // we delegate the entire row build to a sibling
-        // function and short-circuit the recursive walk.
-        if let matches = searchMatches {
-            // Only the top-level call should render the flat
-            // list; recursive descendents return immediately.
-            if nodeIndex == 0, depth == 0 {
-                walkFlatSearchResults(scan: scan, matches: matches, out: &out)
-            }
-            return
-        }
-
-        let kind = scan.kind(of: nodeIndex)
-        let childCount = scan.childCount(of: nodeIndex)
-        let isDir = kind == .dir
-        let hasChildren = isDir && childCount > 0
-        let isExpanded = hasChildren && expandedNodes.contains(nodeIndex)
-        let isCurrent = nodeIndex == currentNode
-        let id = (UInt64(nodeIndex) << 8) | UInt64(depth & 0xff)
-        out.append(TreeListRow(
-            id: id, nodeIndex: nodeIndex, depth: depth,
-            hasChildren: hasChildren, isExpanded: isExpanded,
-            isCurrent: isCurrent,
-            isOverflow: false, overflowCount: 0
-        ))
-        guard isExpanded else { return }
-        // Sort children descending by the active metric. Pull
-        // the value-per-child once into an array then sort to
-        // keep the per-comparison FFI cost down.
-        let children = Array(scan.children(of: nodeIndex))
-        let scored: [(UInt32, UInt64)] = children.map { ($0, metricValue(for: $0, scan: scan)) }
-        let sorted = scored.sorted { $0.1 > $1.1 }
-        let visible = sorted.prefix(NativeContentView.treeListChildrenCap)
-        for (child, _) in visible {
-            walkForRows(scan: scan, nodeIndex: child, depth: depth + 1, out: &out)
-        }
-        if sorted.count > visible.count {
-            let id = (UInt64(nodeIndex) << 8) | UInt64((depth + 1) & 0xff) | 0xff_0000_0000
-            out.append(TreeListRow(
-                id: id, nodeIndex: Scan.nodeInvalid, depth: depth,
-                hasChildren: false, isExpanded: false, isCurrent: false,
-                isOverflow: true, overflowCount: sorted.count - visible.count
-            ))
-        }
-    }
-
-    /// Emit one `TreeListRow` per match. The matches list was
-    /// already sorted + capped on the background thread (see
-    /// `onSearchQueryChanged`); we just translate each
-    /// node index into a row. All rows render at `depth = 0`
-    /// (the search-list is flat); the existing
-    /// `treeListRowView` displays the node's name plus its
-    /// parent path inferred via `Scan.path(of:)`.
-    ///
-    /// Overflow row at the end when `searchTotalMatches`
-    /// exceeded the cap — surfaces "+ N more matches" so
-    /// the user knows they're seeing a partial view.
-    private func walkFlatSearchResults(
-        scan: Scan,
-        matches: [UInt32],
-        out: inout [TreeListRow]
-    ) {
-        for nodeIndex in matches {
-            // `id` collisions can't happen because every
-            // match is a unique tree node and `depth` is 0
-            // for all of them.
-            let id = UInt64(nodeIndex) << 8
-            let kind = scan.kind(of: nodeIndex)
-            let isDir = kind == .dir
-            // In search mode, a dir is shown as a row but
-            // not "expanded" — clicking it navigates rather
-            // than expanding in place. Disclosure triangle
-            // suppressed.
-            out.append(TreeListRow(
-                id: id, nodeIndex: nodeIndex, depth: 0,
-                hasChildren: false, isExpanded: false,
-                isCurrent: nodeIndex == currentNode,
-                isOverflow: false, overflowCount: 0
-            ))
-            _ = isDir
-        }
-        let overflow = searchTotalMatches - matches.count
-        if overflow > 0 {
-            let id: UInt64 = (UInt64.max / 2)
-            out.append(TreeListRow(
-                id: id, nodeIndex: Scan.nodeInvalid, depth: 0,
-                hasChildren: false, isExpanded: false, isCurrent: false,
-                isOverflow: true, overflowCount: overflow
-            ))
-        }
+    private func installScan(_ result: Scan) {
+        scan = result
+        if !result.allocatedAvailable { metric = .logical }
+        browser.install(result, metric: metric)
+        fileActions.install(result)
+        walkSkips = result.walkSkips()
+        updateLayout()
+        rebuildExtSummary()
     }
 
     // MARK: - Toolbar
@@ -1092,6 +207,8 @@ struct NativeContentView: View {
             }
             .buttonStyle(.plain)
             .help("Browse… (⌘O)")
+            .accessibilityLabel("Choose folder to scan")
+            .disabled(scanning)
             .keyboardShortcut("o", modifiers: .command)
 
             TextField("Path to scan", text: $pathInput)
@@ -1104,6 +221,7 @@ struct NativeContentView: View {
                         .stroke(VizPalette.border, lineWidth: 1)
                 )
                 .onSubmit { startScan() }
+                .disabled(scanning)
 
             Picker("", selection: $metric) {
                 Text("Logical").tag(Scan.Metric.logical)
@@ -1113,18 +231,13 @@ struct NativeContentView: View {
             .labelsHidden()
             .frame(width: 180)
             .disabled(scan?.allocatedAvailable == false)
-            .onChange(of: metric) { _ in updateLayout() }
+            .accessibilityLabel("Size metric")
 
             Spacer(minLength: 12)
 
             Button {
                 startScan()
             } label: {
-                // In sticky admin mode (see `adminMode` state) the
-                // Scan button still drives the privileged flow, so
-                // surface a lock icon + "Admin" label so the user
-                // knows clicking will pop the auth prompt (or run
-                // privileged if already root).
                 if adminMode {
                     Label("Scan", systemImage: "lock.fill")
                         .frame(minWidth: 72)
@@ -1144,52 +257,30 @@ struct NativeContentView: View {
     }
 
     // MARK: - Breadcrumb (visible only when navigated below root)
-    //
-    // The original bar was always-visible and the user
-    // (correctly) flagged it as redundant — at root it just
-    // repeated the toolbar's path field. The fix isn't to
-    // delete it: it's the only navigate-back affordance for
-    // the treemap-only view mode where the folder tree is
-    // hidden. Showing it only when `currentNode != 0` keeps
-    // the redundancy gone and the navigation working.
     private var breadcrumbBar: some View {
-        HStack(spacing: 0) {
-            let chain = breadcrumbChain
-            ForEach(0..<chain.count, id: \.self) { i in
-                let node = chain[i]
-                Button {
-                    guard node.index != currentNode else { return }
-                    currentNode = node.index
-                    updateLayout()
-                } label: {
-                    Text(node.label)
-                        .font(AppFont.ui(12)).monospacedDigit()
-                        .foregroundStyle(
-                            node.index == currentNode
-                                ? VizPalette.text
-                                : VizPalette.accent
-                        )
+        HStack(spacing: 8) {
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(breadcrumbChain, id: \.index) { node in
+                            if node.index != 0 { Text("›").foregroundStyle(VizPalette.muted) }
+                            Button(node.label) { browser.select(node.index) }
+                                .buttonStyle(.plain)
+                                .foregroundStyle(node.index == currentNode ? VizPalette.text : VizPalette.accent)
+                                .disabled(node.index == currentNode)
+                                .id(node.index)
+                        }
+                    }
+                    .font(AppFont.ui(12))
+                    .fixedSize()
                 }
-                .buttonStyle(.plain)
-                .disabled(node.index == currentNode)
-                if i < chain.count - 1 {
-                    Text("›")
-                        .foregroundStyle(VizPalette.muted)
-                        .padding(.horizontal, 6)
-                }
+                .onChange(of: currentNode) { node in proxy.scrollTo(node, anchor: .trailing) }
             }
-            Spacer(minLength: 8)
-            // Up to parent (⌘↑). Always present in this bar
-            // because the bar itself is shown only when
-            // `currentNode != 0`, i.e. there *is* a parent.
             Button {
                 guard let scan, let parent = scan.parent(of: currentNode) else { return }
-                currentNode = parent
-                updateLayout()
+                browser.select(parent)
             } label: {
-                Label("Up", systemImage: "chevron.up")
-                    .labelStyle(.iconOnly)
-                    .padding(.horizontal, 4)
+                Label("Up", systemImage: "chevron.up").labelStyle(.iconOnly)
             }
             .buttonStyle(.borderless)
             .help("Up to parent directory (⌘↑)")
@@ -1203,9 +294,6 @@ struct NativeContentView: View {
         let label: String
     }
 
-    /// Root → currentNode path chain. Rebuilt each access; the
-    /// breadcrumb only renders when `currentNode != 0` so the
-    /// chain is always ≥ 2 segments.
     private var breadcrumbChain: [BreadcrumbNode] {
         guard let scan else { return [] }
         var chain: [BreadcrumbNode] = []
@@ -1213,15 +301,9 @@ struct NativeContentView: View {
         while let c = cursor {
             let label: String
             if c == 0 {
-                // Root segment — show the scan's actual
-                // requested path (UX-4 from the previous
-                // round). User-supplied; no sanitisation
-                // needed.
                 let root = scan.sourceRequestedPath
-                label = root.isEmpty ? "/" : root
+                label = DisplaySanitizer.sanitiseDisplay(root.isEmpty ? "/" : root)
             } else {
-                // Parser-supplied name; sanitise before
-                // rendering (audit #App-2).
                 label = DisplaySanitizer.sanitiseDisplay(scan.name(of: c) ?? "?")
             }
             chain.append(BreadcrumbNode(index: c, label: label))
@@ -1720,50 +802,35 @@ struct NativeContentView: View {
 
     // MARK: - Scan + layout flow
 
-    /// "Scan as Administrator…" flow (EX-28 follow-up). Spawns the
-    /// bundled CLI under `osascript ... with administrator
-    /// privileges`, which pops the macOS authentication prompt. The
-    /// CLI runs as root, bypasses TCC on user-data paths, writes
-    /// its `FallbackScanOutput` as msgpack to a temp file and
-    /// progress JSON to a sibling stderr file at 250 ms cadence.
-    /// `PrivilegedScan.run` polls that progress file and forwards
-    /// events to `onProgress` here; the parent updates the same
-    /// state machine the regular Scan flow uses, so the overlay
-    /// shows live counter ticks (not a stuck 0 / 0).
-    ///
-    /// When the GUI is already running as root, `PrivilegedScan`
-    /// short-circuits to the in-process walker; the progress
-    /// callback is wired into `Scan.fallbackWithProgress` and the
-    /// UX is identical to the non-admin path.
-    ///
-    /// On success, sticky admin mode is engaged
-    /// (`adminMode = true`) — per the user requirement that
-    /// subsequent scans stay in administrator mode.
-    private func startPrivilegedScan() {
-        let path = pathInput.trimmingCharacters(in: .whitespaces)
-        guard !path.isEmpty else { return }
-        guard !scanning else { return }
+    private func beginScan(path: String, phase: String) {
         scanError = nil
         scanning = true
-        // "Authorizing" reads better than "Scanning" while the
-        // auth dialog is on screen and the subprocess hasn't
-        // started writing progress events yet. Flips to
-        // "Scanning (administrator)" on the first progress
-        // event.
-        scanPhaseLabel = "Authorizing"
+        scanPhaseLabel = phase
         scanProgressScanned = 0
         scanProgressSkipped = 0
         scanProgressBytes = 0
         scanProgressElapsedMs = 0
-        // Denominator: same as the regular path. Volume-root
-        // scans use the volume's `used` bytes; subpath scans
-        // stay indeterminate until the terminal event snaps to
-        // the actual total.
-        if isVolumeRoot(path: path) {
-            scanProgressBytesTotal = volumeStats(for: path)?.used ?? 0
-        } else {
-            scanProgressBytesTotal = 0
+        // A subfolder has no known total until the scanner finishes.
+        scanProgressBytesTotal = isVolumeRoot(path: path) ? volumeStats(for: path)?.used ?? 0 : 0
+    }
+
+    private func receiveProgress(_ snapshot: Scan.ProgressSnapshot) {
+        if scanPhaseLabel == "Authorizing" { scanPhaseLabel = "Scanning (administrator)" }
+        scanProgressScanned = snapshot.scanned
+        scanProgressSkipped = snapshot.skipped
+        scanProgressBytes = snapshot.bytes
+        scanProgressElapsedMs = snapshot.elapsedMs
+        if snapshot.terminal {
+            scanPhaseLabel = "Indexing"
+            if scanProgressBytesTotal == 0 { scanProgressBytesTotal = snapshot.bytes }
         }
+    }
+
+    private func startPrivilegedScan() {
+        let path = pathInput.trimmingCharacters(in: .whitespaces)
+        guard !path.isEmpty else { return }
+        guard !scanning else { return }
+        beginScan(path: path, phase: "Authorizing")
         DispatchQueue.global(qos: .userInitiated).async {
             let outcome = PrivilegedScan.run(
                 path: path,
@@ -1781,54 +848,25 @@ struct NativeContentView: View {
                     }
                 },
                 onProgress: { snapshot in
-                    DispatchQueue.main.async {
-                        if scanPhaseLabel == "Authorizing" {
-                            scanPhaseLabel = "Scanning (administrator)"
-                        }
-                        scanProgressScanned = snapshot.scanned
-                        scanProgressSkipped = snapshot.skipped
-                        scanProgressBytes = snapshot.bytes
-                        scanProgressElapsedMs = snapshot.elapsedMs
-                        if snapshot.terminal {
-                            scanPhaseLabel = "Indexing"
-                            if scanProgressBytesTotal == 0 {
-                                scanProgressBytesTotal = snapshot.bytes
-                            }
-                        }
-                    }
+                    DispatchQueue.main.async { receiveProgress(snapshot) }
                 }
             )
             DispatchQueue.main.async {
                 switch outcome {
                 case .ok(let result):
                     scanPhaseLabel = "Rendering"
-                    scan = result
-                    currentNode = 0
-                    lastClickedPath = ""
-                    expandedNodes = [0]
-                    walkSkips = result.walkSkips()
+                    installScan(result)
                     scanProgressScanned = result.entryCount
                     scanProgressBytes = result.logicalTotal
                     if scanProgressBytesTotal == 0 {
                         scanProgressBytesTotal = result.logicalTotal
                     }
-                    if !result.allocatedAvailable && metric == .allocated {
-                        metric = .logical
-                    }
                     // adminMode was already engaged via
                     // onSessionReady above; idempotent here.
                     adminMode = true
-                    updateLayout()
-                    rebuildTreeRows()
-                    rebuildExtSummary()
                 case .cancelled:
                     break
                 case .failed(let message, _):
-                    scan = nil
-                    layout = nil
-                    treeRows = []
-                    extSummary = nil
-                    walkSkips = []
                     scanError = message
                 }
                 scanning = false
@@ -1837,6 +875,7 @@ struct NativeContentView: View {
     }
 
     private func startScan() {
+        guard !scanning else { return }
         // Two paths route through the privileged flow instead of
         // the in-process fallback walker.
         //
@@ -1881,68 +920,18 @@ struct NativeContentView: View {
             }
         }
 
-        scanError = nil
-        scanning = true
-        scanPhaseLabel = "Scanning"
-        scanProgressScanned = 0
-        scanProgressSkipped = 0
-        scanProgressBytes = 0
-        scanProgressElapsedMs = 0
-        // Progress-bar denominator strategy (A+B):
-        //
-        //   A. Volume-root scan (path is its own mount point) →
-        //      use the volume's `used` bytes. The denominator
-        //      is accurate by construction because scanning
-        //      the whole volume covers exactly those bytes.
-        //
-        //   B. Subpath scan → start indeterminate (`= 0`,
-        //      which the overlay reads as "no fraction").
-        //      `volume.used` here would be wrong — it
-        //      includes data outside the scan root that we
-        //      never visit, so the bar would never reach 100%.
-        //      On the walker's `terminal` event we snap the
-        //      denominator to the actual scanned bytes so the
-        //      bar visually completes at exactly 100% before
-        //      transitioning to the treemap.
-        if isVolumeRoot(path: path) {
-            scanProgressBytesTotal = volumeStats(for: path)?.used ?? 0
-        } else {
-            scanProgressBytesTotal = 0
-        }
+        beginScan(path: path, phase: "Scanning")
+        let workerCount = UInt32(clamping: threads)
         DispatchQueue.global(qos: .userInitiated).async {
             let result = Scan.fallbackWithProgress(
                 path: path,
-                threads: UInt32(threads),
+                threads: workerCount,
                 crossMounts: false,
                 onProgress: { snapshot in
-                    // Marshal off the Rust progress thread onto
-                    // the main queue before touching SwiftUI
-                    // state. The terminal event flips the phase
-                    // to "Indexing" (tree-build runs after the
-                    // walker terminates inside the same FFI call).
-                    DispatchQueue.main.async {
-                        scanProgressScanned = snapshot.scanned
-                        scanProgressSkipped = snapshot.skipped
-                        scanProgressBytes = snapshot.bytes
-                        scanProgressElapsedMs = snapshot.elapsedMs
-                        if snapshot.terminal {
-                            scanPhaseLabel = "Indexing"
-                            // Terminal snap (B): for subpath
-                            // scans that started indeterminate,
-                            // we now know the actual total —
-                            // set the denominator to it so the
-                            // bar fills to exactly 100% on the
-                            // last frame before transitioning.
-                            // Volume-root scans already have a
-                            // valid denominator from startScan,
-                            // so the `== 0` guard skips them.
-                            if scanProgressBytesTotal == 0 {
-                                scanProgressBytesTotal = snapshot.bytes
-                            }
-                        }
-                    }
+                    DispatchQueue.main.async { receiveProgress(snapshot) }
                 }
             )
+            let failure = result == nil ? NativeBridge.lastError() : nil
             DispatchQueue.main.async {
                 if let result {
                     // Flip phase to "Rendering" *before* the
@@ -1952,32 +941,14 @@ struct NativeContentView: View {
                     // index gap rather than letting the spinner
                     // disappear silently.
                     scanPhaseLabel = "Rendering"
-                    scan = result
-                    currentNode = 0
-                    lastClickedPath = ""
-                    expandedNodes = [0]
-                    // Snapshot walk-skips (audit r3 #F1) so the
-                    // status-bar banner can show how many
-                    // subtrees the walker refused to descend.
-                    walkSkips = result.walkSkips()
-                    if !result.allocatedAvailable && metric == .allocated {
-                        metric = .logical
-                    }
-                    updateLayout()
-                    rebuildTreeRows()
-                    rebuildExtSummary()
+                    installScan(result)
                 } else {
-                    scan = nil
-                    layout = nil
-                    treeRows = []
-                    extSummary = nil
-                    walkSkips = []
                     // Pull the Rust-side last-error if there is
                     // one — this is what makes panics and
                     // recoverable scan failures user-visible
                     // instead of surfacing the generic "scan
                     // failed" toast for every cause.
-                    if let detail = NativeBridge.lastError() {
+                    if let detail = failure {
                         scanError = "\(path): \(detail)"
                     } else {
                         scanError = "scan failed for \(path)"
@@ -2004,7 +975,7 @@ struct NativeContentView: View {
         }
         layout = scan.layout(
             rootedAt: currentNode,
-            maxDepth: UInt32(depth),
+            maxDepth: UInt32(clamping: depth),
             metric: metric,
             width: Float(lastSize.width),
             height: Float(lastSize.height)
@@ -2012,21 +983,7 @@ struct NativeContentView: View {
     }
 
     private func handleClick(nodeIndex: UInt32) {
-        guard let scan else { return }
-        if scan.childCount(of: nodeIndex) > 0 {
-            // Treemap → drill in. Reuse `navigate(to:)` so the
-            // tree-list sync (expand ancestors, scroll-to-row,
-            // highlight) is the same path the side-panel click
-            // takes.
-            navigate(to: nodeIndex)
-        } else {
-            // Leaf (file / symlink): surface the path but don't
-            // drill — the cell isn't a navigable container.
-            // Sanitised for the status bar (audit #App-2); no
-            // FS action is keyed off this string.
-            let path = scan.path(of: nodeIndex) ?? ""
-            lastClickedPath = DisplaySanitizer.sanitiseDisplay(path.isEmpty ? "/" : path)
-        }
+        browser.select(nodeIndex)
     }
 
     private func browseForFolder() {
@@ -2035,7 +992,7 @@ struct NativeContentView: View {
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = false
-        panel.prompt = "Scan"
+        panel.prompt = "Choose"
         panel.message = "Pick a directory to scan."
         let trimmed = pathInput.trimmingCharacters(in: .whitespaces)
         if !trimmed.isEmpty,

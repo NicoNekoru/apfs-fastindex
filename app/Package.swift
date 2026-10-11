@@ -46,12 +46,16 @@ let package = Package(
         // Pure-Swift utility library — nothing SwiftUI- or
         // AppKit-coupled. Lives here so the app target and the
         // FFI test runner can both depend on it without one
-        // pulling in the other. Currently carries the
-        // path-containment helper used by the right-click menu's
-        // security guard (audit fix #5).
+        // pulling in the other. Contains the browsing model,
+        // path containment checks and display sanitiser.
         .target(
             name: "ApfsCore",
             path: "Sources/ApfsCore"
+        ),
+        .executableTarget(
+            name: "apfs-browser-tests",
+            dependencies: ["ApfsCore"],
+            path: "Tests/ApfsBrowserTests"
         ),
         .executableTarget(
             name: "ApfsFastindex",

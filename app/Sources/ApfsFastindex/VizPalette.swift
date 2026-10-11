@@ -48,4 +48,10 @@ enum VizPalette {
     static let muted   = Color(red: 0x8b/255.0, green: 0x93/255.0, blue: 0xa5/255.0)
     static let accent  = Color(red: 0x4f/255.0, green: 0x8c/255.0, blue: 0xff/255.0)
     static let warning = Color(red: 0xfb/255.0, green: 0xbf/255.0, blue: 0x24/255.0)
+
+    static func color(rgb: UInt32) -> Color {
+        Color(red: Double((rgb >> 16) & 0xff) / 255,
+              green: Double((rgb >> 8) & 0xff) / 255,
+              blue: Double(rgb & 0xff) / 255)
+    }
 }

@@ -33,7 +33,7 @@ open app/ApfsFastindex.app
 
 `make-release.sh` builds the Rust crate, stages the static lib + cbindgen header into the SwiftPM `CApfsFastindex` shim, runs `swift build -c release`, and assembles the `app/ApfsFastindex.app` bundle. The Rust crate links statically into the app binary — no subprocess, no WebKit, no JSON file on disk. See [`app/README.md`](app/README.md) for `PROFILE=debug` and `--no-bundle` options.
 
-Inside the app: pick a folder, watch the determinate progress island (phase label, scanned / skipped counts, bytes against the volume's used size, m:ss stopwatch), then read the treemap.  Hover for a tooltip; right-click for a context menu (Open, Reveal in Finder, Copy Path, Move to Trash); use the breadcrumb to focus on a subtree; toggle between Logical and Allocated size with the metric picker. The left panel is the tree-list of largest immediate children; the right panel is the per-extension aggregate. `Cmd-,` opens the settings scene for depth and worker-thread preferences.
+Inside the app, pick a folder and scan it, then browse the treemap or folder tree. Both support Reveal in Finder, Copy Path and confirmed Move to Trash through their context menus. Clicking a folder focuses its subtree. Clicking a file selects it without replacing the treemap with a single file. Extension rows filter files within the current folder and highlight matching treemap cells. Name search can narrow that filter, and Escape clears it. Large folders and result lists have a Show more button. Use the breadcrumb to go up, the metric picker to switch between Logical and Allocated sizes, and `Cmd-,` for depth and worker-thread preferences.
 
 ## The CLI
 

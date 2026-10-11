@@ -66,18 +66,14 @@ fn main() -> ExitCode {
 
     // Long-lived privileged-helper mode (admin-session productisation):
     // when the GUI's `AdminSession` spawns this binary via
-    // osascript-with-administrator-privileges, it passes `--server` as
-    // the single argument. The CLI then reads tab-delimited commands
-    // from stdin (one per line) and acts on them — reusing the same
-    // privileged process across all subsequent scans means the auth
-    // dialog pops once per session, not once per scan.
+    // Authorization Services, it passes `--server` as the single
+    // argument. The CLI then reads JSON-line commands from stdin.
+    // Reusing the same privileged process across subsequent scans
+    // means the auth dialog pops once per session, not once per scan.
     //
-    // Protocol:
-    //   stdin:  scan<TAB><path><TAB><out_msgpack><TAB><progress_log>\n
-    //           quit\n
-    //   stdout: ready<TAB>1\n     (emitted once at startup)
-    //           ok<TAB><exit>\n   (after each scan)
-    //           err<TAB><msg>\n   (malformed command, missing args, etc.)
+    // Protocol version 2 uses one JSON object per line. The parent
+    // sends `scan`, `release`, and `quit` commands; the helper emits
+    // `ready`, `progress`, `ok`, `err`, and `bye` events.
     //
     // All stdout writes are explicitly flushed so the parent never
     // waits behind pipe buffering.
@@ -995,16 +991,9 @@ fn print_summary_with_skips(
     }
 }
 
-/// Long-lived privileged-helper loop. Reads tab-delimited commands
-/// from stdin, runs scans, writes status lines to stdout. See the
-/// `--server` block in `main` for the full protocol contract.
-///
-/// Each `ok`/`err`/`ready` line is flushed immediately so the GUI
-/// parent observes them in real time. The scan itself writes
-/// msgpack to the caller-supplied output path and JSON progress
-/// events (one per line, ~250 ms cadence) to the progress path.
-/// Privileged-helper server-mode protocol (JSON-line, audit
-/// C1 + H1 + H2 fix).
+/// Long-lived privileged-helper server using a JSON-line protocol.
+/// Each reply is flushed immediately so the GUI observes progress
+/// and terminal events in real time.
 ///
 /// Audit (V2) replaced the original tab-delimited framing
 /// with a JSON-line protocol. The earlier shape took the
@@ -1023,17 +1012,18 @@ fn print_summary_with_skips(
 ///   the path field (TAB, newline, NUL) are handled by
 ///   serde_json rather than crashing through a fragile
 ///   tab-split parser.
-/// - **H2**: the helper returns the chosen paths to the
-///   parent in the reply. The parent stat-verifies root
-///   ownership before reading — defence-in-depth on top of
-///   the mkstemp-created file already being root-owned in
-///   the sticky `/tmp`.
+/// - **H2**: the helper writes through the original mkstemp
+///   descriptor, then transfers the completed mode-0600 file
+///   to the GUI's UID. The parent verifies ownership, type,
+///   link count, and mode before reading.
 #[derive(serde::Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 enum HelperCommand {
     /// Run one scan. Helper picks the output + progress
-    /// paths and reports them back.
-    Scan { path: String },
+    /// paths and reports them back. `owner_uid` is the GUI's
+    /// effective UID; the helper transfers the completed 0600
+    /// output file to it so the unprivileged GUI can read it.
+    Scan { path: String, owner_uid: u32 },
     /// Helper unlinks each path *if* it created it (tracked
     /// in the helper's owned-paths list). Failure to unlink
     /// is logged to stderr but doesn't fail the call.
@@ -1066,8 +1056,8 @@ enum HelperReply<'a> {
         elapsed_ms: u128,
         terminal: bool,
     },
-    /// Scan succeeded. `out_path` is helper-chosen, in /tmp,
-    /// root-owned mode 0600 (via mkstemp).
+    /// Scan succeeded. `out_path` is helper-chosen and mode
+    /// 0600, owned by the requesting GUI.
     Ok {
         out_path: &'a str,
         exit_code: i32,
@@ -1108,16 +1098,14 @@ fn run_server_mode() -> ExitCode {
 
     let threads = default_fallback_threads();
 
-    // Track every tempfile we hand out. On quit (or on a
-    // matching `release` command) we unlink them. The parent
-    // can't unlink them itself because they're root-owned in
-    // sticky `/tmp` — only we (root) can. Bounded by helper
-    // lifetime, which is typically the GUI process lifetime.
+    // Track every tempfile we hand out. On quit or a matching
+    // `release` command we unlink it. The list is bounded by the
+    // helper lifetime, normally the GUI process lifetime.
     let mut owned_paths: Vec<std::path::PathBuf> = Vec::new();
 
     {
         let mut out = std::io::stdout().lock();
-        write_reply(&mut out, &HelperReply::Ready { version: 1 });
+        write_reply(&mut out, &HelperReply::Ready { version: 2 });
     }
 
     let stdin = std::io::stdin();
@@ -1162,7 +1150,7 @@ fn run_server_mode() -> ExitCode {
             }
         };
         match cmd {
-            HelperCommand::Scan { path } => {
+            HelperCommand::Scan { path, owner_uid } => {
                 // Defence-in-depth: refuse control bytes in
                 // path. `serde_json` already accepts them
                 // (JSON strings can carry any UTF-8) but our
@@ -1178,7 +1166,7 @@ fn run_server_mode() -> ExitCode {
                     );
                     continue;
                 }
-                match run_server_scan(&path, threads) {
+                match run_server_scan(&path, threads, owner_uid) {
                     Ok((out_path, exit_code)) => {
                         owned_paths.push(out_path.clone());
                         let mut out = std::io::stdout().lock();
@@ -1327,19 +1315,21 @@ fn spawn_parent_death_watcher() {
 ///
 /// Returns `(out_path, exit_code)` so the dispatcher can
 /// include the path in the final Ok reply. The parent
-/// verifies the path's root ownership before reading.
+/// verifies the path's ownership and mode before reading.
 fn run_server_scan(
     path: &str,
     threads: usize,
+    owner_uid: u32,
 ) -> Result<(std::path::PathBuf, i32), String> {
     use std::io::Write;
+    use std::os::fd::AsRawFd;
 
     // mkstemp-style: prefix + suffix in /tmp, mode 0600,
     // O_EXCL. `NamedTempFile` owns the file's lifetime; we
     // call `keep()` to detach so the path survives past the
     // function return and is unlinked by the protocol's
     // `release` / `quit` cleanup.
-    let tmp_out = match tempfile::Builder::new()
+    let mut tmp_out = match tempfile::Builder::new()
         .prefix("apfs-fastindex-out-")
         .suffix(".msgpack")
         .tempfile_in(std::env::temp_dir())
@@ -1387,8 +1377,45 @@ fn run_server_scan(
         Ok(b) => b,
         Err(err) => return Err(format!("msgpack serialise failed: {err}")),
     };
-    if let Err(err) = std::fs::write(tmp_out.path(), &bytes) {
+    // Write through NamedTempFile's original mkstemp descriptor.
+    // Re-opening the pathname here would let a watcher replace
+    // the directory entry before a root process opened it.
+    if let Err(err) = tmp_out.as_file_mut().write_all(&bytes) {
         return Err(format!("write output file failed: {err}"));
+    }
+    if let Err(err) = tmp_out.as_file_mut().flush() {
+        return Err(format!("flush output file failed: {err}"));
+    }
+
+    // The helper runs as root in production, while the GUI that
+    // consumes this file does not. Keep the mkstemp permissions
+    // at 0600 and transfer the completed file to the requesting
+    // GUI rather than weakening it to group/world-readable.
+    #[cfg(unix)]
+    let current_uid = {
+        use std::os::unix::fs::MetadataExt;
+        tmp_out
+            .as_file()
+            .metadata()
+            .map_err(|err| format!("stat output file failed: {err}"))?
+            .uid()
+    };
+    #[cfg(not(unix))]
+    let current_uid = owner_uid;
+    if current_uid != owner_uid {
+        let rc = unsafe {
+            libc::fchown(
+                tmp_out.as_file().as_raw_fd(),
+                owner_uid as libc::uid_t,
+                libc::gid_t::MAX,
+            )
+        };
+        if rc != 0 {
+            return Err(format!(
+                "transfer output file to uid {owner_uid} failed: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
     }
 
     // Detach the tempfile from RAII so the path survives

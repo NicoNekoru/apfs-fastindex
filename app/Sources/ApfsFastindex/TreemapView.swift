@@ -4,8 +4,6 @@ import CApfsFastindex
 import SwiftUI
 
 /// Delegate the `TreemapView` posts user interactions back to.
-/// Phase 4 only emits click; phase 4b will add context-menu and
-/// hover-changed for the tooltip.
 protocol TreemapViewDelegate: AnyObject {
     func treemapView(_ view: TreemapView, didClickCell nodeIndex: UInt32)
 }
@@ -33,6 +31,7 @@ final class TreemapView: NSView {
     var layout: Scan.Layout? {
         didSet {
             hoveredIndex = nil
+            updateSelectionRect()
             invalidateStaticCache()
             needsDisplay = true
         }
@@ -96,6 +95,29 @@ final class TreemapView: NSView {
     /// Drives the tooltip's anchor on the next paint.
     private var hoverPoint: CGPoint = .zero
 
+    weak var fileActions: FileActions?
+    var selectedNode: UInt32 = 0 {
+        didSet {
+            guard selectedNode != oldValue else { return }
+            updateSelectionRect()
+            needsDisplay = true
+        }
+    }
+    var highlightedNodes: Set<UInt32>? {
+        didSet {
+            guard highlightedNodes != oldValue else { return }
+            invalidateStaticCache()
+            needsDisplay = true
+        }
+    }
+    private var selectionRect: CGRect?
+
+    private func updateSelectionRect() {
+        selectionRect = layout?.cells.first(where: { $0.node_index == selectedNode }).map {
+            CGRect(x: CGFloat($0.x0), y: CGFloat($0.y0), width: CGFloat($0.x1 - $0.x0), height: CGFloat($0.y1 - $0.y0))
+        }
+    }
+
     weak var delegate: TreemapViewDelegate?
 
     /// Coordinate origin at the top-left matches the cell coords
@@ -144,6 +166,12 @@ final class TreemapView: NSView {
             // isn't black/transparent.
             ctx.setFillColor(red: 0x0f / 255.0, green: 0x11 / 255.0, blue: 0x15 / 255.0, alpha: 1.0)
             ctx.fill(bounds)
+        }
+
+        if let rect = selectionRect, selectedNode != 0, rect.width >= 3, rect.height >= 3 {
+            ctx.setStrokeColor(NSColor.controlAccentColor.cgColor)
+            ctx.setLineWidth(2)
+            ctx.stroke(rect.insetBy(dx: 1, dy: 1))
         }
 
         // Hover overlay + tooltip. Drawn fresh per paint over
@@ -282,6 +310,13 @@ final class TreemapView: NSView {
             drawLabels(cells: cells, scan: scan)
         }
 
+        if let highlightedNodes {
+            ctx.setFillColor(red: 0.06, green: 0.07, blue: 0.08, alpha: 0.78)
+            for cell in cells where cell.flags & Self.flagDir == 0 && !highlightedNodes.contains(cell.node_index) {
+                ctx.fill(CGRect(x: CGFloat(cell.x0), y: CGFloat(cell.y0),
+                                width: CGFloat(cell.x1 - cell.x0), height: CGFloat(cell.y1 - cell.y0)))
+            }
+        }
         cachedStatic = img
         cachedStaticBoundsSize = size
     }
@@ -393,6 +428,7 @@ final class TreemapView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        if event.modifierFlags.contains(.control) { super.mouseDown(with: event); return }
         guard let layout else { return }
         let p = convert(event.locationInWindow, from: nil)
         guard let hit = layout.hitTest(x: Float(p.x), y: Float(p.y)) else { return }
@@ -400,168 +436,13 @@ final class TreemapView: NSView {
         delegate?.treemapView(self, didClickCell: cell.node_index)
     }
 
-    /// AppKit calls this on every right-click / control-click.
-    /// Hit-tests the click point and returns a context menu
-    /// targeted at the cell's resolved absolute path; returning
-    /// `nil` suppresses the menu (no cell under cursor / no
-    /// resolvable path).
     override func menu(for event: NSEvent) -> NSMenu? {
-        guard let layout, let scan else { return nil }
-        let p = convert(event.locationInWindow, from: nil)
-        guard let hit = layout.hitTest(x: Float(p.x), y: Float(p.y)) else { return nil }
-        let cell = layout.cells[Int(hit)]
-        guard let absPath = absolutePath(forNode: cell.node_index, scan: scan) else {
-            return nil
-        }
-        // Sanitise the display name before it hits any menu
-        // chrome. Parser bytes can carry C0/C1 controls and
-        // RTL overrides that misrender the title to spoof the
-        // action target (audit #App-2). `displayName` is *only*
-        // used for human-facing strings — `representedObject`
-        // keeps the canonical `absPath` for the actual action.
-        let rawName = scan.name(of: cell.node_index) ?? absPath
-        let displayName = DisplaySanitizer.sanitiseDisplay(rawName)
-
-        let menu = NSMenu()
-
-        let reveal = NSMenuItem(
-            title: "Reveal in Finder",
-            action: #selector(contextRevealInFinder(_:)),
-            keyEquivalent: ""
-        )
-        reveal.target = self
-        reveal.representedObject = absPath
-        menu.addItem(reveal)
-
-        // Audit #App-4: `NSWorkspace.open` on a parser-controlled
-        // .app/.command/.scpt would run with user privileges.
-        // We drop the Open action entirely — users who really
-        // want to launch can Reveal → double-click in Finder
-        // (Finder enforces its own confirmation chain for
-        // executables, including Gatekeeper). This trades a
-        // small UX hit for a closed footgun.
-
-        menu.addItem(.separator())
-
-        let copy = NSMenuItem(
-            title: "Copy Path",
-            action: #selector(contextCopyPath(_:)),
-            keyEquivalent: ""
-        )
-        copy.target = self
-        // The pasteboard writes the *real* absPath bytes —
-        // sanitising it would silently corrupt the string when
-        // the user expects it to round-trip through a shell.
-        // `absPath` is already containment-checked (no `..`
-        // escape) and was joined from raw parser path bytes,
-        // so it matches what the user sees in Finder.
-        copy.representedObject = absPath
-        menu.addItem(copy)
-
-        menu.addItem(.separator())
-
-        let trash = NSMenuItem(
-            title: "Move to Trash — \(displayName)",
-            action: #selector(contextMoveToTrash(_:)),
-            keyEquivalent: ""
-        )
-        trash.target = self
-        trash.representedObject = absPath
-        menu.addItem(trash)
-
-        return menu
-    }
-
-    /// Resolve a node's scan-relative path against the scan's
-    /// requested-path root and return the canonical absolute
-    /// path, **only if** that path stays contained inside the
-    /// scan root. Returns nil for paths that escape via `..`
-    /// segments or absolute-path relative entries — those go to
-    /// the OS verbatim, and would let a crafted image direct
-    /// `Reveal in Finder` / `Move to Trash` at `/etc/passwd` or
-    /// similar (audit fix #5).
-    ///
-    /// Containment is verified by path-component prefix match
-    /// after both sides are `.standardizedFileURL`-normalized
-    /// (which resolves `.` and `..` but does *not* follow
-    /// symlinks — Trash and Reveal want the symlink itself,
-    /// not its target, which matches Finder semantics).
-    private func absolutePath(forNode nodeIndex: UInt32, scan: Scan) -> String? {
-        let relative = scan.path(of: nodeIndex) ?? ""
-        let root = scan.sourceRequestedPath
-        guard let resolved = PathContainment.resolveContained(scanRoot: root, relative: relative)
-        else {
-            appLogger.error(
-                "context menu: path containment violation — root=\(root, privacy: .public) relative=\(relative, privacy: .public)"
-            )
-            return nil
-        }
-        return resolved
-    }
-
-    @objc private func contextRevealInFinder(_ sender: NSMenuItem) {
-        guard let path = sender.representedObject as? String else { return }
-        let url = URL(fileURLWithPath: path)
-        NSWorkspace.shared.activateFileViewerSelecting([url])
-    }
-
-    // Audit #App-4: the previous `contextOpenItem` handler called
-    // `NSWorkspace.open` on the resolved absolute path, which
-    // would launch parser-controlled .app/.command/.scpt entries
-    // with the user's full privileges. The Open menu item has
-    // been removed; users who actually want to launch something
-    // can Reveal → double-click in Finder (which routes through
-    // Gatekeeper). Keeping this comment as a load-bearing reminder
-    // not to re-introduce the Open action by reflex.
-
-    @objc private func contextCopyPath(_ sender: NSMenuItem) {
-        guard let path = sender.representedObject as? String else { return }
-        let pb = NSPasteboard.general
-        pb.clearContents()
-        pb.setString(path, forType: .string)
-    }
-
-    @objc private func contextMoveToTrash(_ sender: NSMenuItem) {
-        guard let path = sender.representedObject as? String else { return }
-        let url = URL(fileURLWithPath: path)
-
-        // Confirm before invoking `recycle()` — AppKit's trash
-        // API is destructive enough that an accidental click on
-        // the wrong cell warrants a yes/no gate even though the
-        // OS will route through Finder.
-        let alert = NSAlert()
-        alert.messageText = "Move to Trash?"
-        alert.informativeText = path
-        alert.addButton(withTitle: "Move to Trash")
-        alert.addButton(withTitle: "Cancel")
-        alert.alertStyle = .warning
-
-        let response: NSApplication.ModalResponse
-        if let window = self.window {
-            // beginSheetModal is async; switch to runModal here
-            // so the call is synchronous from the menu action's
-            // perspective. The alert is small + brief so blocking
-            // the main runloop is fine.
-            response = alert.runModal()
-            _ = window
-        } else {
-            response = alert.runModal()
-        }
-        guard response == .alertFirstButtonReturn else { return }
-
-        NSWorkspace.shared.recycle([url]) { newURLs, error in
-            if let error {
-                appLogger.error(
-                    "context recycle failed for \(path, privacy: .public): \(error.localizedDescription, privacy: .public)"
-                )
-                let err = NSAlert(error: error)
-                err.runModal()
-                return
-            }
-            appLogger.info(
-                "context recycled \(path, privacy: .public) -> \(newURLs.values.first?.path ?? "(unknown)", privacy: .public)"
-            )
-        }
+        guard let layout, let scan, let fileActions else { return nil }
+        let point = convert(event.locationInWindow, from: nil)
+        guard let hit = layout.hitTest(x: Float(point.x), y: Float(point.y)),
+              let target = fileActions.target(node: layout.cells[Int(hit)].node_index, scan: scan)
+        else { return nil }
+        return fileActions.menu(for: target)
     }
 
     private func updateHover(for event: NSEvent) {
@@ -691,6 +572,9 @@ struct TreemapViewRepresentable: NSViewRepresentable {
     let scan: Scan?
     let layout: Scan.Layout?
     let metric: Scan.Metric
+    let fileActions: FileActions
+    let selectedNode: UInt32
+    let highlightedNodes: Set<UInt32>?
     let onClick: (UInt32) -> Void
 
     func makeNSView(context: Context) -> TreemapView {
@@ -712,6 +596,9 @@ struct TreemapViewRepresentable: NSViewRepresentable {
         if nsView.metric != metric {
             nsView.metric = metric
         }
+        nsView.fileActions = fileActions
+        nsView.selectedNode = selectedNode
+        nsView.highlightedNodes = highlightedNodes
         context.coordinator.onClick = onClick
     }
 

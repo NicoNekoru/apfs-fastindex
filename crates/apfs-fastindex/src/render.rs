@@ -398,10 +398,20 @@ fn fill_for_file(name: &str) -> u32 {
         Some(idx) => &bytes[idx + 1..],
         None => return 0x9aa3b2,
     };
-    if let Some(rgb) = palette_lookup(ext) {
-        return rgb;
+    palette_lookup(ext).unwrap_or_else(|| hash_hsl(ext))
+}
+
+/// Extension-panel chips use the same palette as treemap leaves.
+pub(crate) fn category_color(category: &str) -> u32 {
+    match category {
+        "(no ext)" => 0x9aa3b2,
+        "(symlink)" => 0x7d8a99,
+        "(other)" => 0x5b6779,
+        _ => {
+            let ext = category.strip_prefix('.').unwrap_or(category).as_bytes();
+            palette_lookup(ext).unwrap_or_else(|| hash_hsl(ext))
+        }
     }
-    hash_hsl(ext)
 }
 
 /// Fixed extension palette. Subset of the JS `EXT_COLORS` —
@@ -538,7 +548,7 @@ pub struct ApfsLayout {
 fn hash_hsl(text: &[u8]) -> u32 {
     let mut h: u32 = 2166136261;
     for &b in text {
-        h ^= b as u32;
+        h ^= b.to_ascii_lowercase() as u32;
         h = h.wrapping_mul(16777619);
     }
     let hue = (h % 360) as f64;
@@ -569,6 +579,22 @@ mod tests {
     use super::*;
     use crate::tree::Tree;
     use crate::{EntryKind, NamespaceEntry};
+
+    #[test]
+    fn extension_chips_match_leaf_colors() {
+        for (filename, category) in [
+            ("file.JPG", ".jpg"),
+            ("file.BackUP", ".backup"),
+            ("file.backup", ".backup"),
+            (".hidden", "(no ext)"),
+            ("file.", "(no ext)"),
+            ("file.ÄBC", ".Äbc"),
+        ] {
+            assert_eq!(fill_for_file(filename), category_color(category), "{filename}");
+        }
+        assert_eq!(category_color("(symlink)"), 0x7d8a99);
+        assert_eq!(category_color("(other)"), 0x5b6779);
+    }
 
     fn entry(path: &str, kind: EntryKind, logical: u64) -> NamespaceEntry {
         NamespaceEntry {

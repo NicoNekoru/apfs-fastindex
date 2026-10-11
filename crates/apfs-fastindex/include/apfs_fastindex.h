@@ -196,7 +196,10 @@ typedef struct ApfsExtRow {
   uint64_t value_logical;
   uint64_t value_allocated;
   uint32_t file_count;
-  uint32_t _pad;
+  /**
+   * Treemap palette colour, packed as 0xRRGGBB. Uses the former padding slot.
+   */
+  uint32_t fill_rgb;
 } ApfsExtRow;
 
 /**
@@ -295,13 +298,12 @@ int32_t apfs_is_snapshot_path(const char *path);
  * Load an ApfsScan from a previously-emitted msgpack file.
  *
  * The privileged-subprocess "Scan as Administrator…" flow
- * spawns `apfs-fastindex-scan --format msgpack ...` via
- * osascript with administrator privileges. The subprocess
- * writes its `FallbackScanOutput` as a msgpack blob to a temp
- * file the parent app picks; on subprocess exit, the parent
- * calls this FFI to rehydrate an `ApfsScan` from that file —
- * identical to the in-process scan handle the Swift renderer
- * normally reads.
+ * runs the CLI's JSON-line server through Authorization
+ * Services. The helper writes its `FallbackScanOutput` to a
+ * helper-chosen tempfile, transfers the completed mode-0600
+ * file to the GUI's UID, and returns the path. The GUI calls
+ * this FFI to build the same `ApfsScan` handle as an in-process
+ * scan.
  *
  * Returns `NULL` on:
  * - `path` is NULL or not valid UTF-8

@@ -115,6 +115,10 @@ jobs:
         run: ./make-release.sh --no-bundle
       - name: Run Swift FFI tests
         run: swift run --package-path app apfs-ffi-tests
+      - name: Run browser interaction tests
+        run: swift run --package-path app apfs-browser-tests
+      - name: Run update feed tests
+        run: swift run --package-path app apfs-update-tests
 
   cbindgen-drift:
     name: cbindgen header drift

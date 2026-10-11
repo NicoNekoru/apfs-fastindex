@@ -37,9 +37,8 @@
 # the next version each release. Exactly one of the three
 # bump flags may be passed; combining with --tag is an error.
 #
-# The release is created if it doesn't exist; if it does, the asset
-# is uploaded with --clobber so re-running the script after a fix
-# overwrites the previous bundle.
+# Each published release gets a new tag. Existing releases are
+# never overwritten.
 #
 # After a successful run the app lives at:
 #   app/ApfsFastindex.app
@@ -52,6 +51,7 @@ REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$REPO_ROOT"
 
 PROFILE="${PROFILE:-release}"
+export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-13.0}"
 case "$PROFILE" in
     release|debug) ;;
     *) echo "make-release.sh: PROFILE must be release or debug, got $PROFILE" >&2; exit 2 ;;
@@ -266,13 +266,10 @@ cp "$CANONICAL_HEADER" "$SHIM_DIR/apfs_fastindex.h"
 # Step 3 — Swift executable.
 # ---------------------------------------------------------------
 echo "==> [3/4] swift build -c $PROFILE"
-SWIFT_FLAGS=""
-if [ "$PROFILE" = "release" ]; then
-    SWIFT_FLAGS="-c release"
-fi
-(cd "$REPO_ROOT/app" && swift build $SWIFT_FLAGS)
+(cd "$REPO_ROOT/app" && swift build -c "$PROFILE" --product ApfsFastindex)
 
-SWIFT_BUILD_DIR="$REPO_ROOT/app/.build/$PROFILE"
+# SwiftPM's output location depends on the selected build system.
+SWIFT_BUILD_DIR="$(cd "$REPO_ROOT/app" && swift build -c "$PROFILE" --show-bin-path)"
 BIN="$SWIFT_BUILD_DIR/ApfsFastindex"
 if [ ! -x "$BIN" ]; then
     echo "make-release.sh: swift build did not produce $BIN" >&2
@@ -595,7 +592,7 @@ DMG_PATH="$REPO_ROOT/app/$DMG_NAME"
 # script exited after the build with no error message and no
 # appcast/commit/tag/release work done.
 DIRTY="$(
-    git -C "$REPO_ROOT" status --porcelain \
+    git -C "$REPO_ROOT" status --porcelain --ignore-submodules=untracked \
         | grep -vE '(^.. Cargo\.lock|^.. crates/apfs-fastindex/Cargo\.toml|^.. appcast\.xml|^\?\?)' \
         || true
 )"
@@ -762,7 +759,7 @@ echo "    gh: created release $RELEASE_TAG with $ASSET_NAME + $DMG_NAME"
 #    apfs-fastindex`.
 HOMEBREW_DIR="$REPO_ROOT/homebrew"
 CASK_FILE="$HOMEBREW_DIR/Casks/apfs-fastindex.rb"
-if [ -d "$HOMEBREW_DIR/.git" ] && [ -f "$CASK_FILE" ]; then
+if [ -e "$HOMEBREW_DIR/.git" ] && [ -f "$CASK_FILE" ]; then
     DMG_SHA256="$(shasum -a 256 "$DMG_PATH" | awk '{print $1}')"
     # Replace the version + sha256 lines in the cask. BSD-sed
     # compatible: both pattern and replacement are spelled out
@@ -780,16 +777,13 @@ if [ -d "$HOMEBREW_DIR/.git" ] && [ -f "$CASK_FILE" ]; then
     fi
     git -C "$HOMEBREW_DIR" add Casks/apfs-fastindex.rb
     git -C "$HOMEBREW_DIR" commit -q -m "release: $RELEASE_TAG"
-    if git -C "$HOMEBREW_DIR" push origin main 2>/dev/null; then
-        echo "    homebrew: pushed $RELEASE_TAG (sha256 $DMG_SHA256)"
-    else
-        echo "    homebrew: cask committed locally but push failed —"
-        echo "      check the tap-repo remote on github.com/NicoNekoru/homebrew-apfs-fastindex."
-    fi
-    # Record the new submodule commit in the main repo's tree.
+    git -C "$HOMEBREW_DIR" push origin main
+    echo "    homebrew: pushed $RELEASE_TAG (sha256 $DMG_SHA256)"
+    # Keep the release commit and tag immutable. The tap checksum
+    # depends on the built artifact, so record it in a follow-up commit.
     git -C "$REPO_ROOT" add homebrew
-    git -C "$REPO_ROOT" commit -q --amend --no-edit
-    git -C "$REPO_ROOT" push --force-with-lease origin "$BRANCH"
+    git -C "$REPO_ROOT" commit -q -m "chore: sync Homebrew tap for $RELEASE_TAG"
+    git -C "$REPO_ROOT" push origin "$BRANCH"
 else
     echo "    homebrew: tap submodule not initialised — skipping."
     echo "      One-time setup:"
@@ -801,6 +795,6 @@ fi
 echo
 echo "✅ Released $RELEASE_TAG."
 echo "   Sparkle users: update arrives on next daily check."
-if [ -d "$HOMEBREW_DIR/.git" ]; then
+if [ -e "$HOMEBREW_DIR/.git" ]; then
     echo "   Brew users:    brew update && brew upgrade --cask apfs-fastindex"
 fi

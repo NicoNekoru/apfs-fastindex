@@ -47,10 +47,11 @@ private typealias AuthorizationExecuteWithPrivilegesType = @convention(c) (
 /// Protocol matches `apfs-fastindex-scan --server`:
 ///
 /// ```text
-/// pipe-out (child stdout):  ready\t1\n                  (once, after auth)
-/// pipe-in  (child stdin):   scan\t<path>\t<out>\t<prog>\n
-/// pipe-out (child stdout):  ok\t<exit_code>\n
-/// pipe-in  (child stdin):   quit\n
+/// child stdout: {"event":"ready","version":2}\n
+/// child stdin:  {"op":"scan","path":"...","owner_uid":501}\n
+/// child stdout: {"event":"progress",...}\n
+/// child stdout: {"event":"ok","out_path":"...","exit_code":0}\n
+/// child stdin:  {"op":"release","paths":["..."]}\n
 /// ```
 final class AdminSession {
     static let shared = AdminSession()
@@ -126,7 +127,7 @@ final class AdminSession {
         }
 
         // Ensure helper is up. If this is the first request,
-        // ensure() spawns osascript, blocks on the `ready`
+        // ensure() spawns the privileged helper, blocks on the `ready`
         // handshake, then returns. Subsequent requests reuse the
         // running helper.
         let ready: Bool
@@ -181,7 +182,15 @@ final class AdminSession {
             // picks its own tempfile path via mkstemp and
             // reports it back in the `ok` reply; we never
             // tell the helper where to write.
-            let scanCmd: [String: Any] = ["op": "scan", "path": path]
+            let scanCmd: [String: Any] = [
+                "op": "scan",
+                "path": path,
+                // The helper creates the result as root, then
+                // transfers the completed mode-0600 file to this
+                // UID. Without that handoff the unprivileged GUI
+                // cannot open the result it just requested.
+                "owner_uid": NSNumber(value: geteuid()),
+            ]
             guard let scanBytes = try? JSONSerialization.data(
                 withJSONObject: scanCmd, options: []
             ) else {
@@ -262,13 +271,12 @@ final class AdminSession {
                 )
             }
 
-            // Audit H2: stat-verify the path is a root-owned
-            // regular file (mode <= 0600) before reading. The
-            // helper created it via mkstemp under sticky /tmp,
-            // so a user-attacker can neither pre-place a
-            // symlink at that exact random name nor swap the
-            // file (sticky + root-owned blocks both). The
-            // explicit check is defence-in-depth.
+            // Audit H2: stat-verify the path is a mode-0600
+            // regular file owned by this GUI process before
+            // reading. The helper creates it via mkstemp, writes
+            // through the open descriptor, then chowns the
+            // completed file to the UID sent above. A root-owned
+            // mode-0600 file would be unreadable here.
             if !AdminSession.verifyHelperOutputPath(outPath) {
                 // Ask the helper to clean up before we bail;
                 // best-effort.
@@ -291,8 +299,7 @@ final class AdminSession {
                 )
             }
 
-            // Tell the helper to unlink the tempfile. We can't
-            // unlink it ourselves (sticky /tmp + root-owned).
+            // Tell the helper to unlink the tempfile.
             // Best-effort: if the helper hung up between scan-
             // and-release, the file leaks until the next quit.
             _ = AdminSession.sendRelease(pipe: pipe, paths: [outPath])
@@ -468,7 +475,10 @@ final class AdminSession {
         let parsed: [String: Any]? = firstLine.data(using: .utf8).flatMap {
             try? JSONSerialization.jsonObject(with: $0, options: []) as? [String: Any]
         }
-        guard let json = parsed, (json["event"] as? String) == "ready" else {
+        guard let json = parsed,
+              (json["event"] as? String) == "ready",
+              AdminSession.uint(json["version"]) == 2
+        else {
             invalidateLocked()
             return .failedToStart(
                 "Privileged helper sent unexpected handshake: \(firstLine.prefix(200))"
@@ -556,12 +566,11 @@ final class AdminSession {
     }
 
     /// Audit H2 defence-in-depth: verify the helper's output
-    /// path is a regular file owned by root with no other-
-    /// write bits set, BEFORE we hand the path to the FFI for
-    /// reading. The mkstemp-created file should always pass;
-    /// any failure means either the helper misbehaved or an
-    /// attacker swapped the file (very unlikely under sticky
-    /// /tmp + root ownership, but cheap to verify).
+    /// path is a regular, singly-linked mode-0600 file owned by
+    /// this process before handing it to the FFI. The helper
+    /// creates the file as root and transfers ownership only
+    /// after it has finished writing through the original open
+    /// descriptor.
     fileprivate static func verifyHelperOutputPath(_ path: String) -> Bool {
         var st = stat()
         // lstat — refuse symlinks outright. The helper used
@@ -573,14 +582,14 @@ final class AdminSession {
         guard rc == 0 else { return false }
         // Regular file (not symlink, not dir, not device).
         guard (st.st_mode & S_IFMT) == S_IFREG else { return false }
-        // Root-owned. The helper runs as uid 0 under
-        // AuthorizationExecuteWithPrivileges; any mkstemp it
-        // does should land with uid == 0.
-        guard st.st_uid == 0 else { return false }
-        // No world or group write. mkstemp creates mode 0600
-        // (owner rw), so anything looser is suspicious.
-        let badBits = mode_t(S_IWGRP | S_IWOTH)
-        guard (st.st_mode & badBits) == 0 else { return false }
+        // The helper chowns the completed file to the requesting
+        // GUI's effective UID so this unprivileged process can
+        // read it without exposing it to other users.
+        guard st.st_uid == geteuid() else { return false }
+        // Refuse hard links and any permission drift. mkstemp
+        // creates 0600 and fchown preserves those mode bits.
+        guard st.st_nlink == 1 else { return false }
+        guard (st.st_mode & mode_t(0o777)) == mode_t(0o600) else { return false }
         return true
     }
 
