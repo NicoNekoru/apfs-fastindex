@@ -181,6 +181,7 @@ extension FocusedValues {
     }
 }
 
+@MainActor
 private struct BrowserCommands: Commands {
     @FocusedValue(\.browserWindowActions) private var actions
 
