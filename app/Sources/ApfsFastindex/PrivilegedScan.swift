@@ -1,25 +1,6 @@
 import Foundation
 import CApfsFastindex
 
-extension Notification.Name {
-    /// Posted by the File > Scan as Administrator… menu command.
-    /// The active `NativeContentView` observes this and kicks off
-    /// `startPrivilegedScan()` with the current `pathInput`.
-    /// No payload — the path lives in SwiftUI state, not on the
-    /// notification.
-    static let scanAsAdministratorRequested = Notification.Name(
-        "apfsfastindex.scanAsAdministratorRequested"
-    )
-
-    /// Posted by Edit > Find (⌘F) so the active
-    /// `NativeContentView` can focus its tree-list search
-    /// field. Same notification pattern as
-    /// `scanAsAdministratorRequested`; no payload.
-    static let findRequested = Notification.Name(
-        "apfsfastindex.findRequested"
-    )
-}
-
 /// "Scan as Administrator…" privileged-subprocess flow.
 ///
 /// The product question this answers: the in-process fallback walker
@@ -176,11 +157,13 @@ enum PrivilegedScan {
     /// background thread, marshal to main if you touch SwiftUI.
     static func run(
         path: String,
+        threads: UInt32 = 0,
         onSessionReady: (() -> Void)? = nil,
         onProgress: ((Scan.ProgressSnapshot) -> Void)? = nil
     ) -> Outcome {
         let outcome = AdminSession.shared.requestScan(
             path: path,
+            threads: threads,
             onSessionReady: onSessionReady,
             onProgress: onProgress
         )

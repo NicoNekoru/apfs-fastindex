@@ -27,6 +27,10 @@ struct NativeContentView: View {
     @ViewState private var extSummary: Scan.ExtSummary?
 
     private var currentNode: UInt32 { browser.currentNode }
+    private var scanWorkerCount: UInt32 {
+        let count = threads == 0 ? min(AppPrefs.maxWorkerThreads, 4) : threads
+        return UInt32(clamping: min(max(count, 1), AppPrefs.maxWorkerThreads))
+    }
     private var lastClickedPath: String {
         guard let scan, browser.selectedNode != 0 else { return "" }
         return DisplaySanitizer.sanitiseDisplay(scan.path(of: browser.selectedNode) ?? "")
@@ -125,18 +129,12 @@ struct NativeContentView: View {
         .background(VizPalette.bg)
         .preferredColorScheme(.dark)
         .foregroundStyle(VizPalette.text)
-        .onReceive(NotificationCenter.default.publisher(for: .scanAsAdministratorRequested)) { _ in
-            startPrivilegedScan()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .findRequested)) { _ in
-            guard scan != nil else { return }
-            showFolderTree = true
-            DispatchQueue.main.async { searchFieldFocused = true }
-        }
-        .onChange(of: adminMode) { _ in
-            applyWindowTitle()
-        }
-        .onAppear { applyWindowTitle() }
+        .navigationTitle(adminMode ? "apfs-fastindex — Administrator" : "apfs-fastindex")
+        .focusedSceneValue(\.browserWindowActions, BrowserWindowActions(
+            find: scan == nil ? nil : focusSearch,
+            scanAsAdministrator: scanning || pathInput.trimmingCharacters(in: .whitespaces).isEmpty
+                ? nil : startPrivilegedScan
+        ))
         .onChange(of: currentNode) { _ in
             updateLayout()
             rebuildExtSummary()
@@ -175,6 +173,12 @@ struct NativeContentView: View {
 
     private var searchField: some View {
         BrowserSearchField(browser: browser, focus: $searchFieldFocused)
+    }
+
+    private func focusSearch() {
+        guard scan != nil else { return }
+        showFolderTree = true
+        DispatchQueue.main.async { searchFieldFocused = true }
     }
 
     private func rebuildExtSummary() {
@@ -445,11 +449,11 @@ struct NativeContentView: View {
     }
 
     private func totalsText(for scan: Scan) -> String {
-        let logical = ByteCountFormatter.string(fromByteCount: Int64(scan.logicalTotal),
+        let logical = ByteCountFormatter.string(fromByteCount: Int64(clamping: scan.logicalTotal),
                                                 countStyle: .binary)
         let allocatedPart: String
         if let alloc = scan.allocatedTotal {
-            allocatedPart = "; allocated \(ByteCountFormatter.string(fromByteCount: Int64(alloc), countStyle: .binary))"
+            allocatedPart = "; allocated \(ByteCountFormatter.string(fromByteCount: Int64(clamping: alloc), countStyle: .binary))"
         } else if scan.allocatedAvailable {
             allocatedPart = "; allocated unclaimed"
         } else {
@@ -601,11 +605,7 @@ struct NativeContentView: View {
 
     // MARK: - Initial-view stats card
 
-    /// Pre-scan welcome card. Shows the volume's total / used /
-    /// free capacity (and a placeholder item count if the
-    /// filesystem reports `f_files`, which APFS doesn't but HFS+
-    /// / FAT-mounted images would). Helps the user calibrate
-    /// "how big a scan am I about to run".
+    /// Pre-scan volume capacity. File counts are only known after scanning.
     private var initialStatsCard: some View {
         let stats = volumeStats(for: pathInput)
         return VStack(alignment: .leading, spacing: 14) {
@@ -622,8 +622,6 @@ struct NativeContentView: View {
                                value: formattedBytes(stats.used))
                     statColumn(label: "Free",
                                value: formattedBytes(stats.free))
-                    statColumn(label: "Items",
-                               value: stats.files.map { $0.formatted() } ?? "—")
                 }
                 if stats.total > 0 {
                     GeometryReader { geom in
@@ -674,18 +672,14 @@ struct NativeContentView: View {
     }
 
     private func formattedBytes(_ n: UInt64) -> String {
-        ByteCountFormatter.string(fromByteCount: Int64(n), countStyle: .binary)
+        ByteCountFormatter.string(fromByteCount: Int64(clamping: n), countStyle: .binary)
     }
 
-    /// Result of `volumeStats(for:)` — `total/used/free` are byte
-    /// counts; `files` is the filesystem's reported node count
-    /// (often 0 on APFS — present here for HFS+ / FAT volumes).
     private struct VolumeStats {
         let volumeName: String
         let total: UInt64
         let used: UInt64
         let free: UInt64
-        let files: UInt64?
     }
 
     private func volumeStats(for path: String) -> VolumeStats? {
@@ -696,11 +690,6 @@ struct NativeContentView: View {
         let total = (attrs[.systemSize] as? NSNumber)?.uint64Value ?? 0
         let free = (attrs[.systemFreeSize] as? NSNumber)?.uint64Value ?? 0
         let used = total > free ? total - free : 0
-        // `.systemNodes` is `statvfs::f_files`. APFS reports 0
-        // (variable inode count); treat 0 as "unknown" upstream.
-        let filesRaw = (attrs[.systemNodes] as? NSNumber)?.uint64Value ?? 0
-        let files: UInt64? = filesRaw > 0 ? filesRaw : nil
-
         // Resolve the human-readable volume name via the URL
         // resource keys (the FileManager attributes don't expose
         // it directly).
@@ -712,7 +701,7 @@ struct NativeContentView: View {
         }
         return VolumeStats(
             volumeName: volumeName,
-            total: total, used: used, free: free, files: files
+            total: total, used: used, free: free
         )
     }
 
@@ -747,15 +736,6 @@ struct NativeContentView: View {
         return url == volumeURL.standardizedFileURL
     }
 
-    // Pre-flight TCC handling lives in `TCCAccess.swift` now.
-    // The earlier ad-hoc per-dir probe (Desktop, Documents,
-    // Downloads, …) was replaced with a unified Full Disk
-    // Access flow: detect whether FDA is granted, redirect
-    // the user to System Settings if not. One grant covers
-    // every TCC-gated location, including the ones the old
-    // probe list missed (Library/Containers/*,
-    // Library/CloudStorage/*, system snapshots, etc.).
-
     @ViewBuilder
     private func metricCell(label: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 1) {
@@ -780,24 +760,6 @@ struct NativeContentView: View {
             return String(format: "%d:%02d:%02d", h, m, s)
         }
         return String(format: "%d:%02d", m, s)
-    }
-
-    // MARK: - Window title
-
-    /// Apply the window title for the current admin-mode state.
-    /// The suffix flips the moment `adminMode = true` is set —
-    /// which happens via the `onSessionReady` callback as soon
-    /// as the privileged helper sends its `ready\t1` handshake,
-    /// i.e. immediately after the user authenticates. This is
-    /// strictly tied to admin-mode state (not to the displayed
-    /// scan's `isAdmin` field) so the indicator updates before
-    /// the first scan completes.
-    private func applyWindowTitle() {
-        let base = "apfs-fastindex"
-        let title = adminMode ? "\(base) — Administrator" : base
-        for window in NSApplication.shared.windows {
-            window.title = title
-        }
     }
 
     // MARK: - Scan + layout flow
@@ -831,9 +793,11 @@ struct NativeContentView: View {
         guard !path.isEmpty else { return }
         guard !scanning else { return }
         beginScan(path: path, phase: "Authorizing")
+        let workerCount = scanWorkerCount
         DispatchQueue.global(qos: .userInitiated).async {
             let outcome = PrivilegedScan.run(
                 path: path,
+                threads: workerCount,
                 onSessionReady: {
                     // Auth just completed (helper sent its
                     // ready handshake). Engage sticky admin
@@ -844,7 +808,6 @@ struct NativeContentView: View {
                     // pops once per app lifetime.
                     DispatchQueue.main.async {
                         adminMode = true
-                        applyWindowTitle()
                     }
                 },
                 onProgress: { snapshot in
@@ -921,7 +884,7 @@ struct NativeContentView: View {
         }
 
         beginScan(path: path, phase: "Scanning")
-        let workerCount = UInt32(clamping: threads)
+        let workerCount = scanWorkerCount
         DispatchQueue.global(qos: .userInitiated).async {
             let result = Scan.fallbackWithProgress(
                 path: path,

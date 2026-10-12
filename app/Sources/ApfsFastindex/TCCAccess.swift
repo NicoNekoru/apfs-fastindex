@@ -1,27 +1,8 @@
 import AppKit
 import Foundation
 
-/// Full Disk Access (FDA) detection + redirect helpers.
-///
-/// macOS gates dozens of folders through the TCC subsystem:
-/// `~/Desktop`, `~/Documents`, `~/Library/Mail`, every
-/// `~/Library/Containers/*` (one per app), every
-/// `~/Library/CloudStorage/*` (one per cloud provider), the
-/// system Time Machine snapshot tree, and more. The walker
-/// hits each one as it descends; the first touch triggers a
-/// modal permission prompt.
-///
-/// The unified answer is Full Disk Access. A single one-time
-/// grant covers every TCC-gated location for this app
-/// forever. Without FDA the alternative is whack-a-mole
-/// per-dir prompts mid-scan.
-///
-/// **There is no API to programmatically grant FDA.** Only
-/// the user can — via System Settings → Privacy & Security →
-/// Full Disk Access — and the app must restart afterwards
-/// for the kernel's per-process TCC cache to refresh. The
-/// best we can do is detect the current state and open the
-/// settings pane on the user's behalf.
+/// Best-effort Full Disk Access detection and Settings navigation.
+/// Permission must be granted by the user, never by the app.
 enum TCCAccess {
     /// Probe whether the app currently has Full Disk Access.
     ///
@@ -65,27 +46,10 @@ enum TCCAccess {
         return (try? FileManager.default.contentsOfDirectory(atPath: fallback)) != nil
     }
 
-    /// Launch System Settings, with a best-effort deep-link
-    /// to the Full Disk Access pane.
-    ///
-    /// **macOS schema drift**: the `?Privacy_AllFiles` query
-    /// string worked through Sonoma + Sequoia but on macOS 26
-    /// (Tahoe) System Settings was restructured — the legacy
-    /// pane bundles are gone, the new app loads extensions
-    /// dynamically, and the deep-link query is silently
-    /// ignored (the app launches to General). We still send
-    /// the deep-link URL because it works on older systems,
-    /// but the explainer text in `showFullDiskAccessExplainer`
-    /// carries the step-by-step navigation so the user can
-    /// reach the FDA pane even when the deep-link drops them
-    /// on the wrong page.
-    ///
-    /// Uses `NSWorkspace.shared.open(_:configuration:)` with
-    /// `activates = true` so System Settings comes to the
-    /// foreground. The async completion handler falls back to
-    /// launching System Settings bare if the URL scheme is
-    /// outright refused by LaunchServices (older macOS where
-    /// the scheme was different, or a stripped-down OS install).
+    /// Open System Settings with a best-effort Full Disk Access
+    /// deep link. If LaunchServices rejects the URL, launch the
+    /// app directly. The explainer also provides manual navigation
+    /// instructions in case Settings does not select the pane.
     static func openFullDiskAccessSettings() {
         let config = NSWorkspace.OpenConfiguration()
         config.activates = true
@@ -97,9 +61,6 @@ enum TCCAccess {
 
         NSWorkspace.shared.open(deepLink, configuration: config) { _, error in
             guard error != nil else { return }
-            // Fallback: launch System Settings as a bare app.
-            // The user navigates manually from the explainer's
-            // instructions.
             let appPath = URL(fileURLWithPath: "/System/Applications/System Settings.app")
             NSWorkspace.shared.openApplication(
                 at: appPath,
@@ -125,49 +86,31 @@ enum TCCAccess {
         case dontAskAgain
     }
 
-    /// Show the modal explainer. Returns synchronously — the
-    /// `NSAlert.runModal()` call blocks the main thread, which
-    /// is exactly what we want here (no UI state changes
-    /// mid-prompt). Caller is responsible for honouring the
-    /// outcome.
+    /// Show the modal explainer and open Settings if requested.
+    /// The caller uses the outcome to cancel or continue the scan
+    /// and to persist the "Don't Ask Again" preference.
     static func showFullDiskAccessExplainer() -> ExplainerOutcome {
         let alert = NSAlert()
-        alert.messageText = "Grant Full Disk Access for smooth scans?"
-        // Step-by-step navigation in the body so users land
-        // correctly even when the deep-link query string
-        // doesn't honour the FDA pane (macOS 26 / Tahoe
-        // ignores it; the legacy URL was reliable on older
-        // releases). Restart-after-grant is called out
-        // because the kernel caches each process's TCC state
-        // at launch — granting FDA mid-session doesn't take
-        // effect until the next launch.
+        alert.messageText = "Allow access to protected folders?"
         alert.informativeText = """
-        Without Full Disk Access, macOS will ask permission \
-        for individual folders (Documents, Downloads, every \
-        app's container, every cloud provider's folder, …) \
-        as the scan walks the tree.
+        Full Disk Access lets ApfsFastindex scan protected folders. \
+        Without it, macOS may ask for permission or skip some folders.
 
-        Granting Full Disk Access once covers everything for \
-        this app, forever.
+        In System Settings, go to Privacy & Security → Full Disk Access. \
+        Add ApfsFastindex with the '+' button and enable access. \
+        Then quit and relaunch ApfsFastindex before scanning.
 
-        How to grant:
-        1.  Click "Open System Settings…" below.
-        2.  Navigate to Privacy & Security → Full Disk Access.
-        3.  Click the '+' button, find ApfsFastindex, and \
-        add it.
-        4.  Quit and relaunch ApfsFastindex (macOS reads each \
-        app's TCC state at launch, so the grant takes effect \
-        on the next start).
+        You can change this reminder in the app's Settings.
         """
         alert.alertStyle = .informational
-        // Button order matters — leftmost is default; macOS
-        // assigns return-value indices in declaration order.
+        // NSAlert return values follow declaration order, not visual position.
         alert.addButton(withTitle: "Open System Settings…")
         alert.addButton(withTitle: "Continue Without")
         alert.addButton(withTitle: "Don't Ask Again")
 
         switch alert.runModal() {
         case .alertFirstButtonReturn:
+            openFullDiskAccessSettings()
             return .openedSettings
         case .alertThirdButtonReturn:
             return .dontAskAgain

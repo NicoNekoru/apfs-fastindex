@@ -1023,7 +1023,12 @@ enum HelperCommand {
     /// paths and reports them back. `owner_uid` is the GUI's
     /// effective UID; the helper transfers the completed 0600
     /// output file to it so the unprivileged GUI can read it.
-    Scan { path: String, owner_uid: u32 },
+    Scan {
+        path: String,
+        owner_uid: u32,
+        /// Missing or zero preserves the default for older clients.
+        threads: Option<usize>,
+    },
     /// Helper unlinks each path *if* it created it (tracked
     /// in the helper's owned-paths list). Failure to unlink
     /// is logged to stderr but doesn't fail the call.
@@ -1096,7 +1101,7 @@ fn run_server_mode() -> ExitCode {
     // syscall + one wait.
     spawn_parent_death_watcher();
 
-    let threads = default_fallback_threads();
+    let default_threads = default_fallback_threads();
 
     // Track every tempfile we hand out. On quit or a matching
     // `release` command we unlink it. The list is bounded by the
@@ -1150,7 +1155,11 @@ fn run_server_mode() -> ExitCode {
             }
         };
         match cmd {
-            HelperCommand::Scan { path, owner_uid } => {
+            HelperCommand::Scan {
+                path,
+                owner_uid,
+                threads,
+            } => {
                 // Defence-in-depth: refuse control bytes in
                 // path. `serde_json` already accepts them
                 // (JSON strings can carry any UTF-8) but our
@@ -1166,6 +1175,9 @@ fn run_server_mode() -> ExitCode {
                     );
                     continue;
                 }
+                let threads = threads
+                    .filter(|&count| count > 0)
+                    .unwrap_or(default_threads);
                 match run_server_scan(&path, threads, owner_uid) {
                     Ok((out_path, exit_code)) => {
                         owned_paths.push(out_path.clone());
@@ -1427,4 +1439,36 @@ fn run_server_scan(
     };
 
     Ok((out_path, 0))
+}
+
+#[cfg(test)]
+mod helper_protocol_tests {
+    use super::HelperCommand;
+
+    #[test]
+    fn scan_command_preserves_worker_preferences_and_legacy_default() {
+        for threads in [None, Some(0), Some(1), Some(2)] {
+            let mut command = serde_json::json!({
+                "op": "scan", "path": "/tmp", "owner_uid": 501,
+            });
+            if let Some(count) = threads {
+                command["threads"] = serde_json::json!(count);
+            }
+            let parsed: HelperCommand = serde_json::from_value(command).unwrap();
+            match parsed {
+                HelperCommand::Scan {
+                    threads: actual, ..
+                } => assert_eq!(actual, threads),
+                _ => panic!("expected a scan command"),
+            }
+        }
+    }
+
+    #[test]
+    fn scan_command_rejects_negative_worker_count() {
+        let command = serde_json::json!({
+            "op": "scan", "path": "/tmp", "owner_uid": 501, "threads": -1,
+        });
+        assert!(serde_json::from_value::<HelperCommand>(command).is_err());
+    }
 }

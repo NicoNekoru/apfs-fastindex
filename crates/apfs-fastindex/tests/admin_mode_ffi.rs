@@ -135,18 +135,30 @@ fn admin_mode_missing_file_returns_null_and_records_error() {
 /// bridge uses.
 #[test]
 fn admin_mode_server_loop_scans_and_quits() {
+    server_loop_scans_and_quits(&[None]);
+}
+
+#[test]
+fn admin_mode_server_loop_accepts_worker_counts() {
+    server_loop_scans_and_quits(&[Some(0), Some(1), Some(2)]);
+}
+
+fn server_loop_scans_and_quits(worker_counts: &[Option<usize>]) {
     use std::io::{BufRead, BufReader, Write};
     use std::process::{Command, Stdio};
 
-    let crate_root =
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let crate_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let bin = crate_root
         .parent()
         .expect("crate parent")
         .parent()
         .expect("repo root")
         .join("target")
-        .join(if cfg!(debug_assertions) { "debug" } else { "release" })
+        .join(if cfg!(debug_assertions) {
+            "debug"
+        } else {
+            "release"
+        })
         .join("apfs-fastindex-scan");
     if !bin.exists() {
         eprintln!(
@@ -181,80 +193,85 @@ fn admin_mode_server_loop_scans_and_quits() {
     assert_eq!(ready["event"], "ready", "unexpected handshake: {line:?}");
     assert_eq!(ready["version"], 2);
 
-    // Send scan command as JSON-line.
-    let cmd = serde_json::json!({
-        "op": "scan",
-        "path": scan_target.to_string_lossy(),
-        "owner_uid": unsafe { libc::geteuid() },
-    });
-    let bytes = serde_json::to_vec(&cmd).expect("encode scan");
-    stdin.write_all(&bytes).expect("write scan");
-    stdin.write_all(b"\n").expect("newline");
-    stdin.flush().expect("flush");
-
-    // Drain progress events until the terminal ok/err event.
-    // `loop { … break value … }` is a Rust expression — the
-    // ok arm's payload becomes the loop's value, dropping
-    // the placeholder-`None` + later-reassign shape that
-    // clippy's `unused_assignments` lint flagged.
-    let out_path: Option<String> = loop {
-        line.clear();
-        reader.read_line(&mut line).expect("read reply");
-        let evt = parse_event(&line);
-        match evt["event"].as_str() {
-            Some("progress") => continue,
-            Some("ok") => break evt["out_path"].as_str().map(|s| s.to_string()),
-            Some("err") => panic!("scan err: {}", evt["message"]),
-            other => panic!("unexpected event {other:?} in {line:?}"),
+    for &threads in worker_counts {
+        // Send scan command as JSON-line.
+        let mut cmd = serde_json::json!({
+            "op": "scan",
+            "path": scan_target.to_string_lossy(),
+            "owner_uid": unsafe { libc::geteuid() },
+        });
+        if let Some(count) = threads {
+            cmd["threads"] = serde_json::json!(count);
         }
-    };
-    let out_path = out_path.expect("ok carried out_path");
-    assert!(
-        !out_path.is_empty(),
-        "ok reply must carry a non-empty out_path"
-    );
+        let bytes = serde_json::to_vec(&cmd).expect("encode scan");
+        stdin.write_all(&bytes).expect("write scan");
+        stdin.write_all(b"\n").expect("newline");
+        stdin.flush().expect("flush");
 
-    // Sanity-check that the helper actually owns the file —
-    // the parent's path-verification in production does this
-    // too, with stricter ownership checks (audit H2).
-    let meta = std::fs::metadata(&out_path).expect("stat out_path");
-    assert!(meta.is_file(), "out_path is not a regular file");
-    assert!(meta.len() > 0, "out_path is empty");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::{MetadataExt, PermissionsExt};
-        assert_eq!(meta.uid(), unsafe { libc::geteuid() });
-        assert_eq!(meta.permissions().mode() & 0o777, 0o600);
+        // Drain progress events until the terminal ok/err event.
+        // `loop { … break value … }` is a Rust expression — the
+        // ok arm's payload becomes the loop's value, dropping
+        // the placeholder-`None` + later-reassign shape that
+        // clippy's `unused_assignments` lint flagged.
+        let out_path: Option<String> = loop {
+            line.clear();
+            reader.read_line(&mut line).expect("read reply");
+            let evt = parse_event(&line);
+            match evt["event"].as_str() {
+                Some("progress") => continue,
+                Some("ok") => break evt["out_path"].as_str().map(|s| s.to_string()),
+                Some("err") => panic!("scan err: {}", evt["message"]),
+                other => panic!("unexpected event {other:?} in {line:?}"),
+            }
+        };
+        let out_path = out_path.expect("ok carried out_path");
+        assert!(
+            !out_path.is_empty(),
+            "ok reply must carry a non-empty out_path"
+        );
+
+        // Sanity-check that the helper actually owns the file —
+        // the parent's path-verification in production does this
+        // too, with stricter ownership checks (audit H2).
+        let meta = std::fs::metadata(&out_path).expect("stat out_path");
+        assert!(meta.is_file(), "out_path is not a regular file");
+        assert!(meta.len() > 0, "out_path is empty");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::{MetadataExt, PermissionsExt};
+            assert_eq!(meta.uid(), unsafe { libc::geteuid() });
+            assert_eq!(meta.permissions().mode() & 0o777, 0o600);
+        }
+
+        // The output msgpack should rehydrate cleanly via the
+        // existing FFI — same shape as a non-server-mode scan.
+        let c_path = CString::new(out_path.clone()).unwrap();
+        let handle = apfs_scan_from_msgpack_file(c_path.as_ptr());
+        assert!(
+            !handle.is_null(),
+            "server-produced msgpack failed to rehydrate; last_error = {:?}",
+            cstr_to_string(apfs_last_error())
+        );
+        let count = apfs_scan_entry_count(handle);
+        assert!(count > 0, "server scan returned zero entries");
+        apfs_scan_free(handle);
+
+        // Release the tempfile (helper unlinks it).
+        let release = serde_json::json!({ "op": "release", "paths": [out_path] });
+        stdin
+            .write_all(&serde_json::to_vec(&release).unwrap())
+            .expect("write release");
+        stdin.write_all(b"\n").expect("newline");
+        stdin.flush().expect("flush");
+        line.clear();
+        reader.read_line(&mut line).expect("read release ack");
+        let ack = parse_event(&line);
+        assert_eq!(ack["event"], "ok");
+        assert!(
+            !std::path::Path::new(&out_path).exists(),
+            "release did not remove the output file"
+        );
     }
-
-    // The output msgpack should rehydrate cleanly via the
-    // existing FFI — same shape as a non-server-mode scan.
-    let c_path = CString::new(out_path.clone()).unwrap();
-    let handle = apfs_scan_from_msgpack_file(c_path.as_ptr());
-    assert!(
-        !handle.is_null(),
-        "server-produced msgpack failed to rehydrate; last_error = {:?}",
-        cstr_to_string(apfs_last_error())
-    );
-    let count = apfs_scan_entry_count(handle);
-    assert!(count > 0, "server scan returned zero entries");
-    apfs_scan_free(handle);
-
-    // Release the tempfile (helper unlinks it).
-    let release = serde_json::json!({ "op": "release", "paths": [out_path] });
-    stdin
-        .write_all(&serde_json::to_vec(&release).unwrap())
-        .expect("write release");
-    stdin.write_all(b"\n").expect("newline");
-    stdin.flush().expect("flush");
-    line.clear();
-    reader.read_line(&mut line).expect("read release ack");
-    let ack = parse_event(&line);
-    assert_eq!(ack["event"], "ok");
-    assert!(
-        !std::path::Path::new(&out_path).exists(),
-        "release did not remove the output file"
-    );
 
     // Quit.
     let quit = serde_json::json!({ "op": "quit" });

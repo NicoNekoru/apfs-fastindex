@@ -48,7 +48,7 @@ private typealias AuthorizationExecuteWithPrivilegesType = @convention(c) (
 ///
 /// ```text
 /// child stdout: {"event":"ready","version":2}\n
-/// child stdin:  {"op":"scan","path":"...","owner_uid":501}\n
+/// child stdin:  {"op":"scan","path":"...","owner_uid":501,"threads":4}\n
 /// child stdout: {"event":"progress",...}\n
 /// child stdout: {"event":"ok","out_path":"...","exit_code":0}\n
 /// child stdin:  {"op":"release","paths":["..."]}\n
@@ -98,6 +98,7 @@ final class AdminSession {
     /// the main queue if you touch SwiftUI state.
     func requestScan(
         path: String,
+        threads: UInt32 = 0,
         onSessionReady: (() -> Void)? = nil,
         onProgress: ((Scan.ProgressSnapshot) -> Void)? = nil
     ) -> Outcome {
@@ -111,9 +112,9 @@ final class AdminSession {
             DispatchQueue.main.async { self.active = true }
             let scan: Scan?
             if let onProgress {
-                scan = Scan.fallbackWithProgress(path: path, onProgress: onProgress)
+                scan = Scan.fallbackWithProgress(path: path, threads: threads, onProgress: onProgress)
             } else {
-                scan = Scan.fallbackAsAdministrator(path: path)
+                scan = Scan.fallbackAsAdministrator(path: path, threads: threads)
             }
             guard let scan else {
                 let cause = PrivilegedScan.lastFfiError()
@@ -185,6 +186,7 @@ final class AdminSession {
             let scanCmd: [String: Any] = [
                 "op": "scan",
                 "path": path,
+                "threads": NSNumber(value: threads),
                 // The helper creates the result as root, then
                 // transfers the completed mode-0600 file to this
                 // UID. Without that handoff the unprivileged GUI

@@ -379,7 +379,7 @@ final class TreemapView: NSView {
                 let value = metric == .allocated
                     ? (scan.valueAllocated(of: c.node_index) ?? 0)
                     : scan.valueLogical(of: c.node_index)
-                label = "\(name) · \(byteFormatter.string(fromByteCount: Int64(value)))"
+                label = "\(name) · \(byteFormatter.string(fromByteCount: Int64(clamping: value)))"
             } else {
                 label = name
             }
@@ -486,7 +486,7 @@ final class TreemapView: NSView {
         let value: UInt64 = metric == .allocated
             ? (scan.valueAllocated(of: cell.node_index) ?? 0)
             : scan.valueLogical(of: cell.node_index)
-        let sizeText = byteFormatter.string(fromByteCount: Int64(value))
+        let sizeText = byteFormatter.string(fromByteCount: Int64(clamping: value))
         let titleText = "\(name) · \(sizeText)"
 
         let titleFont = AppFont.ns(12, bold: true)

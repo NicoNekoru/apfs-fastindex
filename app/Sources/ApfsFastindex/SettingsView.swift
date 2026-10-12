@@ -9,10 +9,7 @@ enum AppPrefs {
     /// Treemap recursion depth. `0` is the auto-fit sentinel
     /// (recurse until cells fall below 1 px).
     static let depthKey = "apfs.depth"
-    /// Worker thread count. `0` is the auto sentinel (CLI
-    /// default = `min(hw.physicalcpu, 4)`). The fallback walker
-    /// treats `0` and `1` as the serial implementation; anything
-    /// ≥ 2 uses the parallel walker.
+    /// Worker thread count. `0` uses up to 4 physical cores.
     static let threadsKey = "apfs.threads"
 
     /// Per-panel visibility for the side column. Both default
@@ -35,10 +32,8 @@ enum AppPrefs {
     /// "check on every app launch and never schedule a
     /// background check"; positive values configure
     /// `SPUUpdater.updateCheckInterval` to that many hours.
-    /// Default is `24` (daily) to match the Info.plist baked-in
-    /// default. Range clamped to `[0, 168]` (1 week) in the UI
-    /// so a user can't accidentally type `99999` and trip the
-    /// auto-updater's max-interval clamp.
+    /// Default is `24` (daily). Settings and the updater apply path
+    /// both clamp saved values to `[0, 168]` (1 week).
     static let updateCheckIntervalHoursKey = "apfs.updateCheckIntervalHours"
 
     /// Upper bound on the worker-threads stepper. Pulled from
@@ -68,6 +63,7 @@ struct SettingsView: View {
     @AppStorage(AppPrefs.updateCheckIntervalHoursKey) private var updateIntervalHours: Int = 24
     @AppStorage(AppPrefs.depthKey) private var depth: Int = 0
     @AppStorage(AppPrefs.threadsKey) private var threads: Int = 0
+    @AppStorage(AppPrefs.fdaPromptDismissedKey) private var fdaPromptDismissed: Bool = false
 
     var body: some View {
         Form {
@@ -100,7 +96,7 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Worker threads")
                             .font(AppFont.ui(13, weight: .semibold))
-                        Text("Parallel-walker thread count. 0 (auto) picks min(hw.physicalcpu, 4). Capped at \(AppPrefs.maxWorkerThreads).")
+                        Text("Number of scanner workers. 0 (auto) uses up to 4 physical cores. Maximum: \(AppPrefs.maxWorkerThreads).")
                             .font(AppFont.ui(11))
                             .foregroundStyle(.secondary)
                             .lineLimit(3)
@@ -122,12 +118,23 @@ struct SettingsView: View {
                     // step *up* from the stale value. Clamp on
                     // appear so the displayed number always
                     // matches what the stepper can produce.
-                    if threads > AppPrefs.maxWorkerThreads {
-                        threads = AppPrefs.maxWorkerThreads
-                    }
+                    threads = min(max(threads, 0), AppPrefs.maxWorkerThreads)
                 }
             } header: {
                 Text("Scan")
+                    .font(AppFont.ui(11, weight: .semibold))
+            }
+
+            Section {
+                Toggle("Remind me about Full Disk Access", isOn: Binding(
+                    get: { !fdaPromptDismissed },
+                    set: { fdaPromptDismissed = !$0 }
+                ))
+                Button("Open Full Disk Access Settings…") {
+                    TCCAccess.openFullDiskAccessSettings()
+                }
+            } header: {
+                Text("Privacy")
                     .font(AppFont.ui(11, weight: .semibold))
             }
 
@@ -136,7 +143,7 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Check for updates every")
                             .font(AppFont.ui(13, weight: .semibold))
-                        Text("How often the app polls the appcast.xml on main for a newer build. 0 = check once on every launch (and never schedule a background check). Range 0–168 hours (1 week).")
+                        Text("0 checks once when the app launches. Otherwise, check every 1–168 hours (up to 1 week). Updates are never installed without asking.")
                             .font(AppFont.ui(11))
                             .foregroundStyle(.secondary)
                             .lineLimit(4)
@@ -167,7 +174,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 600, height: 380)
+        .frame(width: 600, height: 500)
         .font(AppFont.ui(12))
     }
 }

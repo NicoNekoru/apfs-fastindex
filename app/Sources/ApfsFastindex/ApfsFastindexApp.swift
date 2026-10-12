@@ -86,6 +86,8 @@ struct ApfsFastindexApp: App {
     ///   also gates first-launch behaviour Sparkle needs.
     /// - `N > 0` → schedule a check every N hours.
     static func applyUpdateInterval(to updater: SPUUpdater, hours: Int) {
+        // Validate saved values before arithmetic, even if Settings has not opened.
+        let hours = min(max(hours, 0), 168)
         // Reentrancy break: the property writes below trigger
         // Sparkle's internal UserDefaults writes, which fire
         // didChangeNotification, which calls us again. If the
@@ -126,33 +128,7 @@ struct ApfsFastindexApp: App {
                 CheckForUpdatesView(controller: updaterController)
             }
 
-            // File menu: "Scan as Administrator…" (⌘⇧A). Posts a
-            // notification picked up by the active
-            // `NativeContentView`, which (per
-            // `PrivilegedScan.run`) either spawns the bundled CLI
-            // under osascript-with-admin-privileges or — when the
-            // process is already running as root — calls the
-            // in-process fallback walker directly.
-            //
-            // The menu is always enabled: silently disabling it
-            // when the CLI helper is missing was confusing in
-            // dev-mode swift-run launches. `PrivilegedScan.run`
-            // surfaces a clear error popup in the status bar if
-            // the helper cannot be located, which is friendlier
-            // than a mysteriously grey menu item.
-            //
-            // EX-28 follow-up: the privileged scan uses the
-            // fallback walker (not raw mode, which EX-28 closed
-            // as kernel-blocked under SIP).
-            CommandGroup(after: .newItem) {
-                Button("Scan as Administrator…") {
-                    NotificationCenter.default.post(
-                        name: .scanAsAdministratorRequested,
-                        object: nil
-                    )
-                }
-                .keyboardShortcut("A", modifiers: [.command, .shift])
-            }
+            BrowserCommands()
             // Strip Apple's default text-editing block from
             // the Edit menu — "Find > Find" / "Find Next" etc
             // act on NSTextView, which we don't host. Leaving
@@ -164,32 +140,6 @@ struct ApfsFastindexApp: App {
             // Cut/Copy/Paste shape that every Mac app has.
             CommandGroup(replacing: .textEditing) { }
 
-            // Merge our view-panel toggles into the *existing*
-            // View menu via `CommandGroup(after: .sidebar)`
-            // rather than `CommandMenu("View")`. The latter
-            // created a sibling menu — the user saw two "View"
-            // entries in the menu bar. `after: .sidebar` is the
-            // canonical placement for app-specific view
-            // toggles; SwiftUI puts the system "Enter Full
-            // Screen" items before ours.
-            //
-            // `Find` lives here too: it's a view-related
-            // operation (focuses the tree-list search field
-            // that filters the visible panel) and grouping it
-            // with the panel toggles is more discoverable than
-            // tucking it under Edit.
-            CommandGroup(after: .sidebar) {
-                Divider()
-                Button("Find") {
-                    NotificationCenter.default.post(
-                        name: .findRequested,
-                        object: nil
-                    )
-                }
-                .keyboardShortcut("f", modifiers: .command)
-                Divider()
-                ShowPanelCommands()
-            }
             // Help-menu entry → opens the Rust panic-hook log
             // file in the user's default editor. The file lives
             // under `~/Library/Logs/apfs-fastindex.log`; this
@@ -210,6 +160,43 @@ struct ApfsFastindexApp: App {
         // is present.
         Settings {
             SettingsView()
+        }
+    }
+}
+
+/// Actions belong to the focused browser window, not every open scene.
+struct BrowserWindowActions {
+    let find: (@MainActor () -> Void)?
+    let scanAsAdministrator: (@MainActor () -> Void)?
+}
+
+private struct BrowserWindowActionsKey: FocusedValueKey {
+    typealias Value = BrowserWindowActions
+}
+
+extension FocusedValues {
+    var browserWindowActions: BrowserWindowActions? {
+        get { self[BrowserWindowActionsKey.self] }
+        set { self[BrowserWindowActionsKey.self] = newValue }
+    }
+}
+
+private struct BrowserCommands: Commands {
+    @FocusedValue(\.browserWindowActions) private var actions
+
+    var body: some Commands {
+        CommandGroup(after: .newItem) {
+            Button("Scan as Administrator…") { actions?.scanAsAdministrator?() }
+                .keyboardShortcut("A", modifiers: [.command, .shift])
+                .disabled(actions?.scanAsAdministrator == nil)
+        }
+        CommandGroup(after: .sidebar) {
+            Divider()
+            Button("Find") { actions?.find?() }
+                .keyboardShortcut("f", modifiers: .command)
+                .disabled(actions?.find == nil)
+            Divider()
+            ShowPanelCommands()
         }
     }
 }

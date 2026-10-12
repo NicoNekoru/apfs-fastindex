@@ -11,10 +11,9 @@ under the application menu.
 
 Sparkle verifies every downloaded update against an EdDSA
 public key embedded in the app's `Info.plist`. The matching
-private key lives in the maintainer's macOS Keychain. Without
-this setup, `make-release.sh --publish` will still upload the
-GitHub release but skip the appcast update — auto-updaters
-won't see the new version until the key is in place.
+private key lives in the maintainer's macOS Keychain. Publishing
+requires both keys. The release script stops before publishing if
+the public key is missing or signing fails.
 
 ### 1. Build the app once so SwiftPM unpacks Sparkle
 
@@ -58,35 +57,25 @@ calls fail and the appcast is never updated. (See "CI
 limitations" below for the longer story.)
 
 ```sh
-# 1. Bump the version. The crate's Cargo.toml is the canonical
-#    source: APP_VERSION in make-release.sh derives from it.
-#    Edit crates/apfs-fastindex/Cargo.toml:
-#      version = "0.2.2"          # ← bump here
-
-# 2. Commit the version bump.
-git commit -am "release: prep v0.2.2"
-
-# 3. Tag (annotated tag triggers the CI release workflow,
-#    which uploads the zip; that's idempotent with your
-#    local publish below so it's fine to do either order).
-git tag -a v0.2.2 -m "v0.2.2"
-git push origin main v0.2.2
-
-# 4. Build + publish locally. This:
-#    - bakes APP_VERSION=0.2.2 into Info.plist
-#    - uploads the asset (no-op if CI beat you to it,
-#      thanks to --clobber)
-#    - signs the zip with sign_update (reads private key
-#      from Keychain)
-#    - appends a new <item> to appcast.xml
-#    - prints the git add/commit/push hint for appcast.xml
-./make-release.sh --publish --tag v0.2.2
-
-# 5. Commit + push the appcast update.
-git add appcast.xml
-git commit -m "release: appcast v0.2.2"
-git push
+# Commit the release's source changes and pass CI first.
+# Then build and publish the next patch version.
+./make-release.sh --publish --patch
 ```
+
+The script bumps the crate version and lockfile, builds with the
+selected macOS SDK, checks the executable's SDK metadata, assembles
+and signs the app, and creates ZIP and DMG downloads. It signs the
+ZIP for Sparkle, prepends the appcast entry, commits the release,
+creates an annotated tag, and pushes the commit and tag before
+creating the GitHub release. Do not create the tag yourself.
+
+Use `--tag v0.3.2` instead of `--patch` when the version has already
+been bumped and tested. Both paths require committed source changes.
+Use a Rust toolchain whose standard library supports macOS 13.
+
+The Homebrew tap's version and DMG checksum are updated after
+publication. Its submodule pointer gets a separate follow-up commit,
+so the release tag remains tied to the source used for the build.
 
 Existing v0.1.0+ installs see the update on their next daily
 background check (or instantly if the user picks "Check for
@@ -116,24 +105,11 @@ A missing version is a hard error.
 
 ## CI limitations
 
-`.github/workflows/release.yml` runs `make-release.sh --publish`
-on a fresh `macos-14` runner whenever a `v*` tag is pushed.
-It can:
+`.github/workflows/release.yml` is manual-only. Tag pushes do not
+publish releases. A fresh runner can build the app, but cannot
+complete publication because it has no private signing key.
 
-- Build the bundle + zip + upload the asset to the release.
-- Bake the right `CFBundleShortVersionString` (it picks up
-  `$GITHUB_REF_NAME`).
-
-It can *not*:
-
-- Sign the zip (no private key in the runner's Keychain →
-  `sign_update` fails).
-- Update or commit `appcast.xml`.
-
-So the CI workflow gets the binary to users who download
-manually, but auto-update is driven by the local `--publish`
-run. If you want to automate the appcast update on CI, the
-two pieces needed are:
+To automate publication on CI, the two pieces needed are:
 
 1. Store the Ed25519 private key as a repo secret
    (`SPARKLE_ED_PRIVATE_KEY`) and import it into the runner's
@@ -145,22 +121,11 @@ two pieces needed are:
 Neither is implemented today — the security trade-off of
 giving CI the signing key is a maintainer decision.
 
-## Backfilling appcast entries for already-shipped releases
+## Published releases are immutable
 
-If a release exists on GitHub but isn't in `appcast.xml` yet,
-`make-release.sh --publish` is idempotent — it picks up the
-existing release via `gh release view`, signs the zip you
-build locally, and appends the appcast entry. The asset
-gets `--clobber`'d so the on-GitHub artifact is replaced
-with the one you just built (which is fine — the version
-inside matches the tag).
-
-**Caveat:** if the existing release's zip contains a bundle
-with a wrong `CFBundleShortVersionString` (e.g. one of the
-v0.2.0 / v0.2.1 releases shipped before this fix landed),
-you can't just sign that zip — the bundle inside would
-report the wrong version after install. Bump the crate
-version and cut a new tag instead.
+Each publication needs a new version and tag. Do not rerun the
+publish command for an existing release or replace its downloads.
+For a broken release, fix the source and publish a new patch version.
 
 ## Failure modes worth knowing
 

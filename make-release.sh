@@ -266,13 +266,29 @@ cp "$CANONICAL_HEADER" "$SHIM_DIR/apfs_fastindex.h"
 # Step 3 — Swift executable.
 # ---------------------------------------------------------------
 echo "==> [3/4] swift build -c $PROFILE"
-(cd "$REPO_ROOT/app" && swift build -c "$PROFILE" --product ApfsFastindex)
+APFS_SDK_PATH="$(xcrun --sdk macosx --show-sdk-path)"
+APFS_SDK_VERSION="$(xcrun --sdk macosx --show-sdk-version)"
+# SDK 27's default Swift Build engine records the deployment target as the
+# build SDK, which changes AppKit/SwiftUI compatibility styling. The native
+# engine links against the selected SDK correctly. Keep the minimum OS separate.
+SWIFT_BUILD_FLAGS=(-c "$PROFILE" --build-system native --sdk "$APFS_SDK_PATH")
+(cd "$REPO_ROOT/app" && swift build "${SWIFT_BUILD_FLAGS[@]}" --product ApfsFastindex)
 
 # SwiftPM's output location depends on the selected build system.
-SWIFT_BUILD_DIR="$(cd "$REPO_ROOT/app" && swift build -c "$PROFILE" --show-bin-path)"
+SWIFT_BUILD_DIR="$(cd "$REPO_ROOT/app" && swift build "${SWIFT_BUILD_FLAGS[@]}" --show-bin-path)"
 BIN="$SWIFT_BUILD_DIR/ApfsFastindex"
 if [ ! -x "$BIN" ]; then
     echo "make-release.sh: swift build did not produce $BIN" >&2
+    exit 1
+fi
+
+# Fail before packaging if a toolchain regression changes the SDK metadata.
+if ! xcrun vtool -show-build "$BIN" | awk -v expected="$APFS_SDK_VERSION" '
+    function version(v) { sub(/(\.0)+$/, "", v); return v }
+    $1 == "sdk" { found = 1; if (version($2) != version(expected)) bad = 1 }
+    END { exit (!found || bad) }
+'; then
+    echo "make-release.sh: executable does not report the selected macOS SDK $APFS_SDK_VERSION." >&2
     exit 1
 fi
 

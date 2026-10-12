@@ -81,6 +81,7 @@ scan.json
 # build output — the script regenerates the binary, the
 # Info.plist, and the SwiftPM resource bundle on every run.
 app/ApfsFastindex.app/
+app/ApfsFastindex-v*-macos-*.zip
 
 # Native bridge: artifacts copied by `make-release.sh` from
 # `target/release/` into the SwiftPM systemLibrary shim. Always
