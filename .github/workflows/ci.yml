@@ -117,6 +117,8 @@ jobs:
         run: swift run --package-path app apfs-ffi-tests
       - name: Run browser interaction tests
         run: swift run --package-path app apfs-browser-tests
+      - name: Run native file-action menu tests
+        run: bash app/Tests/test-file-actions.sh
       - name: Run update feed tests
         run: swift run --package-path app apfs-update-tests
 

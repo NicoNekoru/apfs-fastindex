@@ -8,7 +8,8 @@ final class FileActions: NSObject, ObservableObject {
         let scan: Scan
         let relative: String
         let path: String
-        let canTrash: Bool
+        let trashDisabledReason: String?
+        var canTrash: Bool { trashDisabledReason == nil }
         var url: URL { URL(fileURLWithPath: path) }
     }
 
@@ -28,7 +29,28 @@ final class FileActions: NSObject, ObservableObject {
         else { return nil }
         return Target(
             scan: scan, relative: relative, path: path,
-            canTrash: node != 0 && !relative.isEmpty && !scan.isSnapshotPath)
+            trashDisabledReason: trashDisabledReason(
+                path: path, isScanRoot: node == 0 || relative.isEmpty))
+    }
+
+    private func trashDisabledReason(path: String, isScanRoot: Bool) -> String? {
+        if isScanRoot { return "The scan root cannot be moved to the Trash." }
+        // Removing an entry modifies its containing directory. Inspect that
+        // filesystem, not the scan root or a symlink's destination. A scan
+        // of / includes writable Data entries beneath the System snapshot.
+        let parent = URL(fileURLWithPath: path).deletingLastPathComponent().path
+        if SnapshotDetect.isOnSnapshot(parent) {
+            return "Items on a snapshot filesystem cannot be moved to the Trash."
+        }
+        let type = try? FileManager.default.attributesOfItem(atPath: path)[.type] as? FileAttributeType
+        if type == .typeDirectory,
+            (try? URL(fileURLWithPath: path).resourceValues(forKeys: [.isVolumeKey]).isVolume) == true {
+            return "A mounted volume cannot be moved to the Trash."
+        }
+        guard FileManager.default.isWritableFile(atPath: parent) else {
+            return "The enclosing folder is read-only or cannot be modified by this app."
+        }
+        return nil
     }
 
     func reveal(_ target: Target) {
@@ -42,7 +64,7 @@ final class FileActions: NSObject, ObservableObject {
     }
 
     func moveToTrash(_ target: Target) {
-        guard target.canTrash, itemExists(target) else { return }
+        guard canTrashNow(target) else { return }
         let alert = NSAlert()
         alert.messageText = "Move to Trash?"
         alert.informativeText =
@@ -53,7 +75,7 @@ final class FileActions: NSObject, ObservableObject {
         alert.addButton(withTitle: "Move to Trash")
         let completion: (NSApplication.ModalResponse) -> Void = { [weak self] response in
             guard response == .alertSecondButtonReturn else { return }
-            guard self?.itemExists(target) == true else { return }
+            guard self?.canTrashNow(target) == true else { return }
             NSWorkspace.shared.recycle([target.url]) { _, error in
                 DispatchQueue.main.async {
                     if let error {
@@ -69,6 +91,15 @@ final class FileActions: NSObject, ObservableObject {
         } else {
             completion(alert.runModal())
         }
+    }
+
+    private func canTrashNow(_ target: Target) -> Bool {
+        guard target.canTrash, itemExists(target) else { return false }
+        if let reason = trashDisabledReason(path: target.path, isScanRoot: target.relative.isEmpty) {
+            showError(reason)
+            return false
+        }
+        return true
     }
 
     private func itemExists(_ target: Target) -> Bool {
@@ -96,17 +127,18 @@ final class FileActions: NSObject, ObservableObject {
     func menu(for target: Target) -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
-        func add(_ title: String, _ action: Selector, enabled: Bool = true) {
+        func add(_ title: String, _ action: Selector, disabledReason: String? = nil) {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
             item.target = self
             item.representedObject = target
-            item.isEnabled = enabled
+            item.isEnabled = disabledReason == nil
+            item.toolTip = disabledReason
             menu.addItem(item)
         }
         add("Reveal in Finder", #selector(revealItem(_:)))
         add("Copy Path", #selector(copyItem(_:)))
         menu.addItem(.separator())
-        add("Move to Trash…", #selector(trashItem(_:)), enabled: target.canTrash)
+        add("Move to Trash…", #selector(trashItem(_:)), disabledReason: target.trashDisabledReason)
         return menu
     }
 
@@ -132,5 +164,6 @@ struct FileActionMenu: View {
         Divider()
         Button("Move to Trash…", role: .destructive) { actions.moveToTrash(target) }
             .disabled(!target.canTrash)
+            .help(target.trashDisabledReason ?? "Move this item to the Trash in Finder.")
     }
 }

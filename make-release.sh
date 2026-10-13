@@ -272,11 +272,14 @@ APFS_SDK_VERSION="$(xcrun --sdk macosx --show-sdk-version)"
 # build SDK, which changes AppKit/SwiftUI compatibility styling. The native
 # engine links against the selected SDK correctly. Keep the minimum OS separate.
 SWIFT_BUILD_FLAGS=(-c "$PROFILE" --build-system native --sdk "$APFS_SDK_PATH")
-(cd "$REPO_ROOT/app" && swift build "${SWIFT_BUILD_FLAGS[@]}" --product ApfsFastindex)
-
 # SwiftPM's output location depends on the selected build system.
 SWIFT_BUILD_DIR="$(cd "$REPO_ROOT/app" && swift build "${SWIFT_BUILD_FLAGS[@]}" --show-bin-path)"
 BIN="$SWIFT_BUILD_DIR/ApfsFastindex"
+# SwiftPM does not track the staged system-library archive as a build input.
+# Force a relink so an incremental release cannot retain an older Rust build.
+rm -f "$BIN"
+(cd "$REPO_ROOT/app" && swift build "${SWIFT_BUILD_FLAGS[@]}" --product ApfsFastindex)
+
 if [ ! -x "$BIN" ]; then
     echo "make-release.sh: swift build did not produce $BIN" >&2
     exit 1

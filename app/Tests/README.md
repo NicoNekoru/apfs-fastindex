@@ -4,10 +4,20 @@ Use a temporary fixture with nested folders, an empty folder,
 mixed-case extensions, a symlink and more than 400 siblings.
 Do not test Trash on personal files.
 
+- Click near the edges of the folder disclosure's 28-point-wide rectangle,
+  outside the chevron glyph. The folder expands or collapses without
+  selecting it or changing the treemap focus. Leaves stay inert, and
+  clicking the adjacent name still selects normally. Rows retain their
+  compact spacing.
 - Right-click a folder, file, search result and treemap cell.
   Each offers Reveal in Finder, Copy Path and Move to Trash.
   The scan root has Trash disabled. Cancel a Trash confirmation
   and verify the file still exists.
+- A scan of `/` must allow Trash on writable Data files and folders,
+  even though the System scan root is a snapshot. Snapshot entries and
+  non-writable parent folders stay disabled. Links to System files and
+  dangling links in a writable folder act on the link itself.
+  Disabled Trash items explain the reason in their tooltip.
 - Click an extension. The tree lists exact category matches in
   the current subtree, the selected category is marked, and other
   treemap leaves dim. A `.jpg.backup` file must not match `.jpg`.
@@ -57,4 +67,9 @@ silently reaching a release.
 
 ```sh
 ./make-release.sh
+bash app/Tests/test-file-actions.sh
 ```
+
+The file-action tests compile the real bridge and menu sources against
+the staged Rust library. They check menu eligibility without performing
+Trash operations or requiring a full-drive scan.

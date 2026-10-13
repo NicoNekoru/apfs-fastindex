@@ -56,6 +56,8 @@ struct BrowserSearchField: View {
 
 @MainActor
 struct FolderTreePanel: View {
+    private static let disclosureWidth: CGFloat = 28
+
     let scan: Scan?
     @ObservedObject var browser: BrowserModel
     let actions: FileActions
@@ -111,7 +113,7 @@ struct FolderTreePanel: View {
                 .buttonStyle(.plain)
                 .font(AppFont.ui(11))
                 .foregroundStyle(VizPalette.accent)
-                .padding(.leading, CGFloat(row.depth * 14 + 22))
+                .padding(.leading, CGFloat(row.depth * 14) + Self.disclosureWidth + 14)
                 .padding(.vertical, 5)
         } else {
             HStack(spacing: 4) {
@@ -121,11 +123,13 @@ struct FolderTreePanel: View {
                 } label: {
                     Image(systemName: row.expanded ? "chevron.down" : "chevron.right")
                         .font(AppFont.ui(9))
-                        .frame(width: 14, height: 18)
+                        .frame(width: Self.disclosureWidth, height: 20)
                         .foregroundStyle(row.hasChildren ? VizPalette.muted : .clear)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .disabled(!row.hasChildren)
+                .help(row.expanded ? "Collapse folder" : "Expand folder")
                 .accessibilityLabel(row.expanded ? "Collapse folder" : "Expand folder")
                 .accessibilityHidden(!row.hasChildren)
                 Button {

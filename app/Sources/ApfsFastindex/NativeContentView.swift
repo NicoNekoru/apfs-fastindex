@@ -341,18 +341,12 @@ struct NativeContentView: View {
                         .help("Scan ran with administrator privileges; "
                           + "TCC-restricted user-data paths are included.")
                 }
-                // Snapshot-path chip (EX-29 follow-up, implicit
-                // opt-in case): user pointed the scanner at a
-                // path on a snapshot filesystem
-                // (statfs.f_flags & MNT_SNAPSHOT). The data is
-                // frozen at the snapshot's transaction — surface
-                // it so they aren't confused when totals don't
-                // match the live volume.
+                // This describes the scan root. Firmlinks and mounts can
+                // expose live Data entries beneath a System snapshot root.
                 if scan.isSnapshotPath {
-                    statusPill("Snapshot", tint: VizPalette.accent)
-                        .help("Scan target is on a snapshot filesystem. "
-                              + "Totals are frozen at the snapshot's "
-                              + "transaction; they don't reflect live volume state.")
+                    statusPill("Snapshot root", tint: VizPalette.accent)
+                        .help("The scan root is on a snapshot filesystem. "
+                              + "Firmlinked or mounted volumes can contain live data.")
                 }
                 Text(totalsText(for: scan))
                     .font(AppFont.ui(12)).monospacedDigit()
