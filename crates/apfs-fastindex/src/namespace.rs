@@ -36,6 +36,7 @@
 //!       (decmpfs.stream_dstream) and resource-fork-stored
 //!       (ResourceFork.stream_dstream).
 //!     - symlink -> `Some(0)`; directory -> `Some(0)`; else -> `None`.
+//!
 //!   The directory aggregate's `unique_inode_allocated_total`
 //!   collapses to `None` if any contributing inode has
 //!   `allocated_size == None`.
@@ -80,7 +81,11 @@ pub(crate) fn build_namespace(
     dump: &FsRecordDump,
     extent_ref_dump: Option<&ExtentRefDump>,
     block_size: u32,
-) -> (Vec<NamespaceEntry>, Vec<DirectoryAggregate>, Vec<crate::WalkSkip>) {
+) -> (
+    Vec<NamespaceEntry>,
+    Vec<DirectoryAggregate>,
+    Vec<crate::WalkSkip>,
+) {
     let phys_exts = extent_ref_dump.map(|d| d.records.as_slice()).unwrap_or(&[]);
     let index = NamespaceIndex::from_records(&dump.records, phys_exts, block_size);
     let mut entries: Vec<NamespaceEntry> = Vec::new();
@@ -434,8 +439,11 @@ fn compute_dstream_real_totals(
             if fe.length_bytes == 0 || fe.phys_block_num == 0 {
                 continue;
             }
-            dedup_total =
-                dedup_total.saturating_add(file_extent_dedup_bytes(fe, &sorted_phys, block_size_u64));
+            dedup_total = dedup_total.saturating_add(file_extent_dedup_bytes(
+                fe,
+                &sorted_phys,
+                block_size_u64,
+            ));
         }
         totals.insert(*dstream_id, dedup_total);
     }
@@ -462,8 +470,8 @@ fn file_extent_dedup_bytes(
 
     // Binary-search the first phys_ext whose extent_end > fe_paddr_start.
     // sorted_phys is sorted by paddr_first ascending.
-    let start_index = sorted_phys
-        .partition_point(|p| p.paddr_first + p.length_blocks <= fe_paddr_start);
+    let start_index =
+        sorted_phys.partition_point(|p| p.paddr_first + p.length_blocks <= fe_paddr_start);
 
     let mut cursor = fe_paddr_start;
     let mut total = 0u64;
@@ -522,11 +530,7 @@ fn compute_allocated_size(
                 // can be the carrier; an embedded (non-stream) xattr
                 // contributes 0 because the compressed bytes live inline
                 // in the xattr payload.
-                let primary = inode
-                    .dstream
-                    .as_ref()
-                    .map(|d| d.alloced_size)
-                    .unwrap_or(0);
+                let primary = inode.dstream.as_ref().map(|d| d.alloced_size).unwrap_or(0);
                 let xattr_share = |name: &str| -> u64 {
                     xattrs
                         .and_then(|m| m.get(name))
@@ -536,7 +540,11 @@ fn compute_allocated_size(
                 };
                 let decmpfs_share = xattr_share(XATTR_DECMPFS_NAME);
                 let rfork_share = xattr_share(XATTR_RFORK_NAME);
-                return Some(primary + decmpfs_share + rfork_share);
+                return Some(
+                    primary
+                        .saturating_add(decmpfs_share)
+                        .saturating_add(rfork_share),
+                );
             }
             if let Some(sparse_bytes) = inode.sparse_bytes {
                 // EX-26 Hypothesis A: sparse allocated = `alloced_size -
@@ -625,7 +633,7 @@ fn build_aggregates(entries: &[NamespaceEntry]) -> Vec<DirectoryAggregate> {
         if !matches!(entry.entry_kind, EntryKind::File) {
             continue;
         }
-        let mut current: &str = &*entry.path;
+        let mut current: &str = &entry.path;
         loop {
             match current.rfind('/') {
                 Some(idx) => {
@@ -664,14 +672,18 @@ fn build_aggregates(entries: &[NamespaceEntry]) -> Vec<DirectoryAggregate> {
         let file_sizes = contributors
             .remove(path)
             .expect("path was just keys()d from the map");
-        let unique_inode_logical_total: u64 =
-            file_sizes.values().map(|(logical, _, _)| *logical).sum();
+        let unique_inode_logical_total: u64 = file_sizes
+            .values()
+            .fold(0u64, |acc, (logical, _, _)| acc.saturating_add(*logical));
         let unique_inode_allocated_total: Option<u64> = file_sizes
             .values()
-            .try_fold(0u64, |acc, (_, allocated, _)| allocated.map(|a| acc + a));
-        let unique_inode_real_total: Option<u64> = file_sizes
-            .values()
-            .try_fold(0u64, |acc, (_, _, real)| real.map(|r| acc + r));
+            .try_fold(0u64, |acc, (_, allocated, _)| {
+                allocated.map(|a| acc.saturating_add(a))
+            });
+        let unique_inode_real_total: Option<u64> =
+            file_sizes.values().try_fold(0u64, |acc, (_, _, real)| {
+                real.map(|r| acc.saturating_add(r))
+            });
         let mut contributing_file_ids: Vec<u64> = file_sizes.keys().copied().collect();
         contributing_file_ids.sort_unstable();
         out.push(DirectoryAggregate {
@@ -881,6 +893,22 @@ mod tests {
         assert_eq!(picked, Some(12_288));
     }
 
+    #[test]
+    fn ex26_decmpfs_stream_sum_saturates_instead_of_wrapping() {
+        for (primary, decmpfs_size, rfork_size) in
+            [(u64::MAX, 1, 0), (0, u64::MAX, 1), (u64::MAX - 1, 1, 1)]
+        {
+            let inode = make_inode(Some(make_dstream(primary)), None);
+            let decmpfs = make_xattr_stream(decmpfs_size);
+            let rfork = make_xattr_stream(rfork_size);
+            let map = BTreeMap::from([(XATTR_DECMPFS_NAME, &decmpfs), (XATTR_RFORK_NAME, &rfork)]);
+            assert_eq!(
+                compute_allocated_size(DT_REG, Some(&inode), Some(&map)),
+                Some(u64::MAX)
+            );
+        }
+    }
+
     /// EX-26 Hypothesis F with both xattrs embedded: compressed
     /// bytes live entirely inline; the file has no extents. Picks 0.
     #[test]
@@ -897,14 +925,8 @@ mod tests {
     #[test]
     fn ex26_symlink_and_dir_emit_zero() {
         let inode = make_inode(None, None);
-        assert_eq!(
-            compute_allocated_size(DT_LNK, Some(&inode), None),
-            Some(0)
-        );
-        assert_eq!(
-            compute_allocated_size(DT_DIR, Some(&inode), None),
-            Some(0)
-        );
+        assert_eq!(compute_allocated_size(DT_LNK, Some(&inode), None), Some(0));
+        assert_eq!(compute_allocated_size(DT_DIR, Some(&inode), None), Some(0));
     }
 
     /// A regular file with no inode record at all (parse anomaly):
@@ -990,6 +1012,7 @@ mod tests {
     ///   - paddr 1176, length 96 blocks (384 KiB), refcnt 2 — shared with clone
     ///   - paddr 1272, length 64 blocks (256 KiB), refcnt 1 — src-exclusive
     ///   - paddr 1336, length 96 blocks (384 KiB), refcnt 2 — shared with clone
+    ///
     /// dedup_bytes = 384 KiB/2 + 256 KiB + 384 KiB/2 = 192+256+192 = 640 KiB.
     #[test]
     fn ex27_family_c_partial_share_after_rewrite() {
@@ -1032,9 +1055,9 @@ mod tests {
         );
         let phys_exts = vec![
             make_phys_ext(1176, 96, 2),
-            make_phys_ext(1272, 64, 1),    // src-exclusive (not referenced by clone)
+            make_phys_ext(1272, 64, 1), // src-exclusive (not referenced by clone)
             make_phys_ext(1336, 96, 2),
-            make_phys_ext(2000, 64, 1),    // clone's new middle (refcnt 1)
+            make_phys_ext(2000, 64, 1), // clone's new middle (refcnt 1)
         ];
         let totals = compute_dstream_real_totals(&map, &phys_exts, 4096);
         // 384 KiB/2 + 256 KiB + 384 KiB/2 = 655_360
@@ -1178,6 +1201,71 @@ mod tests {
         assert_eq!(root.unique_inode_logical_total, 29);
         assert_eq!(root.unique_inode_allocated_total, Some(4096));
         assert_eq!(root.contributing_file_ids, vec![30]);
+    }
+
+    #[test]
+    fn aggregate_overflow_saturates_and_preserves_hardlinks_and_none_collapse() {
+        let make_entry =
+            |path: &str, kind: EntryKind, file_id, logical_size, allocated_size, real_size| {
+                NamespaceEntry {
+                    path: path.into(),
+                    entry_kind: kind,
+                    file_id,
+                    logical_size,
+                    allocated_size,
+                    real_size,
+                    symlink_target: None,
+                }
+            };
+        let mut entries = vec![
+            make_entry("a", EntryKind::Dir, 1, 0, Some(0), Some(0)),
+            make_entry("a/b", EntryKind::Dir, 2, 0, Some(0), Some(0)),
+            make_entry("empty", EntryKind::Dir, 3, 0, Some(0), Some(0)),
+            make_entry(
+                "a/b/large",
+                EntryKind::File,
+                10,
+                u64::MAX,
+                Some(u64::MAX),
+                Some(u64::MAX),
+            ),
+            make_entry("a/b/one", EntryKind::File, 11, 1, Some(1), Some(1)),
+            // Same inode, with different observations. Only the first
+            // occurrence contributes, including its concrete metrics.
+            make_entry("a/link", EntryKind::File, 10, 0, None, None),
+        ];
+        let aggregates = build_aggregates(&entries);
+        for path in [".", "a", "a/b"] {
+            let aggregate = aggregates.iter().find(|a| a.path == path).unwrap();
+            assert_eq!(aggregate.unique_inode_logical_total, u64::MAX);
+            assert_eq!(aggregate.unique_inode_allocated_total, Some(u64::MAX));
+            assert_eq!(aggregate.unique_inode_real_total, Some(u64::MAX));
+            assert_eq!(aggregate.contributing_file_ids, vec![10, 11]);
+        }
+        let empty = aggregates.iter().find(|a| a.path == "empty").unwrap();
+        assert_eq!(empty.unique_inode_logical_total, 0);
+        assert_eq!(empty.unique_inode_allocated_total, Some(0));
+        assert_eq!(empty.unique_inode_real_total, Some(0));
+        entries.push(make_entry(
+            "a/b/unknown",
+            EntryKind::File,
+            12,
+            0,
+            None,
+            Some(0),
+        ));
+        let aggregates = build_aggregates(&entries);
+        let root = aggregates.iter().find(|a| a.path == ".").unwrap();
+        assert_eq!(root.unique_inode_logical_total, u64::MAX);
+        assert_eq!(root.unique_inode_allocated_total, None);
+        assert_eq!(root.unique_inode_real_total, Some(u64::MAX));
+        entries.last_mut().unwrap().allocated_size = Some(0);
+        entries.last_mut().unwrap().real_size = None;
+        let aggregates = build_aggregates(&entries);
+        let root = aggregates.iter().find(|a| a.path == ".").unwrap();
+        assert_eq!(root.unique_inode_allocated_total, Some(u64::MAX));
+        assert_eq!(root.unique_inode_real_total, None);
+        assert_eq!(root.contributing_file_ids, vec![10, 11, 12]);
     }
 
     /// Build a stand-alone `NamespaceIndex` over a hand-rolled

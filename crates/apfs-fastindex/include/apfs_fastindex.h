@@ -264,6 +264,10 @@ const char *apfs_version(void);
  *   - `path` is not valid UTF-8
  *   - the scan returns an error (bad source, permission denial
  *     at root, etc.)
+ *
+ * # Safety
+ * `path` must be NULL or a valid, unmodified NUL-terminated C string for
+ * the duration of the call. Free a non-NULL result with `apfs_scan_free`.
  */
 struct ApfsScan *apfs_scan_directory(const char *path, uint32_t threads, bool cross_mounts);
 
@@ -274,6 +278,12 @@ struct ApfsScan *apfs_scan_directory(const char *path, uint32_t threads, bool cr
  * `terminal == true`. Passing NULL for `progress_fn` is
  * equivalent to calling `apfs_scan_directory` (no progress
  * events).
+ *
+ * # Safety
+ * `path` must be NULL or a valid, unmodified NUL-terminated C string until
+ * this call returns. A callback must not unwind and must be safe on any
+ * walker thread. Its `userdata` must remain valid and thread-safe as required
+ * by that callback until return. Free a non-NULL result with `apfs_scan_free`.
  */
 struct ApfsScan *apfs_scan_directory_with_progress(const char *path,
                                                    uint32_t threads,
@@ -291,6 +301,10 @@ struct ApfsScan *apfs_scan_directory_with_progress(const char *path,
  * `statfs(_:_:)` function unambiguously through the overlay
  * (name collision with `struct statfs`). Calling out to this
  * FFI is the workaround.
+ *
+ * # Safety
+ * `path` must be NULL or a valid, unmodified NUL-terminated C string for
+ * the duration of the call.
  */
 int32_t apfs_is_snapshot_path(const char *path);
 
@@ -308,26 +322,45 @@ int32_t apfs_is_snapshot_path(const char *path);
  * Returns `NULL` on:
  * - `path` is NULL or not valid UTF-8
  * - the file can't be opened or read
+ * - the opened object is not a regular file, or on macOS the
+ *   final path component is a symlink
  * - the msgpack blob fails to decode as `FallbackScanOutput`
+ * - decoded metadata for a C-string accessor contains a NUL byte
  *
  * On any of those, the caller can read `apfs_last_error` for a
  * human-readable diagnostic.
+ *
+ * # Safety
+ * `path` must be NULL or a valid, unmodified NUL-terminated C string for
+ * the duration of the call. Free a non-NULL result with `apfs_scan_free`.
  */
 struct ApfsScan *apfs_scan_from_msgpack_file(const char *path);
 
 /**
  * Drop a scan handle. Idempotent on NULL.
+ *
+ * # Safety
+ * `scan` must be NULL or an owning scan handle returned by this module,
+ * not previously freed. All calls and borrowed views using it must be done.
  */
 void apfs_scan_free(struct ApfsScan *scan);
 
 /**
  * Number of `NamespaceEntry` rows in the scan.
+ *
+ * # Safety
+ * `scan` must be NULL or a live scan handle from this module. It must not
+ * be mutated or freed during this call.
  */
 uint64_t apfs_scan_entry_count(const struct ApfsScan *scan);
 
 /**
  * Sum of `entry.logical_size` across the whole scan. Reads off
  * the tree root's pre-computed aggregate.
+ *
+ * # Safety
+ * `scan` must be NULL or a live scan handle from this module. It must not
+ * be mutated or freed during this call.
  */
 uint64_t apfs_scan_logical_total(const struct ApfsScan *scan);
 
@@ -336,6 +369,10 @@ uint64_t apfs_scan_logical_total(const struct ApfsScan *scan);
  * `APFS_ALLOCATED_TOTAL_UNCLAIMED` (`u64::MAX`) when *any* row
  * had `allocated_size = None` (SR-019 None-collapse). Reads off
  * the tree root's pre-computed aggregate.
+ *
+ * # Safety
+ * `scan` must be NULL or a live scan handle from this module. It must not
+ * be mutated or freed during this call.
  */
 uint64_t apfs_scan_allocated_total(const struct ApfsScan *scan);
 
@@ -344,6 +381,10 @@ uint64_t apfs_scan_allocated_total(const struct ApfsScan *scan);
  * bytes) across the whole scan, or `APFS_REAL_TOTAL_UNCLAIMED`
  * (`u64::MAX`) when *any* row had `real_size = None`. Reads off
  * the tree root's pre-computed aggregate.
+ *
+ * # Safety
+ * `scan` must be NULL or a live scan handle from this module. It must not
+ * be mutated or freed during this call.
  */
 uint64_t apfs_scan_real_total(const struct ApfsScan *scan);
 
@@ -353,6 +394,10 @@ uint64_t apfs_scan_real_total(const struct ApfsScan *scan);
  * chip off when this is false. Fallback mode populates this same
  * as `allocated_size` (no refcount info from POSIX), so on a
  * well-formed scan both are typically `true`.
+ *
+ * # Safety
+ * `scan` must be NULL or a live scan handle from this module. It must not
+ * be mutated or freed during this call.
  */
 bool apfs_scan_real_available(const struct ApfsScan *scan);
 
@@ -360,49 +405,21 @@ bool apfs_scan_real_available(const struct ApfsScan *scan);
  * Total number of nodes in the tree (root + every directory +
  * every leaf). Differs from `apfs_scan_entry_count` because the
  * tree also has synthesized intermediate directories.
+ *
+ * # Safety
+ * `scan` must be NULL or a live scan handle from this module. It must not
+ * be mutated or freed during this call.
  */
 uint32_t apfs_scan_node_count(const struct ApfsScan *scan);
 
 /**
- * Case-insensitive substring search across every node's
- * display name. Returns a handle wrapping the **full
- * keep-set**: every matching node index plus every ancestor
- * of every match, plus the root. This is the set the UI
- * renders as the visible tree under an active search;
- * pushing the ancestor-walk into Rust avoids a per-ancestor
- * FFI call from Swift (which on a pathological match-everything
- * query would have been millions of FFI hits).
+ * Canonical caseless substring search across every node's display name.
+ * Returns matching node indices, their ancestors, and the root, so callers
+ * can render a connected tree. Display names and paths remain unchanged.
  *
- * Architecture (EX-33 follow-up):
- *
- * 1. The tree carries a **flat lowercased-name buffer**
- *    (`tree.names_lower_buf: Vec<u8>` + offsets), built once
- *    at scan time. Scanning every name reads sequentially
- *    from one contiguous allocation; the CPU prefetcher
- *    streams through it. (The prior `Vec<String>` shape
- *    forced a heap-pointer chase per name, defeating
- *    prefetch — ~10× slower on 1.5 M-node trees.)
- *
- * 2. The query is lowercased once and wrapped in a
- *    `memchr::memmem::Finder`. The Finder amortises
- *    needle-preprocessing across every haystack call;
- *    `str::contains` builds the searcher state per call,
- *    which is wasted work when we have 1.5 M haystacks
- *    to scan with the same needle.
- *
- * 3. For each name whose bytes contain the lowercased
- *    needle, walk the parent chain (`tree.nodes[i].parent:
- *    Option<u32>`) and insert every ancestor into an
- *    `FxHashSet`. Early-out: when `insert` returns false
- *    (node already in), the rest of that chain is too —
- *    total ancestor work is O(unique kept nodes), not
- *    O(matches × depth).
- *
- * EX-33 numbers on a 1.56 M-entry `/Users/kai` scan: search
- * latency dropped from 30-55 ms (median) under the
- * Vec<String> + str::contains shape to ~3-6 ms. That's
- * approaching the memory-bandwidth floor (~50 MB of name
- * bytes / ~20 GB/s ≈ 2.5 ms).
+ * Names use a contiguous search-key buffer built once per scan. The query
+ * uses the same folding and one reusable substring finder. Ancestor walks
+ * stop at an already-kept node, bounding that work by the unique keep-set.
  *
  * Returns `NULL` on:
  * - `scan` or `query` NULL
@@ -413,11 +430,21 @@ uint32_t apfs_scan_node_count(const struct ApfsScan *scan);
  *
  * The result handle owns its indices buffer; Swift must call
  * `apfs_search_results_free` when done.
+ *
+ * # Safety
+ * `scan` must be NULL or a live scan handle from this module, not mutated
+ * or freed during the call. `query` must be NULL or a valid, unmodified
+ * NUL-terminated C string during the call. Free a non-NULL result with
+ * `apfs_search_results_free`. The result does not borrow from `scan`.
  */
 struct ApfsSearchResults *apfs_scan_search_names(const struct ApfsScan *scan, const char *query);
 
 /**
  * Number of matching node indices in `results`. `0` on NULL.
+ *
+ * # Safety
+ * `results` must be NULL or a live search-results handle from this module.
+ * It must not be mutated or freed during this call.
  */
 uintptr_t apfs_search_results_count(const struct ApfsSearchResults *results);
 
@@ -425,17 +452,29 @@ uintptr_t apfs_search_results_count(const struct ApfsSearchResults *results);
  * Pointer to the matching-node-indices buffer. Length given
  * by `apfs_search_results_count`. Buffer is valid until
  * `apfs_search_results_free` is called.
+ *
+ * # Safety
+ * `results` must be NULL or a live search-results handle from this module.
+ * Keep it alive and unmodified while using the returned borrowed buffer.
  */
 const uint32_t *apfs_search_results_indices(const struct ApfsSearchResults *results);
 
 /**
  * Drop the search-results handle. Idempotent on NULL.
+ *
+ * # Safety
+ * `results` must be NULL or an owning handle from `apfs_scan_search_names`,
+ * not previously freed. All calls and borrowed views using it must be done.
  */
 void apfs_search_results_free(struct ApfsSearchResults *results);
 
 /**
  * Number of nodes whose name matched the query (i.e. the
  * "real" matches, not the inflated keep-set). `0` on NULL.
+ *
+ * # Safety
+ * `results` must be NULL or a live search-results handle from this module.
+ * It must not be mutated or freed during this call.
  */
 uintptr_t apfs_search_results_match_count(const struct ApfsSearchResults *results);
 
@@ -443,6 +482,10 @@ uintptr_t apfs_search_results_match_count(const struct ApfsSearchResults *result
  * Pointer to the matches buffer (`u32` per entry, length
  * from `apfs_search_results_match_count`). Sorted in tree
  * (node-index) order. Valid until `apfs_search_results_free`.
+ *
+ * # Safety
+ * `results` must be NULL or a live search-results handle from this module.
+ * Keep it alive and unmodified while using the returned borrowed buffer.
  */
 const uint32_t *apfs_search_results_match_indices(const struct ApfsSearchResults *results);
 
@@ -450,6 +493,11 @@ const uint32_t *apfs_search_results_match_indices(const struct ApfsSearchResults
  * Look up a node by its absolute logical path. The empty string
  * (and `"/"`) maps to the synthesised root (index 0). Returns
  * `APFS_NODE_INVALID` if no such node exists.
+ *
+ * # Safety
+ * `scan` must be NULL or a live scan handle from this module, not mutated
+ * or freed during the call. `path` must be NULL or a valid, unmodified
+ * NUL-terminated C string for the duration of the call.
  */
 uint32_t apfs_scan_node_index_for_path(const struct ApfsScan *scan, const char *path);
 
@@ -457,12 +505,20 @@ uint32_t apfs_scan_node_index_for_path(const struct ApfsScan *scan, const char *
  * Number of immediate children of the given node.
  * `apfs_scan_node_child_count(s, root) == top-level dir/file
  * count`. Returns 0 for invalid indices.
+ *
+ * # Safety
+ * `scan` must be NULL or a live scan handle from this module. It must not
+ * be mutated or freed during this call.
  */
 uint32_t apfs_scan_node_child_count(const struct ApfsScan *scan, uint32_t idx);
 
 /**
  * Per-node aggregate read by Swift's status bar. Pre-computed
  * post-order at `Tree::build` time; constant-time lookup.
+ *
+ * # Safety
+ * `scan` must be NULL or a live scan handle from this module. It must not
+ * be mutated or freed during this call.
  */
 uint64_t apfs_scan_node_value_logical(const struct ApfsScan *scan, uint32_t idx);
 
@@ -470,12 +526,20 @@ uint64_t apfs_scan_node_value_logical(const struct ApfsScan *scan, uint32_t idx)
  * `value_allocated` for the node, or
  * `APFS_ALLOCATED_TOTAL_UNCLAIMED` (`u64::MAX`) when SR-019
  * None-collapse fired anywhere in this subtree.
+ *
+ * # Safety
+ * `scan` must be NULL or a live scan handle from this module. It must not
+ * be mutated or freed during this call.
  */
 uint64_t apfs_scan_node_value_allocated(const struct ApfsScan *scan, uint32_t idx);
 
 /**
  * Item count for the node — number of non-directory descendants.
  * `apfs_scan_node_item_count(s, root) == files+symlinks total`.
+ *
+ * # Safety
+ * `scan` must be NULL or a live scan handle from this module. It must not
+ * be mutated or freed during this call.
  */
 uint64_t apfs_scan_node_item_count(const struct ApfsScan *scan, uint32_t idx);
 
@@ -488,12 +552,20 @@ uint64_t apfs_scan_node_item_count(const struct ApfsScan *scan, uint32_t idx);
  * via parent-walk and cache the materialised `Box<str>` in
  * `ApfsScan.path_cache`. Pointer lifetime matches the scan
  * handle: the cache owns the bytes until `apfs_scan_free`.
+ *
+ * # Safety
+ * `scan` must be NULL or a live scan handle from this module. Keep it alive
+ * and unmodified while using the returned borrowed bytes.
  */
 struct ApfsPathRef apfs_scan_node_path(const struct ApfsScan *scan, uint32_t idx);
 
 /**
  * Borrow the node's last path component (display name). Like
  * `apfs_scan_node_path` but returns just the leaf basename.
+ *
+ * # Safety
+ * `scan` must be NULL or a live scan handle from this module. Keep it alive
+ * and unmodified while using the returned borrowed bytes.
  */
 struct ApfsPathRef apfs_scan_node_name(const struct ApfsScan *scan, uint32_t idx);
 
@@ -501,6 +573,10 @@ struct ApfsPathRef apfs_scan_node_name(const struct ApfsScan *scan, uint32_t idx
  * Parent index for `idx`, or `APFS_NODE_INVALID` for the root
  * (no parent) or an invalid `idx`. Used by Swift's breadcrumb
  * construction (walk parent chain from `currentNode` to root).
+ *
+ * # Safety
+ * `scan` must be NULL or a live scan handle from this module. It must not
+ * be mutated or freed during this call.
  */
 uint32_t apfs_scan_node_parent(const struct ApfsScan *scan, uint32_t idx);
 
@@ -508,12 +584,20 @@ uint32_t apfs_scan_node_parent(const struct ApfsScan *scan, uint32_t idx);
  * Returns the node's `EntryKind` as a u32 discriminant:
  *   0 = dir, 1 = file, 2 = symlink, 3 = other, 0xff = invalid
  * Swift maps back to a `Scan.NodeKind` enum.
+ *
+ * # Safety
+ * `scan` must be NULL or a live scan handle from this module. It must not
+ * be mutated or freed during this call.
  */
 uint32_t apfs_scan_node_kind(const struct ApfsScan *scan, uint32_t idx);
 
 /**
  * Borrow the slice of immediate-child node indices for `idx`.
  * Returns an empty slice for invalid indices or leaves.
+ *
+ * # Safety
+ * `scan` must be NULL or a live scan handle from this module. Keep it alive
+ * and unmodified while using the returned borrowed buffer.
  */
 struct ApfsU32Slice apfs_scan_node_children(const struct ApfsScan *scan, uint32_t idx);
 
@@ -530,6 +614,11 @@ struct ApfsU32Slice apfs_scan_node_children(const struct ApfsScan *scan, uint32_
  * The returned handle owns both the cell array and the
  * `HitGrid` for hit-testing. Always pair with
  * `apfs_layout_free`.
+ *
+ * # Safety
+ * `scan` must be NULL or a live scan handle from this module, not mutated
+ * or freed during the call. Free a non-NULL result with `apfs_layout_free`.
+ * The result does not borrow from `scan`.
  */
 struct ApfsLayout *apfs_layout_new(const struct ApfsScan *scan,
                                    uint32_t node_idx,
@@ -541,6 +630,10 @@ struct ApfsLayout *apfs_layout_new(const struct ApfsScan *scan,
 /**
  * Reclaim a layout previously returned by `apfs_layout_new`.
  * Idempotent on NULL.
+ *
+ * # Safety
+ * `layout` must be NULL or an owning handle from `apfs_layout_new`, not
+ * previously freed. All calls and borrowed views using it must be done.
  */
 void apfs_layout_free(struct ApfsLayout *layout);
 
@@ -548,12 +641,20 @@ void apfs_layout_free(struct ApfsLayout *layout);
  * Borrow the laid-out cells. Pointer lifetime is tied to the
  * enclosing `ApfsLayout`; Swift must not retain the slice past
  * the layout handle's lifetime.
+ *
+ * # Safety
+ * `layout` must be NULL or a live layout handle from this module. Keep it
+ * alive and unmodified while using the returned borrowed buffer.
  */
 struct ApfsCellSlice apfs_layout_cells(const struct ApfsLayout *layout);
 
 /**
  * Number of cells in the layout. Convenience accessor — the
  * same value is on `ApfsCellSlice.count`.
+ *
+ * # Safety
+ * `layout` must be NULL or a live layout handle from this module. It must
+ * not be mutated or freed during this call.
  */
 uint64_t apfs_layout_cell_count(const struct ApfsLayout *layout);
 
@@ -563,6 +664,10 @@ uint64_t apfs_layout_cell_count(const struct ApfsLayout *layout);
  * `(x, y)` is outside the laid-out rect. Sub-millisecond on a
  * /-class scan thanks to the 64×64 spatial hash; OK to call
  * every mousemove.
+ *
+ * # Safety
+ * `layout` must be NULL or a live layout handle from this module. It must
+ * not be mutated or freed during this call.
  */
 uint32_t apfs_layout_hit_test(const struct ApfsLayout *layout, float x, float y);
 
@@ -570,6 +675,11 @@ uint32_t apfs_layout_hit_test(const struct ApfsLayout *layout, float x, float y)
  * Construct the ext-list summary for the subtree rooted at
  * `node_idx`. `metric == 1` sorts by allocated; anything else
  * sorts by logical. Returns NULL on invalid scan / idx.
+ *
+ * # Safety
+ * `scan` must be NULL or a live scan handle from this module, not mutated
+ * or freed during the call. Free a non-NULL result with
+ * `apfs_scan_ext_summary_free`. The result does not borrow from `scan`.
  */
 struct ApfsExtSummaryHandle *apfs_scan_ext_summary_new(const struct ApfsScan *scan,
                                                        uint32_t node_idx,
@@ -577,15 +687,30 @@ struct ApfsExtSummaryHandle *apfs_scan_ext_summary_new(const struct ApfsScan *sc
 
 /**
  * Drop the summary handle. Idempotent on NULL.
+ *
+ * # Safety
+ * `handle` must be NULL or an owning handle from `apfs_scan_ext_summary_new`,
+ * not previously freed. All calls and borrowed views using it must be done.
  */
 void apfs_scan_ext_summary_free(struct ApfsExtSummaryHandle *handle);
 
+/**
+ * Number of extension-summary rows. Returns 0 on NULL.
+ *
+ * # Safety
+ * `handle` must be NULL or a live extension-summary handle from this module.
+ * It must not be mutated or freed during this call.
+ */
 uint32_t apfs_scan_ext_summary_count(const struct ApfsExtSummaryHandle *handle);
 
 /**
  * Sum of the active-metric values across all rows. Used by
  * Swift for the per-row percent column. Returns 0 on
  * invalid handle.
+ *
+ * # Safety
+ * `handle` must be NULL or a live extension-summary handle from this module.
+ * It must not be mutated or freed during this call.
  */
 uint64_t apfs_scan_ext_summary_total(const struct ApfsExtSummaryHandle *handle);
 
@@ -593,18 +718,30 @@ uint64_t apfs_scan_ext_summary_total(const struct ApfsExtSummaryHandle *handle);
  * True iff at least one contributing file's `allocated_size`
  * was None (SR-019 None-collapse). The Swift panel uses this
  * to caption the header subtitle.
+ *
+ * # Safety
+ * `handle` must be NULL or a live extension-summary handle from this module.
+ * It must not be mutated or freed during this call.
  */
 bool apfs_scan_ext_summary_any_unclaimed(const struct ApfsExtSummaryHandle *handle);
 
 /**
  * Fetch row `n`. Returns a zero-filled row if `n` is out of
  * range or the handle is NULL.
+ *
+ * # Safety
+ * `handle` must be NULL or a live extension-summary handle from this module.
+ * Keep it alive and unmodified while using the returned borrowed bytes.
  */
 struct ApfsExtRow apfs_scan_ext_summary_row(const struct ApfsExtSummaryHandle *handle, uint32_t n);
 
 /**
  * `true` iff at least one entry has `allocated_size = Some(_)`.
  * The Swift UI uses this to gate the "Allocated" metric chip.
+ *
+ * # Safety
+ * `scan` must be NULL or a live scan handle from this module. It must not
+ * be mutated or freed during this call.
  */
 bool apfs_scan_allocated_available(const struct ApfsScan *scan);
 
@@ -612,30 +749,50 @@ bool apfs_scan_allocated_available(const struct ApfsScan *scan);
  * `correctness_claim` (UTF-8, NUL-terminated). The returned
  * pointer is owned by `scan` and is valid until
  * `apfs_scan_free(scan)`. Swift must not free it.
+ *
+ * # Safety
+ * `scan` must be NULL or a live scan handle from this module. Keep it alive
+ * and unmodified while using the returned borrowed string.
  */
 const char *apfs_scan_correctness_claim(const struct ApfsScan *scan);
 
 /**
  * `SourceDescriptor.source_kind` (e.g. `"mounted_directory"`,
  * `"dmg_image"`). UTF-8, NUL-terminated; owned by `scan`.
+ *
+ * # Safety
+ * `scan` must be NULL or a live scan handle from this module. Keep it alive
+ * and unmodified while using the returned borrowed string.
  */
 const char *apfs_scan_source_kind(const struct ApfsScan *scan);
 
 /**
  * `SourceDescriptor.requested_path`, the absolute path the user
  * asked us to scan. UTF-8, NUL-terminated; owned by `scan`.
+ *
+ * # Safety
+ * `scan` must be NULL or a live scan handle from this module. Keep it alive
+ * and unmodified while using the returned borrowed string.
  */
 const char *apfs_scan_source_requested_path(const struct ApfsScan *scan);
 
 /**
  * Number of `walk_skip` rows recorded during the scan. 0 when
  * the scan completed cleanly.
+ *
+ * # Safety
+ * `scan` must be NULL or a live scan handle from this module. It must not
+ * be mutated or freed during this call.
  */
 uint32_t apfs_scan_walk_skip_count(const struct ApfsScan *scan);
 
 /**
  * Fetch walk-skip row `n`. Returns an all-NULL row for out-of-
  * range indices or a NULL handle.
+ *
+ * # Safety
+ * `scan` must be NULL or a live scan handle from this module. Keep it alive
+ * and unmodified while using the returned borrowed bytes.
  */
 struct ApfsWalkSkipRow apfs_scan_walk_skip_row(const struct ApfsScan *scan, uint32_t n);
 

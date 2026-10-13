@@ -17,9 +17,7 @@ fn cstr_to_string(p: *const c_char) -> Option<String> {
     if p.is_null() {
         return None;
     }
-    let s = unsafe { CStr::from_ptr(p) }
-        .to_string_lossy()
-        .into_owned();
+    let s = unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned();
     if s.is_empty() {
         None
     } else {
@@ -52,17 +50,14 @@ fn null_path_populates_last_error() {
     // free.)
     let _ = cstr_to_string(apfs_last_error());
 
-    let scan = apfs_scan_directory_with_progress(
-        std::ptr::null(),
-        0,
-        false,
-        None,
-        std::ptr::null_mut(),
-    );
+    // SAFETY: NULL is supported, and no callback or userdata is used.
+    let scan = unsafe {
+        apfs_scan_directory_with_progress(std::ptr::null(), 0, false, None, std::ptr::null_mut())
+    };
     assert!(scan.is_null(), "NULL path must fail-closed");
 
-    let err = cstr_to_string(apfs_last_error())
-        .expect("last_error should be set after NULL-path scan");
+    let err =
+        cstr_to_string(apfs_last_error()).expect("last_error should be set after NULL-path scan");
     assert!(
         err.contains("NULL") || err.contains("null"),
         "error message should mention the cause; got: {err}"
@@ -74,13 +69,10 @@ fn null_path_populates_last_error() {
 #[test]
 fn last_error_clears_after_read() {
     // Trigger an error to populate the slot.
-    let _ = apfs_scan_directory_with_progress(
-        std::ptr::null(),
-        0,
-        false,
-        None,
-        std::ptr::null_mut(),
-    );
+    // SAFETY: NULL is supported, and no callback or userdata is used.
+    let _ = unsafe {
+        apfs_scan_directory_with_progress(std::ptr::null(), 0, false, None, std::ptr::null_mut())
+    };
     // First read drains it.
     let first = cstr_to_string(apfs_last_error());
     assert!(first.is_some(), "first read should return the message");

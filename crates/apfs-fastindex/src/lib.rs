@@ -59,6 +59,7 @@ mod omap;
 /// `UnsafeBufferPointer<ApfsCell>`. Squarify algorithm ported
 /// from d3-hierarchy.
 pub mod render;
+mod search;
 /// Indexed tree built from a flat `Vec<NamespaceEntry>`. Drives
 /// the native renderer's navigation, breadcrumb, tree-list,
 /// layout, and hit-test paths. Used internally by `ffi::ApfsScan`.

@@ -364,6 +364,7 @@ fn squarify(initial_rect: Rect, items: &[(u32, f64)], total: f64, ratio: f64, ou
 ///   - Symlink → blue-grey.
 ///   - Anything not-a-file → mid-grey.
 ///   - File → extension lookup, then hash-to-HSL for unknowns.
+///
 /// Dirs are drawn with a uniform dir-bg fill on the Swift side;
 /// the per-cell `fill_rgb` is still computed so a future
 /// per-dir colouring (e.g. by mount point) is a one-field
@@ -590,7 +591,11 @@ mod tests {
             ("file.", "(no ext)"),
             ("file.ÄBC", ".Äbc"),
         ] {
-            assert_eq!(fill_for_file(filename), category_color(category), "{filename}");
+            assert_eq!(
+                fill_for_file(filename),
+                category_color(category),
+                "{filename}"
+            );
         }
         assert_eq!(category_color("(symlink)"), 0x7d8a99);
         assert_eq!(category_color("(other)"), 0x5b6779);

@@ -22,6 +22,14 @@
 //!   `i64::MIN` where applicable) for `None`. Cleaner than a
 //!   parallel "has-this-field" bool from a FFI standpoint;
 //!   Swift maps the sentinel back to `nil` on the wrapper side.
+//!
+//! # Pointer contract
+//!
+//! Non-NULL handles must be the original pointers returned by this module.
+//! Callers must not mutate their contents or free them while a call or a
+//! borrowed view is using them. Borrowed strings and buffers must not be
+//! modified or freed by the caller. Each owning handle is freed exactly once
+//! with its matching function, after all users and borrowed views are done.
 
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
@@ -192,8 +200,12 @@ const APFS_REAL_TOTAL_UNCLAIMED: u64 = u64::MAX;
 ///   - `path` is not valid UTF-8
 ///   - the scan returns an error (bad source, permission denial
 ///     at root, etc.)
+///
+/// # Safety
+/// `path` must be NULL or a valid, unmodified NUL-terminated C string for
+/// the duration of the call. Free a non-NULL result with `apfs_scan_free`.
 #[no_mangle]
-pub extern "C" fn apfs_scan_directory(
+pub unsafe extern "C" fn apfs_scan_directory(
     path: *const c_char,
     threads: u32,
     cross_mounts: bool,
@@ -203,7 +215,10 @@ pub extern "C" fn apfs_scan_directory(
         // with-progress path called with a NULL callback. Keeps the
         // post-scan finalize logic in one place
         // (`finalize_scan_handle`).
-        apfs_scan_directory_with_progress(path, threads, cross_mounts, None, ptr::null_mut())
+        // SAFETY: the caller supplies the path contract, and no callback runs.
+        unsafe {
+            apfs_scan_directory_with_progress(path, threads, cross_mounts, None, ptr::null_mut())
+        }
     })
 }
 
@@ -245,8 +260,14 @@ unsafe impl Send for ProgressUserdata {}
 /// `terminal == true`. Passing NULL for `progress_fn` is
 /// equivalent to calling `apfs_scan_directory` (no progress
 /// events).
+///
+/// # Safety
+/// `path` must be NULL or a valid, unmodified NUL-terminated C string until
+/// this call returns. A callback must not unwind and must be safe on any
+/// walker thread. Its `userdata` must remain valid and thread-safe as required
+/// by that callback until return. Free a non-NULL result with `apfs_scan_free`.
 #[no_mangle]
-pub extern "C" fn apfs_scan_directory_with_progress(
+pub unsafe extern "C" fn apfs_scan_directory_with_progress(
     path: *const c_char,
     threads: u32,
     cross_mounts: bool,
@@ -296,7 +317,7 @@ pub extern "C" fn apfs_scan_directory_with_progress(
             threads: if threads == 0 { 4 } else { threads as usize },
             // FFI consumers (the SwiftUI app) read subtree totals
             // from the indexed `Tree`, not from the legacy
-            // `aggregates` Vec — skip the ~90 ms aggregate pass.
+            // `aggregates` Vec.
             skip_aggregates: true,
         };
         let output = match fallback_scan_path_with_options(path_str, options) {
@@ -315,6 +336,37 @@ pub extern "C" fn apfs_scan_directory_with_progress(
 /// tree, caches the `allocated_available` flag, packs paths
 /// + claim into CStrings, and hands the box back.
 fn finalize_scan_handle(output: crate::FallbackScanOutput) -> *mut ApfsScan {
+    // These fields cross the ABI as C strings. Reject embedded NULs
+    // instead of silently replacing the source or correctness claim
+    // with an empty string when loading a malformed saved scan.
+    let claim_c = match CString::new(output.correctness_claim.as_str()) {
+        Ok(value) => value,
+        Err(_) => {
+            diag::set_last_error("scan correctness claim contains a NUL byte");
+            return ptr::null_mut();
+        }
+    };
+    let source_kind_c = match CString::new(output.parser_output.source.source_kind.as_str()) {
+        Ok(value) => value,
+        Err(_) => {
+            diag::set_last_error("scan source kind contains a NUL byte");
+            return ptr::null_mut();
+        }
+    };
+    let source_requested_path_c = match CString::new(
+        output
+            .parser_output
+            .source
+            .requested_path
+            .to_string_lossy()
+            .as_bytes(),
+    ) {
+        Ok(value) => value,
+        Err(_) => {
+            diag::set_last_error("scan requested path contains a NUL byte");
+            return ptr::null_mut();
+        }
+    };
     let tree = Tree::build(&output.parser_output.entries);
     let mut allocated_available = false;
     let mut real_available = false;
@@ -329,19 +381,6 @@ fn finalize_scan_handle(output: crate::FallbackScanOutput) -> *mut ApfsScan {
             break;
         }
     }
-    let claim_c = CString::new(output.correctness_claim.clone())
-        .unwrap_or_else(|_| CString::new("").unwrap());
-    let source_kind_c = CString::new(output.parser_output.source.source_kind.clone())
-        .unwrap_or_else(|_| CString::new("").unwrap());
-    let source_requested_path_c = CString::new(
-        output
-            .parser_output
-            .source
-            .requested_path
-            .to_string_lossy()
-            .into_owned(),
-    )
-    .unwrap_or_else(|_| CString::new("").unwrap());
     Box::into_raw(Box::new(ApfsScan {
         output,
         tree,
@@ -363,8 +402,12 @@ fn finalize_scan_handle(output: crate::FallbackScanOutput) -> *mut ApfsScan {
 /// `statfs(_:_:)` function unambiguously through the overlay
 /// (name collision with `struct statfs`). Calling out to this
 /// FFI is the workaround.
+///
+/// # Safety
+/// `path` must be NULL or a valid, unmodified NUL-terminated C string for
+/// the duration of the call.
 #[no_mangle]
-pub extern "C" fn apfs_is_snapshot_path(path: *const c_char) -> i32 {
+pub unsafe extern "C" fn apfs_is_snapshot_path(path: *const c_char) -> i32 {
     ffi_guard(0, move || {
         if path.is_null() {
             return 0;
@@ -404,12 +447,19 @@ pub extern "C" fn apfs_is_snapshot_path(path: *const c_char) -> i32 {
 /// Returns `NULL` on:
 /// - `path` is NULL or not valid UTF-8
 /// - the file can't be opened or read
+/// - the opened object is not a regular file, or on macOS the
+///   final path component is a symlink
 /// - the msgpack blob fails to decode as `FallbackScanOutput`
+/// - decoded metadata for a C-string accessor contains a NUL byte
 ///
 /// On any of those, the caller can read `apfs_last_error` for a
 /// human-readable diagnostic.
+///
+/// # Safety
+/// `path` must be NULL or a valid, unmodified NUL-terminated C string for
+/// the duration of the call. Free a non-NULL result with `apfs_scan_free`.
 #[no_mangle]
-pub extern "C" fn apfs_scan_from_msgpack_file(path: *const c_char) -> *mut ApfsScan {
+pub unsafe extern "C" fn apfs_scan_from_msgpack_file(path: *const c_char) -> *mut ApfsScan {
     ffi_guard(ptr::null_mut(), move || {
         if path.is_null() {
             crate::diag::set_last_error("apfs_scan_from_msgpack_file: path is NULL");
@@ -417,12 +467,10 @@ pub extern "C" fn apfs_scan_from_msgpack_file(path: *const c_char) -> *mut ApfsS
         }
         let cstr = unsafe { std::ffi::CStr::from_ptr(path) };
         let Ok(rust_path) = cstr.to_str() else {
-            crate::diag::set_last_error(
-                "apfs_scan_from_msgpack_file: path is not valid UTF-8",
-            );
+            crate::diag::set_last_error("apfs_scan_from_msgpack_file: path is not valid UTF-8");
             return ptr::null_mut();
         };
-        let bytes = match std::fs::read(rust_path) {
+        let bytes = match read_scan_msgpack_file(std::path::Path::new(rust_path)) {
             Ok(b) => b,
             Err(err) => {
                 crate::diag::set_last_error(format!(
@@ -440,19 +488,61 @@ pub extern "C" fn apfs_scan_from_msgpack_file(path: *const c_char) -> *mut ApfsS
                 return ptr::null_mut();
             }
         };
+        // Deserialization owns every string. Release the transport
+        // allocation before the indexed tree allocates its buffers.
+        drop(bytes);
         finalize_scan_handle(output)
     })
 }
 
+/// Read through the same descriptor that we inspect. This generic loader
+/// accepts ordinary CLI output regardless of mode or owner. The private
+/// helper's stricter ownership checks remain the GUI caller's responsibility.
+fn read_scan_msgpack_file(path: &std::path::Path) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // Nonblocking open prevents a replaced FIFO from hanging before
+        // fstat can reject it. It does not affect regular-file reads.
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC);
+    }
+    let mut file = options.open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "scan input is not a regular file",
+        ));
+    }
+    let mut bytes = Vec::new();
+    let size = usize::try_from(metadata.len()).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "scan input exceeds the address space",
+        )
+    })?;
+    bytes
+        .try_reserve_exact(size)
+        .map_err(|err| std::io::Error::new(std::io::ErrorKind::OutOfMemory, err))?;
+    file.read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+
 /// Drop a scan handle. Idempotent on NULL.
+///
+/// # Safety
+/// `scan` must be NULL or an owning scan handle returned by this module,
+/// not previously freed. All calls and borrowed views using it must be done.
 #[no_mangle]
-pub extern "C" fn apfs_scan_free(scan: *mut ApfsScan) {
+pub unsafe extern "C" fn apfs_scan_free(scan: *mut ApfsScan) {
     ffi_guard((), move || {
         if scan.is_null() {
             return;
         }
-        // SAFETY: caller must have obtained `scan` from
-        // `apfs_scan_directory` and not yet freed it.
+        // SAFETY: the caller transfers an original, not-yet-freed scan handle.
         unsafe {
             drop(Box::from_raw(scan));
         }
@@ -460,8 +550,12 @@ pub extern "C" fn apfs_scan_free(scan: *mut ApfsScan) {
 }
 
 /// Number of `NamespaceEntry` rows in the scan.
+///
+/// # Safety
+/// `scan` must be NULL or a live scan handle from this module. It must not
+/// be mutated or freed during this call.
 #[no_mangle]
-pub extern "C" fn apfs_scan_entry_count(scan: *const ApfsScan) -> u64 {
+pub unsafe extern "C" fn apfs_scan_entry_count(scan: *const ApfsScan) -> u64 {
     ffi_guard(0, move || {
         let Some(s) = (unsafe { scan.as_ref() }) else {
             return 0;
@@ -472,8 +566,12 @@ pub extern "C" fn apfs_scan_entry_count(scan: *const ApfsScan) -> u64 {
 
 /// Sum of `entry.logical_size` across the whole scan. Reads off
 /// the tree root's pre-computed aggregate.
+///
+/// # Safety
+/// `scan` must be NULL or a live scan handle from this module. It must not
+/// be mutated or freed during this call.
 #[no_mangle]
-pub extern "C" fn apfs_scan_logical_total(scan: *const ApfsScan) -> u64 {
+pub unsafe extern "C" fn apfs_scan_logical_total(scan: *const ApfsScan) -> u64 {
     ffi_guard(0, move || {
         let Some(s) = (unsafe { scan.as_ref() }) else {
             return 0;
@@ -486,8 +584,12 @@ pub extern "C" fn apfs_scan_logical_total(scan: *const ApfsScan) -> u64 {
 /// `APFS_ALLOCATED_TOTAL_UNCLAIMED` (`u64::MAX`) when *any* row
 /// had `allocated_size = None` (SR-019 None-collapse). Reads off
 /// the tree root's pre-computed aggregate.
+///
+/// # Safety
+/// `scan` must be NULL or a live scan handle from this module. It must not
+/// be mutated or freed during this call.
 #[no_mangle]
-pub extern "C" fn apfs_scan_allocated_total(scan: *const ApfsScan) -> u64 {
+pub unsafe extern "C" fn apfs_scan_allocated_total(scan: *const ApfsScan) -> u64 {
     ffi_guard(APFS_ALLOCATED_TOTAL_UNCLAIMED, move || {
         let Some(s) = (unsafe { scan.as_ref() }) else {
             return APFS_ALLOCATED_TOTAL_UNCLAIMED;
@@ -504,8 +606,12 @@ pub extern "C" fn apfs_scan_allocated_total(scan: *const ApfsScan) -> u64 {
 /// bytes) across the whole scan, or `APFS_REAL_TOTAL_UNCLAIMED`
 /// (`u64::MAX`) when *any* row had `real_size = None`. Reads off
 /// the tree root's pre-computed aggregate.
+///
+/// # Safety
+/// `scan` must be NULL or a live scan handle from this module. It must not
+/// be mutated or freed during this call.
 #[no_mangle]
-pub extern "C" fn apfs_scan_real_total(scan: *const ApfsScan) -> u64 {
+pub unsafe extern "C" fn apfs_scan_real_total(scan: *const ApfsScan) -> u64 {
     ffi_guard(APFS_REAL_TOTAL_UNCLAIMED, move || {
         let Some(s) = (unsafe { scan.as_ref() }) else {
             return APFS_REAL_TOTAL_UNCLAIMED;
@@ -523,8 +629,12 @@ pub extern "C" fn apfs_scan_real_total(scan: *const ApfsScan) -> u64 {
 /// chip off when this is false. Fallback mode populates this same
 /// as `allocated_size` (no refcount info from POSIX), so on a
 /// well-formed scan both are typically `true`.
+///
+/// # Safety
+/// `scan` must be NULL or a live scan handle from this module. It must not
+/// be mutated or freed during this call.
 #[no_mangle]
-pub extern "C" fn apfs_scan_real_available(scan: *const ApfsScan) -> bool {
+pub unsafe extern "C" fn apfs_scan_real_available(scan: *const ApfsScan) -> bool {
     ffi_guard(false, move || {
         let Some(s) = (unsafe { scan.as_ref() }) else {
             return false;
@@ -540,8 +650,12 @@ pub extern "C" fn apfs_scan_real_available(scan: *const ApfsScan) -> bool {
 /// Total number of nodes in the tree (root + every directory +
 /// every leaf). Differs from `apfs_scan_entry_count` because the
 /// tree also has synthesized intermediate directories.
+///
+/// # Safety
+/// `scan` must be NULL or a live scan handle from this module. It must not
+/// be mutated or freed during this call.
 #[no_mangle]
-pub extern "C" fn apfs_scan_node_count(scan: *const ApfsScan) -> u32 {
+pub unsafe extern "C" fn apfs_scan_node_count(scan: *const ApfsScan) -> u32 {
     ffi_guard(0, move || {
         let Some(s) = (unsafe { scan.as_ref() }) else {
             return 0;
@@ -571,45 +685,13 @@ pub struct ApfsSearchResults {
     matches: Vec<u32>,
 }
 
-/// Case-insensitive substring search across every node's
-/// display name. Returns a handle wrapping the **full
-/// keep-set**: every matching node index plus every ancestor
-/// of every match, plus the root. This is the set the UI
-/// renders as the visible tree under an active search;
-/// pushing the ancestor-walk into Rust avoids a per-ancestor
-/// FFI call from Swift (which on a pathological match-everything
-/// query would have been millions of FFI hits).
+/// Canonical caseless substring search across every node's display name.
+/// Returns matching node indices, their ancestors, and the root, so callers
+/// can render a connected tree. Display names and paths remain unchanged.
 ///
-/// Architecture (EX-33 follow-up):
-///
-/// 1. The tree carries a **flat lowercased-name buffer**
-///    (`tree.names_lower_buf: Vec<u8>` + offsets), built once
-///    at scan time. Scanning every name reads sequentially
-///    from one contiguous allocation; the CPU prefetcher
-///    streams through it. (The prior `Vec<String>` shape
-///    forced a heap-pointer chase per name, defeating
-///    prefetch — ~10× slower on 1.5 M-node trees.)
-///
-/// 2. The query is lowercased once and wrapped in a
-///    `memchr::memmem::Finder`. The Finder amortises
-///    needle-preprocessing across every haystack call;
-///    `str::contains` builds the searcher state per call,
-///    which is wasted work when we have 1.5 M haystacks
-///    to scan with the same needle.
-///
-/// 3. For each name whose bytes contain the lowercased
-///    needle, walk the parent chain (`tree.nodes[i].parent:
-///    Option<u32>`) and insert every ancestor into an
-///    `FxHashSet`. Early-out: when `insert` returns false
-///    (node already in), the rest of that chain is too —
-///    total ancestor work is O(unique kept nodes), not
-///    O(matches × depth).
-///
-/// EX-33 numbers on a 1.56 M-entry `/Users/kai` scan: search
-/// latency dropped from 30-55 ms (median) under the
-/// Vec<String> + str::contains shape to ~3-6 ms. That's
-/// approaching the memory-bandwidth floor (~50 MB of name
-/// bytes / ~20 GB/s ≈ 2.5 ms).
+/// Names use a contiguous search-key buffer built once per scan. The query
+/// uses the same folding and one reusable substring finder. Ancestor walks
+/// stop at an already-kept node, bounding that work by the unique keep-set.
 ///
 /// Returns `NULL` on:
 /// - `scan` or `query` NULL
@@ -620,8 +702,14 @@ pub struct ApfsSearchResults {
 ///
 /// The result handle owns its indices buffer; Swift must call
 /// `apfs_search_results_free` when done.
+///
+/// # Safety
+/// `scan` must be NULL or a live scan handle from this module, not mutated
+/// or freed during the call. `query` must be NULL or a valid, unmodified
+/// NUL-terminated C string during the call. Free a non-NULL result with
+/// `apfs_search_results_free`. The result does not borrow from `scan`.
 #[no_mangle]
-pub extern "C" fn apfs_scan_search_names(
+pub unsafe extern "C" fn apfs_scan_search_names(
     scan: *const ApfsScan,
     query: *const c_char,
 ) -> *mut ApfsSearchResults {
@@ -640,8 +728,9 @@ pub extern "C" fn apfs_scan_search_names(
         if q_str.is_empty() {
             return std::ptr::null_mut();
         }
-        let q_lower: String = q_str.to_lowercase();
-        let finder = memchr::memmem::Finder::new(q_lower.as_bytes());
+        let mut q_lower = Vec::with_capacity(q_str.len());
+        crate::search::append_folded(q_str, &mut q_lower);
+        let finder = memchr::memmem::Finder::new(&q_lower);
         let buf = &s.tree.names_lower_buf;
         let offsets = &s.tree.names_lower_offsets;
         let nodes = &s.tree.nodes;
@@ -692,8 +781,12 @@ pub extern "C" fn apfs_scan_search_names(
 }
 
 /// Number of matching node indices in `results`. `0` on NULL.
+///
+/// # Safety
+/// `results` must be NULL or a live search-results handle from this module.
+/// It must not be mutated or freed during this call.
 #[no_mangle]
-pub extern "C" fn apfs_search_results_count(results: *const ApfsSearchResults) -> usize {
+pub unsafe extern "C" fn apfs_search_results_count(results: *const ApfsSearchResults) -> usize {
     ffi_guard(0, move || {
         let Some(r) = (unsafe { results.as_ref() }) else {
             return 0;
@@ -705,8 +798,12 @@ pub extern "C" fn apfs_search_results_count(results: *const ApfsSearchResults) -
 /// Pointer to the matching-node-indices buffer. Length given
 /// by `apfs_search_results_count`. Buffer is valid until
 /// `apfs_search_results_free` is called.
+///
+/// # Safety
+/// `results` must be NULL or a live search-results handle from this module.
+/// Keep it alive and unmodified while using the returned borrowed buffer.
 #[no_mangle]
-pub extern "C" fn apfs_search_results_indices(
+pub unsafe extern "C" fn apfs_search_results_indices(
     results: *const ApfsSearchResults,
 ) -> *const u32 {
     ffi_guard(std::ptr::null(), move || {
@@ -718,8 +815,12 @@ pub extern "C" fn apfs_search_results_indices(
 }
 
 /// Drop the search-results handle. Idempotent on NULL.
+///
+/// # Safety
+/// `results` must be NULL or an owning handle from `apfs_scan_search_names`,
+/// not previously freed. All calls and borrowed views using it must be done.
 #[no_mangle]
-pub extern "C" fn apfs_search_results_free(results: *mut ApfsSearchResults) {
+pub unsafe extern "C" fn apfs_search_results_free(results: *mut ApfsSearchResults) {
     if results.is_null() {
         return;
     }
@@ -733,8 +834,14 @@ pub extern "C" fn apfs_search_results_free(results: *mut ApfsSearchResults) {
 
 /// Number of nodes whose name matched the query (i.e. the
 /// "real" matches, not the inflated keep-set). `0` on NULL.
+///
+/// # Safety
+/// `results` must be NULL or a live search-results handle from this module.
+/// It must not be mutated or freed during this call.
 #[no_mangle]
-pub extern "C" fn apfs_search_results_match_count(results: *const ApfsSearchResults) -> usize {
+pub unsafe extern "C" fn apfs_search_results_match_count(
+    results: *const ApfsSearchResults,
+) -> usize {
     ffi_guard(0, move || {
         let Some(r) = (unsafe { results.as_ref() }) else {
             return 0;
@@ -746,8 +853,12 @@ pub extern "C" fn apfs_search_results_match_count(results: *const ApfsSearchResu
 /// Pointer to the matches buffer (`u32` per entry, length
 /// from `apfs_search_results_match_count`). Sorted in tree
 /// (node-index) order. Valid until `apfs_search_results_free`.
+///
+/// # Safety
+/// `results` must be NULL or a live search-results handle from this module.
+/// Keep it alive and unmodified while using the returned borrowed buffer.
 #[no_mangle]
-pub extern "C" fn apfs_search_results_match_indices(
+pub unsafe extern "C" fn apfs_search_results_match_indices(
     results: *const ApfsSearchResults,
 ) -> *const u32 {
     ffi_guard(std::ptr::null(), move || {
@@ -766,8 +877,16 @@ pub const APFS_NODE_INVALID: u32 = u32::MAX;
 /// Look up a node by its absolute logical path. The empty string
 /// (and `"/"`) maps to the synthesised root (index 0). Returns
 /// `APFS_NODE_INVALID` if no such node exists.
+///
+/// # Safety
+/// `scan` must be NULL or a live scan handle from this module, not mutated
+/// or freed during the call. `path` must be NULL or a valid, unmodified
+/// NUL-terminated C string for the duration of the call.
 #[no_mangle]
-pub extern "C" fn apfs_scan_node_index_for_path(scan: *const ApfsScan, path: *const c_char) -> u32 {
+pub unsafe extern "C" fn apfs_scan_node_index_for_path(
+    scan: *const ApfsScan,
+    path: *const c_char,
+) -> u32 {
     ffi_guard(APFS_NODE_INVALID, move || {
         if path.is_null() {
             return APFS_NODE_INVALID;
@@ -792,8 +911,12 @@ pub extern "C" fn apfs_scan_node_index_for_path(scan: *const ApfsScan, path: *co
 /// Number of immediate children of the given node.
 /// `apfs_scan_node_child_count(s, root) == top-level dir/file
 /// count`. Returns 0 for invalid indices.
+///
+/// # Safety
+/// `scan` must be NULL or a live scan handle from this module. It must not
+/// be mutated or freed during this call.
 #[no_mangle]
-pub extern "C" fn apfs_scan_node_child_count(scan: *const ApfsScan, idx: u32) -> u32 {
+pub unsafe extern "C" fn apfs_scan_node_child_count(scan: *const ApfsScan, idx: u32) -> u32 {
     ffi_guard(0, move || {
         let Some(s) = (unsafe { scan.as_ref() }) else {
             return 0;
@@ -807,8 +930,12 @@ pub extern "C" fn apfs_scan_node_child_count(scan: *const ApfsScan, idx: u32) ->
 
 /// Per-node aggregate read by Swift's status bar. Pre-computed
 /// post-order at `Tree::build` time; constant-time lookup.
+///
+/// # Safety
+/// `scan` must be NULL or a live scan handle from this module. It must not
+/// be mutated or freed during this call.
 #[no_mangle]
-pub extern "C" fn apfs_scan_node_value_logical(scan: *const ApfsScan, idx: u32) -> u64 {
+pub unsafe extern "C" fn apfs_scan_node_value_logical(scan: *const ApfsScan, idx: u32) -> u64 {
     ffi_guard(0, move || {
         let Some(s) = (unsafe { scan.as_ref() }) else {
             return 0;
@@ -823,8 +950,12 @@ pub extern "C" fn apfs_scan_node_value_logical(scan: *const ApfsScan, idx: u32) 
 /// `value_allocated` for the node, or
 /// `APFS_ALLOCATED_TOTAL_UNCLAIMED` (`u64::MAX`) when SR-019
 /// None-collapse fired anywhere in this subtree.
+///
+/// # Safety
+/// `scan` must be NULL or a live scan handle from this module. It must not
+/// be mutated or freed during this call.
 #[no_mangle]
-pub extern "C" fn apfs_scan_node_value_allocated(scan: *const ApfsScan, idx: u32) -> u64 {
+pub unsafe extern "C" fn apfs_scan_node_value_allocated(scan: *const ApfsScan, idx: u32) -> u64 {
     ffi_guard(APFS_ALLOCATED_TOTAL_UNCLAIMED, move || {
         let Some(s) = (unsafe { scan.as_ref() }) else {
             return APFS_ALLOCATED_TOTAL_UNCLAIMED;
@@ -840,8 +971,12 @@ pub extern "C" fn apfs_scan_node_value_allocated(scan: *const ApfsScan, idx: u32
 
 /// Item count for the node — number of non-directory descendants.
 /// `apfs_scan_node_item_count(s, root) == files+symlinks total`.
+///
+/// # Safety
+/// `scan` must be NULL or a live scan handle from this module. It must not
+/// be mutated or freed during this call.
 #[no_mangle]
-pub extern "C" fn apfs_scan_node_item_count(scan: *const ApfsScan, idx: u32) -> u64 {
+pub unsafe extern "C" fn apfs_scan_node_item_count(scan: *const ApfsScan, idx: u32) -> u64 {
     ffi_guard(0, move || {
         let Some(s) = (unsafe { scan.as_ref() }) else {
             return 0;
@@ -877,8 +1012,12 @@ pub struct ApfsPathRef {
 /// via parent-walk and cache the materialised `Box<str>` in
 /// `ApfsScan.path_cache`. Pointer lifetime matches the scan
 /// handle: the cache owns the bytes until `apfs_scan_free`.
+///
+/// # Safety
+/// `scan` must be NULL or a live scan handle from this module. Keep it alive
+/// and unmodified while using the returned borrowed bytes.
 #[no_mangle]
-pub extern "C" fn apfs_scan_node_path(scan: *const ApfsScan, idx: u32) -> ApfsPathRef {
+pub unsafe extern "C" fn apfs_scan_node_path(scan: *const ApfsScan, idx: u32) -> ApfsPathRef {
     ffi_guard(
         ApfsPathRef {
             bytes: ptr::null(),
@@ -925,8 +1064,12 @@ pub extern "C" fn apfs_scan_node_path(scan: *const ApfsScan, idx: u32) -> ApfsPa
 
 /// Borrow the node's last path component (display name). Like
 /// `apfs_scan_node_path` but returns just the leaf basename.
+///
+/// # Safety
+/// `scan` must be NULL or a live scan handle from this module. Keep it alive
+/// and unmodified while using the returned borrowed bytes.
 #[no_mangle]
-pub extern "C" fn apfs_scan_node_name(scan: *const ApfsScan, idx: u32) -> ApfsPathRef {
+pub unsafe extern "C" fn apfs_scan_node_name(scan: *const ApfsScan, idx: u32) -> ApfsPathRef {
     ffi_guard(
         ApfsPathRef {
             bytes: ptr::null(),
@@ -955,8 +1098,12 @@ pub extern "C" fn apfs_scan_node_name(scan: *const ApfsScan, idx: u32) -> ApfsPa
 /// Parent index for `idx`, or `APFS_NODE_INVALID` for the root
 /// (no parent) or an invalid `idx`. Used by Swift's breadcrumb
 /// construction (walk parent chain from `currentNode` to root).
+///
+/// # Safety
+/// `scan` must be NULL or a live scan handle from this module. It must not
+/// be mutated or freed during this call.
 #[no_mangle]
-pub extern "C" fn apfs_scan_node_parent(scan: *const ApfsScan, idx: u32) -> u32 {
+pub unsafe extern "C" fn apfs_scan_node_parent(scan: *const ApfsScan, idx: u32) -> u32 {
     ffi_guard(APFS_NODE_INVALID, move || {
         let Some(s) = (unsafe { scan.as_ref() }) else {
             return APFS_NODE_INVALID;
@@ -973,8 +1120,12 @@ pub extern "C" fn apfs_scan_node_parent(scan: *const ApfsScan, idx: u32) -> u32 
 /// Returns the node's `EntryKind` as a u32 discriminant:
 ///   0 = dir, 1 = file, 2 = symlink, 3 = other, 0xff = invalid
 /// Swift maps back to a `Scan.NodeKind` enum.
+///
+/// # Safety
+/// `scan` must be NULL or a live scan handle from this module. It must not
+/// be mutated or freed during this call.
 #[no_mangle]
-pub extern "C" fn apfs_scan_node_kind(scan: *const ApfsScan, idx: u32) -> u32 {
+pub unsafe extern "C" fn apfs_scan_node_kind(scan: *const ApfsScan, idx: u32) -> u32 {
     ffi_guard(0xff, move || {
         let Some(s) = (unsafe { scan.as_ref() }) else {
             return 0xff;
@@ -1003,8 +1154,12 @@ pub struct ApfsU32Slice {
 
 /// Borrow the slice of immediate-child node indices for `idx`.
 /// Returns an empty slice for invalid indices or leaves.
+///
+/// # Safety
+/// `scan` must be NULL or a live scan handle from this module. Keep it alive
+/// and unmodified while using the returned borrowed buffer.
 #[no_mangle]
-pub extern "C" fn apfs_scan_node_children(scan: *const ApfsScan, idx: u32) -> ApfsU32Slice {
+pub unsafe extern "C" fn apfs_scan_node_children(scan: *const ApfsScan, idx: u32) -> ApfsU32Slice {
     ffi_guard(
         ApfsU32Slice {
             items: ptr::null(),
@@ -1069,8 +1224,13 @@ pub const APFS_CELL_INVALID: u32 = u32::MAX;
 /// The returned handle owns both the cell array and the
 /// `HitGrid` for hit-testing. Always pair with
 /// `apfs_layout_free`.
+///
+/// # Safety
+/// `scan` must be NULL or a live scan handle from this module, not mutated
+/// or freed during the call. Free a non-NULL result with `apfs_layout_free`.
+/// The result does not borrow from `scan`.
 #[no_mangle]
-pub extern "C" fn apfs_layout_new(
+pub unsafe extern "C" fn apfs_layout_new(
     scan: *const ApfsScan,
     node_idx: u32,
     max_depth: u32,
@@ -1110,8 +1270,12 @@ pub extern "C" fn apfs_layout_new(
 
 /// Reclaim a layout previously returned by `apfs_layout_new`.
 /// Idempotent on NULL.
+///
+/// # Safety
+/// `layout` must be NULL or an owning handle from `apfs_layout_new`, not
+/// previously freed. All calls and borrowed views using it must be done.
 #[no_mangle]
-pub extern "C" fn apfs_layout_free(layout: *mut ApfsLayout) {
+pub unsafe extern "C" fn apfs_layout_free(layout: *mut ApfsLayout) {
     ffi_guard((), move || {
         if layout.is_null() {
             return;
@@ -1128,8 +1292,12 @@ pub extern "C" fn apfs_layout_free(layout: *mut ApfsLayout) {
 /// Borrow the laid-out cells. Pointer lifetime is tied to the
 /// enclosing `ApfsLayout`; Swift must not retain the slice past
 /// the layout handle's lifetime.
+///
+/// # Safety
+/// `layout` must be NULL or a live layout handle from this module. Keep it
+/// alive and unmodified while using the returned borrowed buffer.
 #[no_mangle]
-pub extern "C" fn apfs_layout_cells(layout: *const ApfsLayout) -> ApfsCellSlice {
+pub unsafe extern "C" fn apfs_layout_cells(layout: *const ApfsLayout) -> ApfsCellSlice {
     ffi_guard(
         ApfsCellSlice {
             cells: ptr::null(),
@@ -1153,8 +1321,12 @@ pub extern "C" fn apfs_layout_cells(layout: *const ApfsLayout) -> ApfsCellSlice 
 
 /// Number of cells in the layout. Convenience accessor — the
 /// same value is on `ApfsCellSlice.count`.
+///
+/// # Safety
+/// `layout` must be NULL or a live layout handle from this module. It must
+/// not be mutated or freed during this call.
 #[no_mangle]
-pub extern "C" fn apfs_layout_cell_count(layout: *const ApfsLayout) -> u64 {
+pub unsafe extern "C" fn apfs_layout_cell_count(layout: *const ApfsLayout) -> u64 {
     ffi_guard(0, move || {
         let Some(l) = (unsafe { layout.as_ref() }) else {
             return 0;
@@ -1168,8 +1340,12 @@ pub extern "C" fn apfs_layout_cell_count(layout: *const ApfsLayout) -> u64 {
 /// `(x, y)` is outside the laid-out rect. Sub-millisecond on a
 /// /-class scan thanks to the 64×64 spatial hash; OK to call
 /// every mousemove.
+///
+/// # Safety
+/// `layout` must be NULL or a live layout handle from this module. It must
+/// not be mutated or freed during this call.
 #[no_mangle]
-pub extern "C" fn apfs_layout_hit_test(layout: *const ApfsLayout, x: f32, y: f32) -> u32 {
+pub unsafe extern "C" fn apfs_layout_hit_test(layout: *const ApfsLayout, x: f32, y: f32) -> u32 {
     ffi_guard(APFS_CELL_INVALID, move || {
         let Some(l) = (unsafe { layout.as_ref() }) else {
             return APFS_CELL_INVALID;
@@ -1208,8 +1384,13 @@ pub struct ApfsExtRow {
 /// Construct the ext-list summary for the subtree rooted at
 /// `node_idx`. `metric == 1` sorts by allocated; anything else
 /// sorts by logical. Returns NULL on invalid scan / idx.
+///
+/// # Safety
+/// `scan` must be NULL or a live scan handle from this module, not mutated
+/// or freed during the call. Free a non-NULL result with
+/// `apfs_scan_ext_summary_free`. The result does not borrow from `scan`.
 #[no_mangle]
-pub extern "C" fn apfs_scan_ext_summary_new(
+pub unsafe extern "C" fn apfs_scan_ext_summary_new(
     scan: *const ApfsScan,
     node_idx: u32,
     metric: u32,
@@ -1232,8 +1413,12 @@ pub extern "C" fn apfs_scan_ext_summary_new(
 }
 
 /// Drop the summary handle. Idempotent on NULL.
+///
+/// # Safety
+/// `handle` must be NULL or an owning handle from `apfs_scan_ext_summary_new`,
+/// not previously freed. All calls and borrowed views using it must be done.
 #[no_mangle]
-pub extern "C" fn apfs_scan_ext_summary_free(handle: *mut ApfsExtSummaryHandle) {
+pub unsafe extern "C" fn apfs_scan_ext_summary_free(handle: *mut ApfsExtSummaryHandle) {
     ffi_guard((), move || {
         if handle.is_null() {
             return;
@@ -1246,8 +1431,13 @@ pub extern "C" fn apfs_scan_ext_summary_free(handle: *mut ApfsExtSummaryHandle) 
     })
 }
 
+/// Number of extension-summary rows. Returns 0 on NULL.
+///
+/// # Safety
+/// `handle` must be NULL or a live extension-summary handle from this module.
+/// It must not be mutated or freed during this call.
 #[no_mangle]
-pub extern "C" fn apfs_scan_ext_summary_count(handle: *const ApfsExtSummaryHandle) -> u32 {
+pub unsafe extern "C" fn apfs_scan_ext_summary_count(handle: *const ApfsExtSummaryHandle) -> u32 {
     ffi_guard(0, move || {
         let Some(h) = (unsafe { handle.as_ref() }) else {
             return 0;
@@ -1259,8 +1449,12 @@ pub extern "C" fn apfs_scan_ext_summary_count(handle: *const ApfsExtSummaryHandl
 /// Sum of the active-metric values across all rows. Used by
 /// Swift for the per-row percent column. Returns 0 on
 /// invalid handle.
+///
+/// # Safety
+/// `handle` must be NULL or a live extension-summary handle from this module.
+/// It must not be mutated or freed during this call.
 #[no_mangle]
-pub extern "C" fn apfs_scan_ext_summary_total(handle: *const ApfsExtSummaryHandle) -> u64 {
+pub unsafe extern "C" fn apfs_scan_ext_summary_total(handle: *const ApfsExtSummaryHandle) -> u64 {
     ffi_guard(0, move || {
         let Some(h) = (unsafe { handle.as_ref() }) else {
             return 0;
@@ -1272,8 +1466,14 @@ pub extern "C" fn apfs_scan_ext_summary_total(handle: *const ApfsExtSummaryHandl
 /// True iff at least one contributing file's `allocated_size`
 /// was None (SR-019 None-collapse). The Swift panel uses this
 /// to caption the header subtitle.
+///
+/// # Safety
+/// `handle` must be NULL or a live extension-summary handle from this module.
+/// It must not be mutated or freed during this call.
 #[no_mangle]
-pub extern "C" fn apfs_scan_ext_summary_any_unclaimed(handle: *const ApfsExtSummaryHandle) -> bool {
+pub unsafe extern "C" fn apfs_scan_ext_summary_any_unclaimed(
+    handle: *const ApfsExtSummaryHandle,
+) -> bool {
     ffi_guard(false, move || {
         let Some(h) = (unsafe { handle.as_ref() }) else {
             return false;
@@ -1284,8 +1484,12 @@ pub extern "C" fn apfs_scan_ext_summary_any_unclaimed(handle: *const ApfsExtSumm
 
 /// Fetch row `n`. Returns a zero-filled row if `n` is out of
 /// range or the handle is NULL.
+///
+/// # Safety
+/// `handle` must be NULL or a live extension-summary handle from this module.
+/// Keep it alive and unmodified while using the returned borrowed bytes.
 #[no_mangle]
-pub extern "C" fn apfs_scan_ext_summary_row(
+pub unsafe extern "C" fn apfs_scan_ext_summary_row(
     handle: *const ApfsExtSummaryHandle,
     n: u32,
 ) -> ApfsExtRow {
@@ -1338,8 +1542,12 @@ pub extern "C" fn apfs_scan_ext_summary_row(
 
 /// `true` iff at least one entry has `allocated_size = Some(_)`.
 /// The Swift UI uses this to gate the "Allocated" metric chip.
+///
+/// # Safety
+/// `scan` must be NULL or a live scan handle from this module. It must not
+/// be mutated or freed during this call.
 #[no_mangle]
-pub extern "C" fn apfs_scan_allocated_available(scan: *const ApfsScan) -> bool {
+pub unsafe extern "C" fn apfs_scan_allocated_available(scan: *const ApfsScan) -> bool {
     ffi_guard(false, move || {
         let Some(s) = (unsafe { scan.as_ref() }) else {
             return false;
@@ -1351,8 +1559,12 @@ pub extern "C" fn apfs_scan_allocated_available(scan: *const ApfsScan) -> bool {
 /// `correctness_claim` (UTF-8, NUL-terminated). The returned
 /// pointer is owned by `scan` and is valid until
 /// `apfs_scan_free(scan)`. Swift must not free it.
+///
+/// # Safety
+/// `scan` must be NULL or a live scan handle from this module. Keep it alive
+/// and unmodified while using the returned borrowed string.
 #[no_mangle]
-pub extern "C" fn apfs_scan_correctness_claim(scan: *const ApfsScan) -> *const c_char {
+pub unsafe extern "C" fn apfs_scan_correctness_claim(scan: *const ApfsScan) -> *const c_char {
     ffi_guard(ptr::null(), move || {
         let Some(s) = (unsafe { scan.as_ref() }) else {
             return ptr::null();
@@ -1363,8 +1575,12 @@ pub extern "C" fn apfs_scan_correctness_claim(scan: *const ApfsScan) -> *const c
 
 /// `SourceDescriptor.source_kind` (e.g. `"mounted_directory"`,
 /// `"dmg_image"`). UTF-8, NUL-terminated; owned by `scan`.
+///
+/// # Safety
+/// `scan` must be NULL or a live scan handle from this module. Keep it alive
+/// and unmodified while using the returned borrowed string.
 #[no_mangle]
-pub extern "C" fn apfs_scan_source_kind(scan: *const ApfsScan) -> *const c_char {
+pub unsafe extern "C" fn apfs_scan_source_kind(scan: *const ApfsScan) -> *const c_char {
     ffi_guard(ptr::null(), move || {
         let Some(s) = (unsafe { scan.as_ref() }) else {
             return ptr::null();
@@ -1375,8 +1591,12 @@ pub extern "C" fn apfs_scan_source_kind(scan: *const ApfsScan) -> *const c_char 
 
 /// `SourceDescriptor.requested_path`, the absolute path the user
 /// asked us to scan. UTF-8, NUL-terminated; owned by `scan`.
+///
+/// # Safety
+/// `scan` must be NULL or a live scan handle from this module. Keep it alive
+/// and unmodified while using the returned borrowed string.
 #[no_mangle]
-pub extern "C" fn apfs_scan_source_requested_path(scan: *const ApfsScan) -> *const c_char {
+pub unsafe extern "C" fn apfs_scan_source_requested_path(scan: *const ApfsScan) -> *const c_char {
     ffi_guard(ptr::null(), move || {
         let Some(s) = (unsafe { scan.as_ref() }) else {
             return ptr::null();
@@ -1415,8 +1635,12 @@ pub struct ApfsWalkSkipRow {
 
 /// Number of `walk_skip` rows recorded during the scan. 0 when
 /// the scan completed cleanly.
+///
+/// # Safety
+/// `scan` must be NULL or a live scan handle from this module. It must not
+/// be mutated or freed during this call.
 #[no_mangle]
-pub extern "C" fn apfs_scan_walk_skip_count(scan: *const ApfsScan) -> u32 {
+pub unsafe extern "C" fn apfs_scan_walk_skip_count(scan: *const ApfsScan) -> u32 {
     ffi_guard(0, move || {
         let Some(s) = (unsafe { scan.as_ref() }) else {
             return 0;
@@ -1427,11 +1651,12 @@ pub extern "C" fn apfs_scan_walk_skip_count(scan: *const ApfsScan) -> u32 {
 
 /// Fetch walk-skip row `n`. Returns an all-NULL row for out-of-
 /// range indices or a NULL handle.
+///
+/// # Safety
+/// `scan` must be NULL or a live scan handle from this module. Keep it alive
+/// and unmodified while using the returned borrowed bytes.
 #[no_mangle]
-pub extern "C" fn apfs_scan_walk_skip_row(
-    scan: *const ApfsScan,
-    n: u32,
-) -> ApfsWalkSkipRow {
+pub unsafe extern "C" fn apfs_scan_walk_skip_row(scan: *const ApfsScan, n: u32) -> ApfsWalkSkipRow {
     let zero = ApfsWalkSkipRow {
         path: ApfsPathRef {
             bytes: ptr::null(),
@@ -1476,6 +1701,191 @@ mod tests {
     //! `tests/diag_ffi.rs` so each case runs fresh.
 
     use super::*;
+
+    fn small_output() -> crate::FallbackScanOutput {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("ΟΣ.txt"), b"content").unwrap();
+        crate::fallback_scan_path_with_options(
+            dir.path(),
+            crate::FallbackOptions {
+                skip_aggregates: true,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+    }
+
+    fn error_message() -> String {
+        let error = apfs_last_error();
+        assert!(!error.is_null());
+        unsafe { CStr::from_ptr(error) }
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    #[test]
+    fn msgpack_import_preserves_every_output_and_tree_field() {
+        use std::io::Write;
+        let output = small_output();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(&rmp_serde::to_vec_named(&output).unwrap())
+            .unwrap();
+        let filename = CString::new(file.path().to_str().unwrap()).unwrap();
+        // SAFETY: filename owns a valid C string throughout this call.
+        let loaded = unsafe { apfs_scan_from_msgpack_file(filename.as_ptr()) };
+        assert!(!loaded.is_null(), "{}", error_message_if_present());
+        let direct = finalize_scan_handle(output.clone());
+        assert!(!direct.is_null());
+        unsafe {
+            let loaded_ref = &*loaded;
+            let direct_ref = &*direct;
+            assert_eq!(loaded_ref.output, output);
+            assert_eq!(
+                format!("{:?}", loaded_ref.tree),
+                format!("{:?}", direct_ref.tree)
+            );
+            assert_eq!(loaded_ref.correctness_claim, direct_ref.correctness_claim);
+            assert_eq!(loaded_ref.source_kind, direct_ref.source_kind);
+            assert_eq!(
+                loaded_ref.source_requested_path,
+                direct_ref.source_requested_path
+            );
+            assert_eq!(
+                loaded_ref.allocated_available,
+                direct_ref.allocated_available
+            );
+            assert_eq!(loaded_ref.real_available, direct_ref.real_available);
+        }
+        // SAFETY: both owning handles are live and their borrowed views are done.
+        unsafe {
+            apfs_scan_free(loaded);
+            apfs_scan_free(direct);
+        }
+    }
+
+    fn error_message_if_present() -> String {
+        let error = apfs_last_error();
+        if error.is_null() {
+            String::new()
+        } else {
+            unsafe { CStr::from_ptr(error) }
+                .to_string_lossy()
+                .into_owned()
+        }
+    }
+
+    #[test]
+    fn msgpack_import_accepts_public_cli_permissions() {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+        let output = small_output();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(&rmp_serde::to_vec_named(&output).unwrap())
+            .unwrap();
+        file.as_file()
+            .set_permissions(std::fs::Permissions::from_mode(0o644))
+            .unwrap();
+        let filename = CString::new(file.path().to_str().unwrap()).unwrap();
+        // SAFETY: filename owns a valid C string throughout this call.
+        let scan = unsafe { apfs_scan_from_msgpack_file(filename.as_ptr()) };
+        assert!(!scan.is_null());
+        // SAFETY: scan is the original owning handle and has no borrowed views.
+        unsafe { apfs_scan_free(scan) };
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn msgpack_import_refuses_symlinks_and_fifos_without_blocking() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("scan.msgpack");
+        std::fs::write(&target, rmp_serde::to_vec_named(&small_output()).unwrap()).unwrap();
+        let link = dir.path().join("link.msgpack");
+        symlink(&target, &link).unwrap();
+        let link = CString::new(link.to_str().unwrap()).unwrap();
+        // SAFETY: link owns a valid C string throughout this call.
+        assert!(unsafe { apfs_scan_from_msgpack_file(link.as_ptr()) }.is_null());
+        assert!(error_message().contains("read"));
+        let fifo = CString::new(dir.path().join("fifo").to_str().unwrap()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+        // SAFETY: fifo owns a valid C string throughout this call.
+        assert!(unsafe { apfs_scan_from_msgpack_file(fifo.as_ptr()) }.is_null());
+        assert!(error_message().contains("not a regular file"));
+    }
+
+    #[test]
+    fn msgpack_import_refuses_corruption_and_invalid_c_string_fields() {
+        use std::io::Write;
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(b"not msgpack").unwrap();
+        let filename = CString::new(file.path().to_str().unwrap()).unwrap();
+        // SAFETY: filename owns a valid C string throughout this call.
+        assert!(unsafe { apfs_scan_from_msgpack_file(filename.as_ptr()) }.is_null());
+        assert!(error_message().contains("decode"));
+        for field in 0..3 {
+            let mut output = small_output();
+            match field {
+                0 => output.correctness_claim.push('\0'),
+                1 => output.parser_output.source.source_kind.push('\0'),
+                _ => output.parser_output.source.requested_path = "invalid\0path".into(),
+            }
+            assert!(finalize_scan_handle(output).is_null());
+            assert!(error_message().contains("NUL"));
+        }
+    }
+
+    #[test]
+    fn search_matches_canonical_caseless_unicode() {
+        let mut output = small_output();
+        for (i, path) in ["Straße.txt", "Café.txt"].into_iter().enumerate() {
+            output.parser_output.entries.push(crate::NamespaceEntry {
+                path: path.into(),
+                entry_kind: crate::EntryKind::File,
+                file_id: i as u64,
+                logical_size: 1,
+                allocated_size: Some(1),
+                real_size: Some(1),
+                symlink_target: None,
+            });
+        }
+        let scan = finalize_scan_handle(output);
+        assert!(!scan.is_null());
+        for (expected_name, queries) in [
+            (
+                "ΟΣ.txt",
+                &[
+                    "ΟΣ", "ος", "οσ", "Σ", "σ", "ς", "Ο", "ο", "ΟΣ.TXT", "ος.txt",
+                ][..],
+            ),
+            (
+                "Straße.txt",
+                &["STRASSE", "strasse", "STRASS", "straße"][..],
+            ),
+            (
+                "Café.txt",
+                &["CAFÉ", "café", "CAFE\u{301}", "cafe\u{301}", "CAF"][..],
+            ),
+        ] {
+            for query in queries {
+                let query = CString::new(*query).unwrap();
+                // SAFETY: scan and query stay live, and the one matching result
+                // owns its index buffer. Borrowed views are used before either
+                // owner is freed, and results is freed exactly once.
+                unsafe {
+                    let results = apfs_scan_search_names(scan, query.as_ptr());
+                    assert!(!results.is_null());
+                    assert_eq!(apfs_search_results_match_count(results), 1, "{query:?}");
+                    let index = *apfs_search_results_match_indices(results);
+                    let name = apfs_scan_node_name(scan, index);
+                    let bytes = std::slice::from_raw_parts(name.bytes, name.len as usize);
+                    assert_eq!(bytes, expected_name.as_bytes());
+                    apfs_search_results_free(results);
+                }
+            }
+        }
+        // SAFETY: scan is the original owning handle and all borrowed views are done.
+        unsafe { apfs_scan_free(scan) };
+    }
 
     #[test]
     fn ffi_guard_returns_closure_value_when_no_panic() {
@@ -1535,7 +1945,10 @@ mod tests {
         }));
 
         // Sanity: the mutex is poisoned.
-        assert!(cache.lock().is_err(), "mutex should be poisoned after panic");
+        assert!(
+            cache.lock().is_err(),
+            "mutex should be poisoned after panic"
+        );
 
         // The recovery idiom we ship in `apfs_scan_node_path`.
         let mut guard = cache

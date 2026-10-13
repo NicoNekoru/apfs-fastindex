@@ -151,6 +151,11 @@ pub(crate) fn validate_object_block(
     block_address: u64,
     expectation: ObjectExpectation,
 ) -> Result<ObjectHeader, ScanError> {
+    if block.len() < OBJ_HEADER_SIZE {
+        return Err(ScanError::InvalidObject(format!(
+            "object at block {block_address} is shorter than obj_phys_t"
+        )));
+    }
     if !checksum_matches(block) {
         return Err(ScanError::InvalidObject(format!(
             "checksum mismatch at block {block_address}"
@@ -249,6 +254,21 @@ mod tests {
     use crate::block_io::{put_u32, put_u64, resign_block};
 
     const BLOCK_SIZE: usize = 4096;
+
+    #[test]
+    fn short_object_headers_fail_closed() {
+        for length in 0..OBJ_HEADER_SIZE {
+            let block = vec![0; length];
+            assert!(matches!(
+                validate_object_block(
+                    &block,
+                    0,
+                    ObjectExpectation::any_storage(OBJECT_TYPE_NX_SUPERBLOCK)
+                ),
+                Err(ScanError::InvalidObject(_))
+            ));
+        }
+    }
 
     fn make_header_block(
         oid: u64,

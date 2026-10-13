@@ -42,7 +42,10 @@ pub(crate) fn read_block<R: Read + Seek>(
     let mut block = vec![0u8; block_size];
     let mut read_total = 0;
     while read_total < block_size {
-        let read_now = reader.read(&mut block[read_total..])?;
+        let read_now = match reader.read(&mut block[read_total..]) {
+            Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+            result => result?,
+        };
         if read_now == 0 {
             return Err(ScanError::ShortRead {
                 block_address,
@@ -198,24 +201,72 @@ mod tests {
         // runs in microseconds and never allocates the hostile
         // buffer.
         let mut reader = cursor_for_block_size(4096);
-        let err = read_block(&mut reader, 0, 1 << 30)
-            .expect_err("1 GiB block_size must fail-closed");
+        let err =
+            read_block(&mut reader, 0, 1 << 30).expect_err("1 GiB block_size must fail-closed");
         assert!(matches!(err, ScanError::InvalidObject(_)));
     }
 
     #[test]
     fn read_block_accepts_min_block_size() {
         let mut reader = cursor_for_block_size(APFS_MIN_BLOCK_SIZE);
-        let block = read_block(&mut reader, 0, APFS_MIN_BLOCK_SIZE)
-            .expect("4 KiB read should succeed");
+        let block =
+            read_block(&mut reader, 0, APFS_MIN_BLOCK_SIZE).expect("4 KiB read should succeed");
         assert_eq!(block.len(), APFS_MIN_BLOCK_SIZE);
     }
 
     #[test]
     fn read_block_accepts_max_block_size() {
         let mut reader = cursor_for_block_size(APFS_MAX_BLOCK_SIZE);
-        let block = read_block(&mut reader, 0, APFS_MAX_BLOCK_SIZE)
-            .expect("64 KiB read should succeed");
+        let block =
+            read_block(&mut reader, 0, APFS_MAX_BLOCK_SIZE).expect("64 KiB read should succeed");
         assert_eq!(block.len(), APFS_MAX_BLOCK_SIZE);
+    }
+
+    struct InterruptedReader {
+        inner: Cursor<Vec<u8>>,
+        interrupt: bool,
+    }
+
+    impl Read for InterruptedReader {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            if std::mem::take(&mut self.interrupt) {
+                return Err(io::Error::from(io::ErrorKind::Interrupted));
+            }
+            let len = buf.len().min(13);
+            let result = self.inner.read(&mut buf[..len]);
+            self.interrupt = true;
+            result
+        }
+    }
+
+    impl Seek for InterruptedReader {
+        fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
+            self.inner.seek(position)
+        }
+    }
+
+    #[test]
+    fn read_block_retries_interrupted_partial_reads() {
+        let expected = vec![7; APFS_MIN_BLOCK_SIZE];
+        let mut reader = InterruptedReader {
+            inner: Cursor::new(expected.clone()),
+            interrupt: true,
+        };
+        assert_eq!(
+            read_block(&mut reader, 0, APFS_MIN_BLOCK_SIZE).unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    fn short_read_retains_actual_byte_count_after_interruption() {
+        let mut reader = InterruptedReader {
+            inner: Cursor::new(vec![7; 31]),
+            interrupt: true,
+        };
+        assert!(matches!(
+            read_block(&mut reader, 0, APFS_MIN_BLOCK_SIZE),
+            Err(ScanError::ShortRead { actual: 31, .. })
+        ));
     }
 }

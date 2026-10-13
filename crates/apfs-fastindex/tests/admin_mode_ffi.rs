@@ -15,8 +15,8 @@ use std::os::raw::c_char;
 
 use apfs_fastindex::fallback::{fallback_scan_path, FallbackScanOutput};
 use apfs_fastindex::ffi::{
-    apfs_last_error, apfs_scan_allocated_total, apfs_scan_entry_count,
-    apfs_scan_from_msgpack_file, apfs_scan_free, apfs_scan_logical_total,
+    apfs_last_error, apfs_scan_allocated_total, apfs_scan_entry_count, apfs_scan_free,
+    apfs_scan_from_msgpack_file, apfs_scan_logical_total,
 };
 
 fn write_msgpack_temp(output: &FallbackScanOutput) -> std::path::PathBuf {
@@ -50,13 +50,12 @@ fn cstr_to_string(p: *const c_char) -> Option<String> {
 fn admin_mode_roundtrip_preserves_entry_count_and_totals() {
     // Use the repo root as the scan target — it's small enough to scan
     // quickly and present on every CI host.
-    let repo_root =
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("crate parent")
-            .parent()
-            .expect("repo root")
-            .to_path_buf();
+    let repo_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("crate parent")
+        .parent()
+        .expect("repo root")
+        .to_path_buf();
     let scan_target = repo_root.join("crates/apfs-fastindex/src");
     assert!(
         scan_target.exists(),
@@ -76,24 +75,32 @@ fn admin_mode_roundtrip_preserves_entry_count_and_totals() {
     let temp_path = write_msgpack_temp(&in_process);
     let c_path = CString::new(temp_path.to_string_lossy().into_owned()).unwrap();
 
-    let handle = apfs_scan_from_msgpack_file(c_path.as_ptr());
+    // SAFETY: c_path owns a valid C string throughout this call.
+    let handle = unsafe { apfs_scan_from_msgpack_file(c_path.as_ptr()) };
     assert!(
         !handle.is_null(),
         "apfs_scan_from_msgpack_file returned NULL; last_error = {:?}",
         cstr_to_string(apfs_last_error())
     );
 
-    let rehydrated_entries = apfs_scan_entry_count(handle);
-    let rehydrated_logical = apfs_scan_logical_total(handle);
+    // SAFETY: handle is live and remains owned by this test during these reads.
+    let (rehydrated_entries, rehydrated_logical) = unsafe {
+        (
+            apfs_scan_entry_count(handle),
+            apfs_scan_logical_total(handle),
+        )
+    };
     assert_eq!(rehydrated_entries, entries as u64);
     assert_eq!(rehydrated_logical, logical_total);
     // Allocated total: in-process fallback emits Some(st_blocks*512)
     // for files; the rehydrated handle's tree root aggregate carries
     // the same number. We don't pin the exact value — just that
     // rehydration produces *a* value, not the None sentinel.
-    let _ = apfs_scan_allocated_total(handle);
+    // SAFETY: handle is still live and unmodified.
+    let _ = unsafe { apfs_scan_allocated_total(handle) };
 
-    apfs_scan_free(handle);
+    // SAFETY: handle is the original owning pointer and has no borrowed views.
+    unsafe { apfs_scan_free(handle) };
     let _ = std::fs::remove_file(&temp_path);
 }
 
@@ -101,7 +108,8 @@ fn admin_mode_roundtrip_preserves_entry_count_and_totals() {
 /// surfaces last_error in a popup so the user sees what went wrong.
 #[test]
 fn admin_mode_null_path_returns_null_and_records_error() {
-    let handle = apfs_scan_from_msgpack_file(std::ptr::null());
+    // SAFETY: NULL is an explicitly supported input sentinel.
+    let handle = unsafe { apfs_scan_from_msgpack_file(std::ptr::null()) };
     assert!(handle.is_null());
     let err = cstr_to_string(apfs_last_error());
     assert!(
@@ -116,7 +124,8 @@ fn admin_mode_null_path_returns_null_and_records_error() {
 #[test]
 fn admin_mode_missing_file_returns_null_and_records_error() {
     let c_path = CString::new("/tmp/apfs-fastindex-this-file-does-not-exist-xyz.msgpack").unwrap();
-    let handle = apfs_scan_from_msgpack_file(c_path.as_ptr());
+    // SAFETY: c_path owns a valid C string throughout this call.
+    let handle = unsafe { apfs_scan_from_msgpack_file(c_path.as_ptr()) };
     assert!(handle.is_null());
     let err = cstr_to_string(apfs_last_error());
     assert!(
@@ -246,15 +255,18 @@ fn server_loop_scans_and_quits(worker_counts: &[Option<usize>]) {
         // The output msgpack should rehydrate cleanly via the
         // existing FFI — same shape as a non-server-mode scan.
         let c_path = CString::new(out_path.clone()).unwrap();
-        let handle = apfs_scan_from_msgpack_file(c_path.as_ptr());
+        // SAFETY: c_path owns a valid C string throughout this call.
+        let handle = unsafe { apfs_scan_from_msgpack_file(c_path.as_ptr()) };
         assert!(
             !handle.is_null(),
             "server-produced msgpack failed to rehydrate; last_error = {:?}",
             cstr_to_string(apfs_last_error())
         );
-        let count = apfs_scan_entry_count(handle);
+        // SAFETY: handle is live and remains owned by this test during the read.
+        let count = unsafe { apfs_scan_entry_count(handle) };
         assert!(count > 0, "server scan returned zero entries");
-        apfs_scan_free(handle);
+        // SAFETY: handle is the original owning pointer and has no borrowed views.
+        unsafe { apfs_scan_free(handle) };
 
         // Release the tempfile (helper unlinks it).
         let release = serde_json::json!({ "op": "release", "paths": [out_path] });
@@ -300,7 +312,8 @@ fn admin_mode_bad_msgpack_returns_null_and_records_error() {
     std::fs::write(&path, b"this is not msgpack").expect("write garbage");
     let c_path = CString::new(path.to_string_lossy().into_owned()).unwrap();
 
-    let handle = apfs_scan_from_msgpack_file(c_path.as_ptr());
+    // SAFETY: c_path owns a valid C string throughout this call.
+    let handle = unsafe { apfs_scan_from_msgpack_file(c_path.as_ptr()) };
     assert!(handle.is_null());
     let err = cstr_to_string(apfs_last_error());
     assert!(

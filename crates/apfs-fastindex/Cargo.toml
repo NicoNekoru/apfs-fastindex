@@ -1,6 +1,6 @@
 [package]
 name = "apfs-fastindex"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2021"
 rust-version = "1.88"
 description = "Fail-closed APFS checkpoint scanner for detached sources"
@@ -42,6 +42,8 @@ rustc-hash = "2.0"
 # setup. Already in our dependency tree as a transitive dep
 # of quick-xml; promoting to a direct dep adds zero footprint.
 memchr = "2"
+caseless = "0.2.2"
+unicode-normalization = "0.1.25"
 # `tempfile::NamedTempFile` for the privileged helper's
 # `--server` mode: every per-scan output file is created via
 # `mkstemp`-equivalent (atomic O_EXCL + mode 0600 + caller-

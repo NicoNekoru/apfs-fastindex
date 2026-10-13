@@ -6,6 +6,7 @@ import SwiftUI
 final class FileActions: NSObject, ObservableObject {
     struct Target {
         let scan: Scan
+        let relative: String
         let path: String
         let canTrash: Bool
         var url: URL { URL(fileURLWithPath: path) }
@@ -26,7 +27,8 @@ final class FileActions: NSObject, ObservableObject {
                 scanRoot: scan.sourceRequestedPath, relative: relative)
         else { return nil }
         return Target(
-            scan: scan, path: path, canTrash: node != 0 && !relative.isEmpty && !scan.isSnapshotPath)
+            scan: scan, relative: relative, path: path,
+            canTrash: node != 0 && !relative.isEmpty && !scan.isSnapshotPath)
     }
 
     func reveal(_ target: Target) {
@@ -51,6 +53,7 @@ final class FileActions: NSObject, ObservableObject {
         alert.addButton(withTitle: "Move to Trash")
         let completion: (NSApplication.ModalResponse) -> Void = { [weak self] response in
             guard response == .alertSecondButtonReturn else { return }
+            guard self?.itemExists(target) == true else { return }
             NSWorkspace.shared.recycle([target.url]) { _, error in
                 DispatchQueue.main.async {
                     if let error {
@@ -69,6 +72,12 @@ final class FileActions: NSObject, ObservableObject {
     }
 
     private func itemExists(_ target: Target) -> Bool {
+        guard PathContainment.resolveContained(
+            scanRoot: target.scan.sourceRequestedPath, relative: target.relative) == target.path
+        else {
+            showError("This path has changed. Rescan the folder before acting on it.")
+            return false
+        }
         // attributesOfItem also recognises dangling symlinks, unlike fileExists.
         guard (try? FileManager.default.attributesOfItem(atPath: target.path)) != nil else {
             showError("This item is no longer available. Rescan the folder to update the index.")

@@ -105,13 +105,15 @@ fn main() {
     let c_target = CString::new(target.clone()).expect("path has interior NUL");
 
     let t = Instant::now();
-    let scan = apfs_scan_directory(c_target.as_ptr(), 4, false);
+    // SAFETY: c_target owns a valid C string throughout the call.
+    let scan = unsafe { apfs_scan_directory(c_target.as_ptr(), 4, false) };
     let scan_elapsed = t.elapsed();
     if scan.is_null() {
         eprintln!("scan failed; aborting");
         std::process::exit(1);
     }
-    let node_count = apfs_scan_node_count(scan);
+    // SAFETY: scan is live and remains owned by this benchmark.
+    let node_count = unsafe { apfs_scan_node_count(scan) };
     println!("scan:    {:>10}, {} nodes", fmt_us(scan_elapsed.as_nanos()), node_count);
 
     let mut stats: Vec<QueryStats> = Vec::new();
@@ -121,14 +123,19 @@ fn main() {
         let mut last_count: usize = 0;
         for _ in 0..ITERATIONS_PER_QUERY {
             let t = Instant::now();
-            let r = apfs_scan_search_names(scan, cq.as_ptr());
+            // SAFETY: scan remains live and cq owns a valid C string.
+            let r = unsafe { apfs_scan_search_names(scan, cq.as_ptr()) };
             let elapsed = t.elapsed();
             last_count = if r.is_null() {
                 0
             } else {
-                let c = apfs_search_results_count(r);
-                apfs_search_results_free(r);
-                c
+                // SAFETY: r is an original live result handle with no borrowed
+                // views. Read it before freeing it exactly once.
+                unsafe {
+                    let c = apfs_search_results_count(r);
+                    apfs_search_results_free(r);
+                    c
+                }
             };
             times.push(elapsed.as_nanos());
         }
@@ -197,7 +204,8 @@ fn main() {
         println!("output: {json_path}");
     }
 
-    apfs_scan_free(scan);
+    // SAFETY: scan is the original owning handle and all users are done.
+    unsafe { apfs_scan_free(scan) };
 }
 
 /// Tiny chrono-free today-as-iso-string. Avoids pulling in a

@@ -47,9 +47,9 @@ pub(crate) struct BtreeNode<'a> {
 
 impl<'a> BtreeNode<'a> {
     pub fn parse(block: &'a [u8], block_size: usize) -> Result<Self, ScanError> {
-        if block.len() < block_size {
+        if block_size < OBJ_HEADER_SIZE + 24 || block.len() < block_size {
             return Err(ScanError::InvalidObject(
-                "btree node block shorter than block_size".to_string(),
+                "btree node block is shorter than its header or block_size".to_string(),
             ));
         }
         let flags = le_u16(block, 0x20);
@@ -57,6 +57,21 @@ impl<'a> BtreeNode<'a> {
         let nkeys = u32::from_le_bytes(block[0x24..0x28].try_into().expect("u32 nkeys field"));
         let toc_off_rel = le_u16(block, 0x28);
         let toc_len = le_u16(block, 0x2a);
+        let fixed_kv_size = flags & BTNODE_FIXED_KV_SIZE != 0;
+        let toc_entry_size = if fixed_kv_size { 4usize } else { 8usize };
+        let required_toc_len = usize::try_from(nkeys)
+            .ok()
+            .and_then(|count| count.checked_mul(toc_entry_size))
+            .ok_or_else(|| {
+                ScanError::InvalidObject("btree key count overflows TOC size".to_string())
+            })?;
+        // Consumers reserve storage for nkeys before visiting entries.
+        // Bound the count by this node's actual TOC before they allocate.
+        if required_toc_len > toc_len as usize {
+            return Err(ScanError::InvalidObject(format!(
+                "btree key count {nkeys} requires {required_toc_len} TOC bytes, but TOC length is {toc_len}"
+            )));
+        }
         let data_offset = OBJ_HEADER_SIZE + 24;
         let toc_offset = data_offset
             .checked_add(toc_off_rel as usize)
@@ -88,7 +103,7 @@ impl<'a> BtreeNode<'a> {
             toc_len,
             key_area_offset,
             value_area_end,
-            fixed_kv_size: flags & BTNODE_FIXED_KV_SIZE != 0,
+            fixed_kv_size,
             is_root,
             is_leaf: flags & BTNODE_LEAF != 0,
         })
@@ -181,9 +196,10 @@ impl<'a> BtreeNode<'a> {
         fixed_key_size: usize,
     ) -> Result<&'a [u8], ScanError> {
         let len = entry.key_len.unwrap_or(fixed_key_size);
-        let end = entry.key_offset.checked_add(len).ok_or_else(|| {
-            ScanError::InvalidObject("btree key end overflow".to_string())
-        })?;
+        let end = entry
+            .key_offset
+            .checked_add(len)
+            .ok_or_else(|| ScanError::InvalidObject("btree key end overflow".to_string()))?;
         if end > self.block.len() {
             return Err(ScanError::InvalidObject(format!(
                 "btree key bytes [{}..{}] exceed block length {}",
@@ -206,9 +222,10 @@ impl<'a> BtreeNode<'a> {
         fixed_value_size: usize,
     ) -> Result<&'a [u8], ScanError> {
         let len = entry.value_len.unwrap_or(fixed_value_size);
-        let end = entry.value_start.checked_add(len).ok_or_else(|| {
-            ScanError::InvalidObject("btree value end overflow".to_string())
-        })?;
+        let end = entry
+            .value_start
+            .checked_add(len)
+            .ok_or_else(|| ScanError::InvalidObject("btree value end overflow".to_string()))?;
         if end > self.block.len() {
             return Err(ScanError::InvalidObject(format!(
                 "btree value bytes [{}..{}] exceed block length {}",
@@ -273,6 +290,72 @@ mod tests {
     //! of panicking the way the pre-fix code did.
 
     use super::*;
+
+    #[test]
+    fn parse_rejects_truncated_headers_without_panicking() {
+        for size in 0..OBJ_HEADER_SIZE + 24 {
+            assert!(matches!(
+                BtreeNode::parse(&vec![0; size], size),
+                Err(ScanError::InvalidObject(_))
+            ));
+        }
+        assert!(BtreeNode::parse(&[0; 56], 4096).is_err());
+    }
+
+    fn node_fixture(fixed: bool, nkeys: u32, toc_len: u16) -> Vec<u8> {
+        use crate::block_io::{put_u16, put_u32, put_u64, resign_block};
+        use crate::object::{OBJECT_TYPE_OMAP, OBJ_PHYSICAL};
+        let mut block = vec![0; 4096];
+        put_u64(&mut block, 0x08, 0);
+        put_u64(&mut block, 0x10, 1);
+        put_u32(&mut block, 0x18, OBJ_PHYSICAL | OBJECT_TYPE_BTREE);
+        put_u32(&mut block, 0x1c, OBJECT_TYPE_OMAP);
+        put_u16(
+            &mut block,
+            0x20,
+            BTNODE_ROOT | if fixed { BTNODE_FIXED_KV_SIZE } else { 0 },
+        );
+        put_u16(&mut block, 0x22, 1);
+        put_u32(&mut block, 0x24, nkeys);
+        put_u16(&mut block, 0x2a, toc_len);
+        resign_block(&mut block);
+        validate_object_block(&block, 0, ObjectExpectation::physical(OBJECT_TYPE_BTREE)).unwrap();
+        block
+    }
+
+    #[test]
+    fn parse_rejects_hostile_key_counts_before_consumers_allocate() {
+        for fixed in [false, true] {
+            for toc_len in [0, 16, 4000] {
+                let block = node_fixture(fixed, u32::MAX, toc_len);
+                let err = BtreeNode::parse(&block, block.len()).unwrap_err();
+                assert!(matches!(err, ScanError::InvalidObject(_)));
+                assert!(err.to_string().contains("TOC"));
+            }
+        }
+    }
+
+    #[test]
+    fn parse_checks_fixed_and_variable_toc_width_boundaries() {
+        for (fixed, width) in [(true, 4u16), (false, 8u16)] {
+            let short = node_fixture(fixed, 2, 2 * width - 1);
+            assert!(matches!(
+                BtreeNode::parse(&short, short.len()),
+                Err(ScanError::InvalidObject(_))
+            ));
+            for length in [2 * width, 2 * width + width] {
+                let block = node_fixture(fixed, 2, length);
+                let node = BtreeNode::parse(&block, block.len()).unwrap();
+                assert_eq!(node.nkeys, 2);
+                assert_eq!(node.fixed_kv_size, fixed);
+                assert!(node.entry(0).is_ok());
+                assert!(node.entry(1).is_ok());
+                assert!(node.entry(2).is_err());
+            }
+            let empty = node_fixture(fixed, 0, 0);
+            assert_eq!(BtreeNode::parse(&empty, empty.len()).unwrap().nkeys, 0);
+        }
+    }
 
     /// Build a stand-alone `BtreeNode` over `block` without going
     /// through `parse` (which requires a full APFS object header

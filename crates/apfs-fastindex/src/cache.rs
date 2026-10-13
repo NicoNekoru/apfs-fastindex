@@ -11,7 +11,7 @@
 //!
 //! ## What's cached
 //!
-//! Per `(volume UUID, canonical scan-root, parser version)`
+//! Per `(mount device identity, canonical scan-root, parser version)`
 //! key, two files:
 //!
 //! 1. `<key-hash>.manifest.json` — a small JSON document with
@@ -19,22 +19,18 @@
 //!    hash, and counts. Cheap to read; consulted first on every
 //!    cache check.
 //! 2. `<key-hash>.scan.msgpack` — the full serialised
-//!    `FallbackScanOutput`. Only read on a hit, and streamed
-//!    straight to stdout so we don't pay deserialise cost
-//!    when the consumer is just going to re-encode.
+//!    `FallbackScanOutput`. Its length and checksum must match
+//!    the manifest before any cached bytes are emitted.
 //!
 //! ## Cache identity
 //!
 //! ```text
-//! CacheKey = (volume_uuid, canonical_scan_root, parser_version)
+//! CacheKey = (volume_id, canonical_scan_root, parser_version)
 //! ```
 //!
-//! - `volume_uuid`: from `statfs.f_fsid` (a `u64` that's stable
-//!   per volume across mounts). Not the APFS container UUID
-//!   (which would need raw-mode access; EX-28-blocked) but
-//!   sufficient — if the user remounts a different filesystem
-//!   at the same path, `f_fsid` changes and we miss-then-write,
-//!   no false hit.
+//! - `volume_id`: the current mount's device identity from
+//!   `MetadataExt::dev()`. This is not a persistent volume UUID
+//!   and has no stability guarantee across remounts.
 //! - `canonical_scan_root`: `realpath(scan_root)`. Resolves
 //!   symlinks + `..`/`.` so equivalent paths share a cache
 //!   entry.
@@ -43,38 +39,17 @@
 //!   that's the safe default. We don't try to detect "is this
 //!   change format-compatible" — too easy to get wrong.
 //!
-//! ## Invalidation: directory-signature hash
+//! ## Invalidation
 //!
-//! A cache hit requires a fresh "is this tree unchanged?" probe
-//! that's cheaper than a full walk. We compute a 64-bit hash
-//! over the (path, mtime, ctime) tuples of **every directory**
-//! in the tree, in sorted order. Two observations make this
-//! work:
+//! Validation hashes every entry's path, identity, timestamps, sizes and
+//! permissions. Directory timestamps alone miss ordinary file resizes,
+//! allocation changes and file permission changes. Any metadata or directory
+//! read failure prevents reuse. The CLI also declines to cache partial scans
+//! or serve options that this default-mount-boundary probe cannot validate.
 //!
-//! 1. APFS updates a directory's `mtime` when a child entry is
-//!    added or removed (file created/deleted, file renamed, dir
-//!    created/deleted). It updates `ctime` when those happen
-//!    plus when xattrs / permissions change on the directory
-//!    itself.
-//! 2. The size totals our tool reports only change when files
-//!    are added/removed/resized. A file's content edit that
-//!    keeps the same size still updates the file's mtime but
-//!    not the parent directory's — but it also doesn't change
-//!    our reported totals, so the cache hit gives the right
-//!    answer.
-//!
-//! So: directory-only signature is a cheap, sound invalidation
-//! oracle for the byte totals this tool surfaces. It misses
-//! in-place file size changes that don't bump dir mtime — a
-//! `truncate()` followed by `write()` is the canonical hostile
-//! case. Documented limitation; the user can force a full
-//! rescan with `--no-cache` or by clearing the cache dir.
-//!
-//! Walking dirs-only is 5-10× faster than the full walker
-//! (no file stat, no aggregate build). On a 172k-directory
-//! tree (per EX-30) it's measured at ~0.5 s — fast enough
-//! that even a cache miss only pays this probe + the full
-//! walk on top.
+//! This remains an opt-in, expensive metadata walk. It is not an atomic
+//! snapshot and does not provide a fast incremental index. A journal-backed
+//! cache needs separate invalidation and dropped-event handling.
 //!
 //! ## Cache location
 //!
@@ -84,7 +59,7 @@
 
 use std::fs;
 use std::hash::{Hash, Hasher};
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -97,6 +72,7 @@ use serde::{Deserialize, Serialize};
 pub const CACHE_PARSER_VERSION: &str = concat!(
     "apfs-fastindex-fallback-",
     env!("CARGO_PKG_VERSION"),
+    "-metadata-v2",
 );
 
 #[derive(Debug)]
@@ -137,8 +113,8 @@ pub struct CacheKey {
 
 impl CacheKey {
     /// Build a key for the given scan-root path. Resolves the
-    /// path via `canonicalize()` and reads `statfs.f_fsid` for
-    /// the volume identifier.
+    /// path via `canonicalize()` and reads `MetadataExt::dev()`
+    /// for the current mount's device identity.
     pub fn for_path(scan_root: &Path) -> Result<Self, CacheError> {
         let canonical = scan_root
             .canonicalize()
@@ -169,8 +145,8 @@ pub struct CacheManifest {
     pub key_parser_version: String,
     /// Unix epoch seconds when the scan was captured.
     pub generated_at_unix_s: u64,
-    /// Hash of every directory's `(path, mtime_ns, ctime_ns)`
-    /// in the scanned tree. Invalidation oracle.
+    /// Hash of all entry metadata in the scanned tree. The historical
+    /// field name is retained for manifest compatibility.
     pub directory_signature: u64,
     /// Sanity-check counts; lets the consumer print useful
     /// status without reading the full msgpack.
@@ -178,6 +154,26 @@ pub struct CacheManifest {
     pub aggregate_count: usize,
     /// Size of the corresponding `.scan.msgpack` blob.
     pub scan_msgpack_bytes: u64,
+    /// Noncryptographic checksum of the exact blob bytes. Missing on
+    /// older manifests, which cannot be reused. This detects accidental
+    /// corruption and mixed generations, not malicious cache forgery.
+    #[serde(default)]
+    pub scan_msgpack_checksum: Option<u64>,
+}
+
+impl CacheManifest {
+    /// Verify the bytes the caller will consume, rather than trusting a
+    /// path that another writer may have replaced since lookup.
+    pub fn matches_scan_msgpack(&self, bytes: &[u8]) -> bool {
+        self.scan_msgpack_bytes == bytes.len() as u64
+            && self.scan_msgpack_checksum == Some(scan_msgpack_checksum(bytes))
+    }
+}
+
+fn scan_msgpack_checksum(bytes: &[u8]) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    hasher.finish()
 }
 
 /// Returns the cache root directory. Creates it if missing.
@@ -232,19 +228,23 @@ pub fn cache_lookup(
         // hash, but if it does we conservatively miss.
         return Ok(None);
     }
-    if manifest.directory_signature != current_signature {
+    if manifest.directory_signature != current_signature || manifest.scan_msgpack_checksum.is_none()
+    {
         return Ok(None);
     }
-    if !scan_path.exists() {
+    let Ok(scan_bytes) = fs::read(&scan_path) else {
+        return Ok(None);
+    };
+    if !manifest.matches_scan_msgpack(&scan_bytes) {
         return Ok(None);
     }
     Ok(Some((manifest, scan_path)))
 }
 
-/// Cache write. Stores the scan blob + manifest atomically:
-/// write to `<id>.{scan.msgpack,manifest.json}.tmp`, then
-/// rename over the target. A concurrent reader either sees the
-/// old pair or the new pair, never a half-written one.
+/// Cache write. Each file is staged through its own unique tempfile
+/// descriptor and atomically replaced. The pair is not a filesystem
+/// transaction. Readers reject mixed or interrupted generations by
+/// checking the manifest's length and checksum against the blob.
 pub fn cache_save(
     key: &CacheKey,
     directory_signature: u64,
@@ -252,14 +252,43 @@ pub fn cache_save(
     aggregate_count: usize,
     scan_msgpack: &[u8],
 ) -> Result<(), CacheError> {
+    let pending = prepare_cache_save(
+        key,
+        directory_signature,
+        entry_count,
+        aggregate_count,
+        scan_msgpack,
+    )?;
+    replace_cache_file(pending.scan_tmp, &pending.scan_path)?;
+    replace_cache_file(pending.manifest_tmp, &pending.manifest_path)?;
+    Ok(())
+}
+
+struct PendingCacheSave {
+    scan_tmp: tempfile::NamedTempFile,
+    manifest_tmp: tempfile::NamedTempFile,
+    scan_path: PathBuf,
+    manifest_path: PathBuf,
+}
+
+fn prepare_cache_save(
+    key: &CacheKey,
+    directory_signature: u64,
+    entry_count: usize,
+    aggregate_count: usize,
+    scan_msgpack: &[u8],
+) -> Result<PendingCacheSave, CacheError> {
     let dir = cache_dir()?;
     let id = key.id();
     let scan_path = dir.join(format!("{id}.scan.msgpack"));
     let manifest_path = dir.join(format!("{id}.manifest.json"));
-    let scan_tmp = dir.join(format!("{id}.scan.msgpack.tmp"));
-    let manifest_tmp = dir.join(format!("{id}.manifest.json.tmp"));
-
-    fs::write(&scan_tmp, scan_msgpack)?;
+    let mut scan_tmp = tempfile::Builder::new()
+        .prefix(&format!("{id}.scan-"))
+        .suffix(".tmp")
+        .tempfile_in(&dir)?;
+    scan_tmp.write_all(scan_msgpack)?;
+    scan_tmp.flush()?;
+    scan_tmp.as_file().sync_all()?;
     let manifest = CacheManifest {
         key_volume_id: key.volume_id,
         key_scan_root: key.scan_root_canonical.clone(),
@@ -272,104 +301,89 @@ pub fn cache_save(
         entry_count,
         aggregate_count,
         scan_msgpack_bytes: scan_msgpack.len() as u64,
+        scan_msgpack_checksum: Some(scan_msgpack_checksum(scan_msgpack)),
     };
-    let manifest_bytes = serde_json::to_vec_pretty(&manifest)
-        .map_err(|e| CacheError::Serialize(e.to_string()))?;
-    fs::write(&manifest_tmp, &manifest_bytes)?;
-
-    // Rename scan first; if it fails, leave the old manifest
-    // pointing at the old scan. Then rename manifest, atomically
-    // switching the cache to the new generation.
-    fs::rename(&scan_tmp, &scan_path)?;
-    fs::rename(&manifest_tmp, &manifest_path)?;
-    Ok(())
+    let manifest_bytes =
+        serde_json::to_vec_pretty(&manifest).map_err(|e| CacheError::Serialize(e.to_string()))?;
+    let mut manifest_tmp = tempfile::Builder::new()
+        .prefix(&format!("{id}.manifest-"))
+        .suffix(".tmp")
+        .tempfile_in(&dir)?;
+    manifest_tmp.write_all(&manifest_bytes)?;
+    manifest_tmp.flush()?;
+    manifest_tmp.as_file().sync_all()?;
+    Ok(PendingCacheSave {
+        scan_tmp,
+        manifest_tmp,
+        scan_path,
+        manifest_path,
+    })
 }
 
-/// Walk the scan target and compute a 64-bit hash over every
-/// directory's `(path, mtime_ns, ctime_ns)`. Files are NOT
-/// included — that's the v1 invalidation contract (see the
-/// module-level docs for the trade-off). Returns the hash + the
-/// number of directories visited (useful for telemetry).
+fn replace_cache_file(temp: tempfile::NamedTempFile, target: &Path) -> Result<(), CacheError> {
+    temp.persist(target)
+        .map(|_| ())
+        .map_err(|err| CacheError::Io(err.error))
+}
+
+/// Hash all entry metadata without following symlink entries or crossing
+/// mount boundaries. The historical name is retained for callers.
+/// Returns the hash and directory count. Any read error fails validation.
 pub fn compute_directory_signature(scan_root: &Path) -> io::Result<(u64, usize)> {
+    use std::os::unix::fs::MetadataExt;
+
+    let root = fs::canonicalize(scan_root)?;
+    let root_meta = fs::symlink_metadata(&root)?;
+    if !root_meta.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "cache root is not a directory",
+        ));
+    }
+    let root_dev = root_meta.dev();
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     let mut dir_count: usize = 0;
-
-    let mut stack: Vec<PathBuf> = vec![scan_root.to_path_buf()];
-    while let Some(current) = stack.pop() {
-        let meta = match fs::symlink_metadata(&current) {
-            Ok(m) => m,
-            Err(_) => continue, // unreadable dir — treat as absent
-        };
-        if !meta.is_dir() {
+    // The wire output preserves the caller's requested root spelling.
+    scan_root.hash(&mut hasher);
+    let mut visited = std::collections::HashSet::new();
+    let mut stack = vec![(root, root_meta)];
+    while let Some((current, meta)) = stack.pop() {
+        current.hash(&mut hasher);
+        meta.dev().hash(&mut hasher);
+        meta.ino().hash(&mut hasher);
+        meta.mode().hash(&mut hasher);
+        meta.uid().hash(&mut hasher);
+        meta.gid().hash(&mut hasher);
+        meta.nlink().hash(&mut hasher);
+        meta.size().hash(&mut hasher);
+        meta.blocks().hash(&mut hasher);
+        meta.mtime().hash(&mut hasher);
+        meta.mtime_nsec().hash(&mut hasher);
+        meta.ctime().hash(&mut hasher);
+        meta.ctime_nsec().hash(&mut hasher);
+        if !meta.is_dir() || meta.dev() != root_dev || !visited.insert((meta.dev(), meta.ino())) {
             continue;
         }
         dir_count += 1;
-        // Stable mtime/ctime as i64 nanoseconds-since-epoch.
-        let mtime = meta
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-            .map(|d| d.as_nanos() as i128)
-            .unwrap_or(0);
-        // ctime: prefer `metadata.created()` when available, but
-        // on macOS Rust's `MetadataExt` gives us `st_ctime_nsec`
-        // via `as_raw()`. Use that directly for change-time.
-        let ctime = {
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::MetadataExt;
-                meta.ctime() as i128 * 1_000_000_000 + meta.ctime_nsec() as i128
-            }
-            #[cfg(not(unix))]
-            {
-                0i128
-            }
-        };
-        current.to_string_lossy().hash(&mut hasher);
-        mtime.hash(&mut hasher);
-        ctime.hash(&mut hasher);
-
-        // Enqueue children. Sorted for deterministic ordering;
-        // the hash MUST be stable across runs even if readdir
-        // returns entries in different order.
-        let mut children: Vec<PathBuf> = match fs::read_dir(&current) {
-            Ok(rd) => rd
-                .filter_map(|e| e.ok())
-                .map(|e| e.path())
-                .collect(),
-            Err(_) => continue,
-        };
+        let mut children = fs::read_dir(&current)?
+            .map(|entry| entry.map(|entry| entry.path()))
+            .collect::<io::Result<Vec<_>>>()?;
         children.sort();
         for child in children {
-            // Mount-boundary check matches the walker's default
-            // (don't cross). We don't want a signature based on
-            // a path the walker won't visit.
-            let Ok(meta) = fs::symlink_metadata(&child) else {
-                continue;
-            };
-            if !meta.is_dir() {
-                continue;
-            }
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::MetadataExt;
-                let root_meta = fs::symlink_metadata(scan_root)?;
-                if meta.dev() != root_meta.dev() {
-                    continue;
-                }
-            }
-            stack.push(child);
+            let meta = fs::symlink_metadata(&child)?;
+            stack.push((child, meta));
         }
     }
     Ok((hasher.finish(), dir_count))
 }
 
-/// Read the path's volume identifier. We use the
+/// Read the path's current mount device identity. We use the
 /// `stat(2).st_dev` device-number rather than `statfs.f_fsid`
 /// because Darwin's `fsid_t` is exposed as an opaque struct
 /// (private `__fsid_val` field) by the `libc` crate and we'd
-/// have to transmute to read it. `st_dev` is equally stable
-/// per mount and exposed via `MetadataExt::dev() -> u64`.
+/// have to transmute to read it. `st_dev` is exposed via
+/// `MetadataExt::dev() -> u64`, without a persistent UUID or
+/// cross-remount stability guarantee.
 fn volume_id_for_path(path: &Path) -> Result<u64, CacheError> {
     use std::os::unix::fs::MetadataExt;
     let meta = fs::metadata(path).map_err(|_| CacheError::NoVolumeUuid)?;
@@ -406,6 +420,19 @@ mod tests {
     struct CacheTestGuard<'a> {
         _lock: MutexGuard<'a, ()>,
         td: tempfile::TempDir,
+        previous_cache_dir: Option<std::ffi::OsString>,
+    }
+
+    impl Drop for CacheTestGuard<'_> {
+        fn drop(&mut self) {
+            // Restore before releasing the module's environment lock.
+            match &self.previous_cache_dir {
+                Some(previous) => unsafe {
+                    std::env::set_var("APFS_FASTINDEX_CACHE_DIR", previous)
+                },
+                None => unsafe { std::env::remove_var("APFS_FASTINDEX_CACHE_DIR") },
+            }
+        }
     }
 
     impl<'a> CacheTestGuard<'a> {
@@ -420,13 +447,18 @@ mod tests {
     fn with_temp_cache_dir() -> CacheTestGuard<'static> {
         let lock = cache_lock();
         let td = tempfile::TempDir::new().expect("tempdir");
+        let previous_cache_dir = std::env::var_os("APFS_FASTINDEX_CACHE_DIR");
         // SAFETY: this section is serialised by `cache_lock()`;
         // no other thread inside this module can race the
         // env-var write.
         unsafe {
             std::env::set_var("APFS_FASTINDEX_CACHE_DIR", td.path());
         }
-        CacheTestGuard { _lock: lock, td }
+        CacheTestGuard {
+            _lock: lock,
+            td,
+            previous_cache_dir,
+        }
     }
 
     /// Helper: make a tiny tree with a known shape so we can
@@ -531,6 +563,58 @@ mod tests {
     }
 
     #[test]
+    fn file_resize_invalidates_without_changing_directory_timestamps() {
+        use std::os::unix::fs::MetadataExt;
+        let g = with_temp_cache_dir();
+        let root = g.path().join("tree");
+        make_tree(&root).unwrap();
+        let parent = root.join("sub_a");
+        let before = fs::metadata(&parent).unwrap();
+        let (sig_before, _) = compute_directory_signature(&root).unwrap();
+        File::options()
+            .write(true)
+            .open(parent.join("x.txt"))
+            .unwrap()
+            .set_len(1234)
+            .unwrap();
+        let after = fs::metadata(&parent).unwrap();
+        assert_eq!(
+            (
+                before.mtime(),
+                before.mtime_nsec(),
+                before.ctime(),
+                before.ctime_nsec()
+            ),
+            (
+                after.mtime(),
+                after.mtime_nsec(),
+                after.ctime(),
+                after.ctime_nsec()
+            )
+        );
+        let (sig_after, _) = compute_directory_signature(&root).unwrap();
+        assert_ne!(sig_before, sig_after);
+    }
+
+    #[test]
+    fn file_permissions_invalidate_and_root_aliases_are_not_empty_signatures() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let g = with_temp_cache_dir();
+        let root = g.path().join("tree");
+        make_tree(&root).unwrap();
+        let alias = g.path().join("alias");
+        symlink(&root, &alias).unwrap();
+        let (before, dirs) = compute_directory_signature(&alias).unwrap();
+        assert_eq!(dirs, 3);
+        fs::set_permissions(root.join("sub_a/x.txt"), fs::Permissions::from_mode(0o600)).unwrap();
+        let (after, _) = compute_directory_signature(&alias).unwrap();
+        assert_ne!(before, after);
+        assert_ne!(after, compute_directory_signature(&root).unwrap().0);
+        assert!(compute_directory_signature(&root.join("missing")).is_err());
+        assert!(compute_directory_signature(&root.join("sub_a/x.txt")).is_err());
+    }
+
+    #[test]
     fn save_overwrites_atomically() {
         let g = with_temp_cache_dir();
         let root = g.path().join("tree");
@@ -544,6 +628,127 @@ mod tests {
         let hit = cache_lookup(&key, sig).expect("lookup").expect("hit");
         assert_eq!(hit.0.entry_count, 2);
         assert_eq!(fs::read(hit.1).unwrap(), b"v2");
+    }
+
+    #[test]
+    fn corruption_or_missing_blob_checksum_cannot_be_reused() {
+        let g = with_temp_cache_dir();
+        let root = g.path().join("tree");
+        make_tree(&root).unwrap();
+        let key = CacheKey::for_path(&root).unwrap();
+        let (sig, _) = compute_directory_signature(&root).unwrap();
+        let scan_path = cache_dir()
+            .unwrap()
+            .join(format!("{}.scan.msgpack", key.id()));
+        let manifest_path = cache_dir()
+            .unwrap()
+            .join(format!("{}.manifest.json", key.id()));
+        for corrupted in [&b"evil"[..], &b"truncated-or-extended"[..], &b""[..]] {
+            cache_save(&key, sig, 1, 1, b"good").unwrap();
+            fs::write(&scan_path, corrupted).unwrap();
+            assert!(cache_lookup(&key, sig).unwrap().is_none());
+        }
+        cache_save(&key, sig, 1, 1, b"good").unwrap();
+        let mut old_manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+        old_manifest
+            .as_object_mut()
+            .unwrap()
+            .remove("scan_msgpack_checksum");
+        fs::write(&manifest_path, serde_json::to_vec(&old_manifest).unwrap()).unwrap();
+        assert!(cache_lookup(&key, sig).unwrap().is_none());
+    }
+
+    #[test]
+    fn mixed_or_interrupted_generations_are_misses_and_can_be_repaired() {
+        let g = with_temp_cache_dir();
+        let root = g.path().join("tree");
+        make_tree(&root).unwrap();
+        let key = CacheKey::for_path(&root).unwrap();
+        let (sig, _) = compute_directory_signature(&root).unwrap();
+        cache_save(&key, sig, 1, 1, b"aaaa").unwrap();
+        let pending = prepare_cache_save(&key, sig, 2, 2, b"bbbb").unwrap();
+        // Simulate interruption after the blob rename, before manifest
+        // publication. Equal lengths require the checksum to detect it.
+        replace_cache_file(pending.scan_tmp, &pending.scan_path).unwrap();
+        assert!(cache_lookup(&key, sig).unwrap().is_none());
+        replace_cache_file(pending.manifest_tmp, &pending.manifest_path).unwrap();
+        let (manifest_b, _) = cache_lookup(&key, sig).unwrap().unwrap();
+        let writer_a = prepare_cache_save(&key, sig, 1, 1, b"aaaa").unwrap();
+        let writer_b = prepare_cache_save(&key, sig, 2, 2, b"bbbb").unwrap();
+        assert_ne!(writer_a.scan_tmp.path(), writer_b.scan_tmp.path());
+        assert_ne!(writer_a.manifest_tmp.path(), writer_b.manifest_tmp.path());
+        replace_cache_file(writer_a.scan_tmp, &writer_a.scan_path).unwrap();
+        replace_cache_file(writer_b.scan_tmp, &writer_b.scan_path).unwrap();
+        replace_cache_file(writer_b.manifest_tmp, &writer_b.manifest_path).unwrap();
+        replace_cache_file(writer_a.manifest_tmp, &writer_a.manifest_path).unwrap();
+        assert!(cache_lookup(&key, sig).unwrap().is_none());
+        // A reader holding the older manifest also rejects replaced
+        // bytes. The CLI repeats this check on the bytes it will emit.
+        assert!(!manifest_b.matches_scan_msgpack(b"aaaa"));
+        cache_save(&key, sig, 3, 3, b"cccc").unwrap();
+        let (manifest, path) = cache_lookup(&key, sig).unwrap().unwrap();
+        assert_eq!(manifest.entry_count, 3);
+        assert!(manifest.matches_scan_msgpack(&fs::read(path).unwrap()));
+    }
+
+    #[test]
+    fn concurrent_saves_use_independent_staging_and_never_validate_mixed_bytes() {
+        use std::sync::{Arc, Barrier};
+        let g = with_temp_cache_dir();
+        let root = g.path().join("tree");
+        make_tree(&root).unwrap();
+        let key = CacheKey::for_path(&root).unwrap();
+        let (sig, _) = compute_directory_signature(&root).unwrap();
+        let barrier = Arc::new(Barrier::new(4));
+        let paths = std::thread::scope(|scope| {
+            let handles: Vec<_> = (1u8..=4)
+                .map(|generation| {
+                    let barrier = Arc::clone(&barrier);
+                    let key = &key;
+                    scope.spawn(move || {
+                        let pending = prepare_cache_save(
+                            key,
+                            sig,
+                            generation as usize,
+                            1,
+                            &[generation; 512],
+                        )
+                        .unwrap();
+                        let paths = (
+                            pending.scan_tmp.path().to_owned(),
+                            pending.manifest_tmp.path().to_owned(),
+                        );
+                        barrier.wait();
+                        replace_cache_file(pending.scan_tmp, &pending.scan_path).unwrap();
+                        // All blobs are published before any manifests,
+                        // forcing real publication overlap deterministically.
+                        barrier.wait();
+                        replace_cache_file(pending.manifest_tmp, &pending.manifest_path).unwrap();
+                        paths
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| h.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        let unique: std::collections::HashSet<_> =
+            paths.into_iter().flat_map(|(a, b)| [a, b]).collect();
+        assert_eq!(unique.len(), 8);
+        if let Some((manifest, path)) = cache_lookup(&key, sig).unwrap() {
+            assert_eq!(
+                fs::read(&path).unwrap(),
+                vec![manifest.entry_count as u8; 512]
+            );
+        }
+        // Whether the concurrent final pair hit or conservatively missed,
+        // an ordinary subsequent save restores a coherent generation.
+        cache_save(&key, sig, 9, 1, b"repaired").unwrap();
+        let (manifest, path) = cache_lookup(&key, sig).unwrap().unwrap();
+        assert_eq!(manifest.entry_count, 9);
+        assert_eq!(fs::read(path).unwrap(), b"repaired");
     }
 
     /// `.tmp` files left behind from an interrupted save must

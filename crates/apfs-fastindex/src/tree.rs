@@ -112,25 +112,10 @@ pub struct Tree {
     /// are contiguous and dense (one big allocation instead of
     /// one Vec per dir).
     pub children_arena: Vec<u32>,
-    /// Flat lowercased-name buffer. All node names lowercased
-    /// and concatenated into one contiguous `Vec<u8>`; per-node
-    /// slices are recovered via `names_lower_offsets`.
-    ///
-    /// Why flat: the obvious shape `Vec<String>` puts each
-    /// name on the heap behind a separate allocation. The
-    /// search loop's hot path is "scan every name with the
-    /// same needle"; 1.5 M random-pointer reads (one per name
-    /// header) is ~10-20× slower than 1.5 M sequential bytes,
-    /// because the CPU can prefetch the contiguous buffer but
-    /// not the heap-scattered Strings. EX-33 measured search
-    /// latency dropping from ~30-55 ms to ~3-6 ms after this
-    /// refactor on a 1.5 M-entry `/Users/kai` scan.
-    ///
-    /// Memory cost: same byte volume as the `Vec<String>`
-    /// shape (the lowercased bytes themselves are the same),
-    /// minus 24 B/node of String header overhead = ~36 MiB
-    /// saved on a 1.5 M-node tree. Plus 4 B/node for the
-    /// offsets table (~6 MiB) — net win of ~30 MiB.
+    /// Canonical caseless search keys, concatenated into one buffer.
+    /// The query uses the same folding in `crate::search`. Keeping keys
+    /// contiguous avoids a separate allocation and pointer chase per name.
+    /// Display names and paths retain their original bytes.
     pub names_lower_buf: Vec<u8>,
     /// Cumulative byte-offsets into `names_lower_buf`. Name
     /// for node `i` lives at `[offsets[i]..offsets[i+1]]`.
@@ -141,7 +126,7 @@ pub struct Tree {
 }
 
 impl Tree {
-    /// Borrow the lowercased name bytes for node `idx`. O(1).
+    /// Borrow the caseless search key for node `idx`. O(1).
     /// Returns an empty slice for out-of-range indices.
     #[inline]
     pub fn name_lower_bytes(&self, idx: u32) -> &[u8] {
@@ -168,8 +153,8 @@ impl Tree {
     /// approximated by emptying it at the end of construction).
     pub fn build(entries: &[NamespaceEntry]) -> Self {
         // Pre-size the major buffers. `entries.len() + 1` is the
-        // upper bound on node count (one node per entry plus
-        // root); on real scans synthesised dirs make the actual
+        // estimate of node count (one node per entry plus
+        // root); on real scans synthesised dirs can make the actual
         // count a bit larger but the over-allocation cost is
         // tiny vs. the savings from skipping Vec growth.
         let cap = entries.len() + 1;
@@ -189,10 +174,8 @@ impl Tree {
         // duplicate-detection during build. Indexed by node_idx,
         // `None` for leaves. Saves ~5× the HashMap allocations
         // on a file-heavy scan (most rows are files). The key is
-        // `Box<str>` rather than `String` so the map and the
-        // owning `TreeNode.name` can share the same allocation
-        // — we clone the box (one alloc) instead of allocating
-        // the name string twice.
+        // `Box<str>` rather than `String` to avoid storing spare
+        // capacity in each key. Cloning a box copies the name bytes.
         let mut child_maps: Vec<Option<FxChildMap>> = Vec::with_capacity(cap);
 
         // Index 0 = root. Empty path; the renderer displays it
@@ -251,8 +234,8 @@ impl Tree {
                 // input and removes the foot-gun for future
                 // refactors. `expect` is fine here — a non-UTF-8
                 // sub-slice of a `&str` is impossible.
-                let name = std::str::from_utf8(&bytes[seg_start..i])
-                    .expect("segment of &str is UTF-8");
+                let name =
+                    std::str::from_utf8(&bytes[seg_start..i]).expect("segment of &str is UTF-8");
 
                 if is_last {
                     match entry.entry_kind {
@@ -394,39 +377,15 @@ impl Tree {
         }
         drop(child_lists);
 
-        // Pre-lowercase every node's name once, into a flat
-        // byte buffer with cumulative-offset boundaries. The
-        // search loop scans this contiguously — the CPU can
-        // prefetch sequential bytes, which a `Vec<String>`
-        // would defeat by scattering each name on the heap.
-        // See `names_lower_buf` docs for the trade-off.
-        //
-        // Pre-size the buffer: sum of name lengths gives the
-        // exact byte volume. Saves the doubling allocs that
-        // `Vec::extend_from_slice` would otherwise do on a
-        // 1.5 M-node tree.
+        // Build search keys once, with offsets into a contiguous buffer.
+        // Raw name lengths estimate capacity. Unicode folding and
+        // normalization can change the byte count.
         let total_name_bytes: usize = nodes.iter().map(|n| n.name.len()).sum();
         let mut names_lower_buf: Vec<u8> = Vec::with_capacity(total_name_bytes);
         let mut names_lower_offsets: Vec<u32> = Vec::with_capacity(nodes.len() + 1);
         names_lower_offsets.push(0);
-        // Scratch String reused across iterations — `to_lowercase`
-        // allocates fresh each call, so we copy into a scratch
-        // and then extend the flat buffer. For typical filenames
-        // (≤ 64 B) the scratch never grows after the first few
-        // entries.
-        let mut scratch = String::new();
         for node in &nodes {
-            scratch.clear();
-            // `chars().flat_map(|c| c.to_lowercase())` is the
-            // same machinery `str::to_lowercase` uses but
-            // writes into our scratch instead of allocating
-            // a new String. Saves one allocation per node.
-            for ch in node.name.chars() {
-                for lo in ch.to_lowercase() {
-                    scratch.push(lo);
-                }
-            }
-            names_lower_buf.extend_from_slice(scratch.as_bytes());
+            crate::search::append_folded(&node.name, &mut names_lower_buf);
             names_lower_offsets.push(names_lower_buf.len() as u32);
         }
 
@@ -573,8 +532,7 @@ impl Tree {
             // variant — never fails on `&str` sub-slices, but
             // catches any future refactor that introduces an
             // unchecked input path.
-            let name = std::str::from_utf8(&bytes[seg_start..i])
-                .expect("segment of &str is UTF-8");
+            let name = std::str::from_utf8(&bytes[seg_start..i]).expect("segment of &str is UTF-8");
             let mut found: Option<u32> = None;
             for &child_idx in self.children_of(cursor) {
                 if &*self.nodes[child_idx as usize].name == name {
@@ -708,6 +666,30 @@ mod tests {
         assert_eq!(tree.node_index_for_path("/"), 0);
         assert_ne!(tree.node_index_for_path("file.txt"), NODE_INVALID);
         assert_eq!(tree.node_index_for_path("nonexistent"), NODE_INVALID);
+    }
+
+    #[test]
+    fn cached_names_match_search_folding() {
+        let names = ["README.TXT", "ΟΣ", "ΟΣ.txt", "İstanbul", "Straße", "ÉCOLE"];
+        let entries: Vec<_> = names
+            .iter()
+            .map(|name| entry(name, EntryKind::File, 1, Some(1)))
+            .collect();
+        let tree = Tree::build(&entries);
+        for (idx, node) in tree.nodes.iter().enumerate() {
+            let mut expected = Vec::new();
+            crate::search::append_folded(&node.name, &mut expected);
+            assert_eq!(tree.name_lower_bytes(idx as u32), expected);
+        }
+        assert_eq!(
+            tree.name_lower_bytes(tree.node_index_for_path("ΟΣ")),
+            "οσ".as_bytes()
+        );
+        assert_eq!(
+            tree.compute_path(tree.node_index_for_path("ÉCOLE"))
+                .as_ref(),
+            "ÉCOLE"
+        );
     }
 
     /// Regression test for the audit #3 stack-overflow vector.

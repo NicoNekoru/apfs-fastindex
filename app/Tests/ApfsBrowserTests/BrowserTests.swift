@@ -196,6 +196,48 @@ enum BrowserTests {
         model.clearFilters()
         expect(model.highlightedNodes == nil && !model.filtering, "Clear resets highlighting and progress")
 
+        let unknownSizes = FixtureTree([
+            .init(name: "root", kind: .dir, parent: nil),
+            .init(name: "unknown.txt", allocated: nil),
+            .init(name: "empty.txt", allocated: 0),
+            .init(name: "known.txt", allocated: 1),
+        ])
+        model.install(unknownSizes, metric: .allocated)
+        expect(model.rows.map(\.node) == [0, 3, 2, 1], "Unknown allocation sorts after known zero in folders")
+        model.toggleExtension(".txt")
+        await settle(model)
+        expect(model.rows.map(\.node) == [3, 2, 1], "Unknown allocation sorts after known zero in filtered results")
+
+        for relative in ["/Documents/file", "file\u{0}other"] {
+            expect(PathContainment.resolveContained(scanRoot: "/Users/me", relative: relative) == nil,
+                "Absolute and NUL-containing entry paths are rejected")
+        }
+        expect(PathContainment.resolveContained(scanRoot: "/Users/me\u{0}other", relative: "file") == nil,
+            "NUL-containing scan roots are rejected")
+        do {
+            let manager = FileManager.default
+            let fixture = manager.temporaryDirectory.appendingPathComponent("apfs-containment-\(UUID().uuidString)")
+            try manager.createDirectory(at: fixture, withIntermediateDirectories: false)
+            defer { try? manager.removeItem(at: fixture) }
+            let root = fixture.appendingPathComponent("root")
+            let outside = fixture.appendingPathComponent("outside")
+            try manager.createDirectory(at: root, withIntermediateDirectories: false)
+            try manager.createDirectory(at: outside, withIntermediateDirectories: false)
+            try manager.createSymbolicLink(at: root.appendingPathComponent("escape"), withDestinationURL: outside)
+            try manager.createSymbolicLink(at: root.appendingPathComponent("dangling"), withDestinationURL: outside.appendingPathComponent("missing"))
+            try manager.createSymbolicLink(at: fixture.appendingPathComponent("alias"), withDestinationURL: root)
+            expect(PathContainment.resolveContained(scanRoot: root.path, relative: "escape/file") == nil,
+                "An ancestor symlink cannot redirect an action outside the root")
+            expect(PathContainment.resolveContained(scanRoot: root.path, relative: "dangling") != nil,
+                "The final dangling symlink itself remains actionable")
+            expect(PathContainment.resolveContained(scanRoot: fixture.appendingPathComponent("alias").path, relative: "file") != nil,
+                "A symlink scan root still accepts its own descendants")
+            expect(!PathContainment.volumeIsCaseInsensitive(at: fixture.appendingPathComponent("missing")),
+                "Unknown volumes fail closed on case mismatches")
+        } catch {
+            expect(false, "Containment fixture failed. \(error)")
+        }
+
         let deep = FixtureTree(
             (0..<600).map {
                 .init(name: "folder\($0)", kind: .dir, parent: $0 == 0 ? nil : UInt32($0 - 1))

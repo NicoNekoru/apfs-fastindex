@@ -99,12 +99,12 @@ impl ExtSummary {
         // when two extensions tie.
         rows.sort_by(|a, b| {
             let av = match metric {
-                Metric::Logical => a.value_logical,
-                Metric::Allocated => a.value_allocated.unwrap_or(0),
+                Metric::Logical => Some(a.value_logical),
+                Metric::Allocated => a.value_allocated,
             };
             let bv = match metric {
-                Metric::Logical => b.value_logical,
-                Metric::Allocated => b.value_allocated.unwrap_or(0),
+                Metric::Logical => Some(b.value_logical),
+                Metric::Allocated => b.value_allocated,
             };
             bv.cmp(&av).then_with(|| a.ext.cmp(&b.ext))
         });
@@ -114,7 +114,7 @@ impl ExtSummary {
                 Metric::Logical => r.value_logical,
                 Metric::Allocated => r.value_allocated.unwrap_or(0),
             })
-            .sum();
+            .fold(0, u64::saturating_add);
         ExtSummary {
             rows,
             total_value,
@@ -189,5 +189,50 @@ mod tests {
         assert_eq!(summary.rows[1].ext, ".rs");
         assert_eq!(summary.rows[2].ext, "(no ext)");
         assert_eq!(summary.total_value, 1000 + 2000 + 500 + 250 + 100);
+    }
+
+    #[test]
+    fn totals_saturate_across_extension_rows() {
+        let tree = Tree::build(&[
+            entry("huge.a", EntryKind::File, u64::MAX),
+            entry("small.b", EntryKind::File, 1),
+        ]);
+        for metric in [Metric::Logical, Metric::Allocated] {
+            assert_eq!(ExtSummary::build(&tree, 0, metric).total_value, u64::MAX);
+        }
+    }
+
+    #[test]
+    fn summary_keeps_unknown_allocation_and_category_boundaries() {
+        let mut unknown = entry("a/unknown.JPG", EntryKind::File, 2);
+        unknown.allocated_size = None;
+        let tree = Tree::build(&[
+            entry("a", EntryKind::Dir, 0),
+            entry("a/known.jpg", EntryKind::File, 3),
+            unknown,
+            entry("outside.jpg", EntryKind::File, 7),
+            entry("a/link.jpg", EntryKind::Symlink, 1),
+            entry("a/file.ÄBC", EntryKind::File, 4),
+        ]);
+        let summary = ExtSummary::build(&tree, tree.node_index_for_path("a"), Metric::Allocated);
+        let jpg = summary.rows.iter().find(|row| row.ext == ".jpg").unwrap();
+        assert_eq!(
+            (jpg.file_count, jpg.value_logical, jpg.value_allocated),
+            (2, 5, None)
+        );
+        assert!(summary.any_unclaimed);
+        assert!(summary.rows.iter().any(|row| row.ext == "(symlink)"));
+        assert!(summary.rows.iter().any(|row| row.ext == ".Äbc"));
+        assert_eq!(summary.total_value, 5);
+    }
+
+    #[test]
+    fn known_zero_allocation_sorts_before_unknown_categories() {
+        let mut unknown = entry("unknown.a", EntryKind::File, 1);
+        unknown.allocated_size = None;
+        let tree = Tree::build(&[unknown, entry("empty.b", EntryKind::File, 0)]);
+        let summary = ExtSummary::build(&tree, 0, Metric::Allocated);
+        assert_eq!(summary.rows[0].ext, ".b");
+        assert_eq!(summary.rows[1].ext, ".a");
     }
 }

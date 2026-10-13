@@ -245,18 +245,29 @@ public final class BrowserModel: ObservableObject {
         } else {
             candidates = Array(nameMatches ?? [])
         }
-        var scored: [(UInt32, UInt64)] = []
+        var scored: [(UInt32, UInt64?)] = []
         scored.reserveCapacity(candidates.count)
         for node in candidates {
             if Task.isCancelled { return ([], []) }
             scored.append(
                 (
                     node,
-                    metric == .allocated ? tree.valueAllocated(of: node) ?? 0 : tree.valueLogical(of: node)
+                    metric == .allocated ? tree.valueAllocated(of: node) : tree.valueLogical(of: node)
                 ))
         }
-        scored.sort { $0.1 == $1.1 ? $0.0 < $1.0 : $0.1 > $1.1 }
+        scored.sort(by: largerFirst)
         return (scored.map(\.0), highlighted)
+    }
+
+    nonisolated private static func largerFirst(
+        _ lhs: (UInt32, UInt64?), _ rhs: (UInt32, UInt64?)
+    ) -> Bool {
+        switch (lhs.1, rhs.1) {
+        case let (a?, b?): return a == b ? lhs.0 < rhs.0 : a > b
+        case (_?, nil): return true
+        case (nil, _?): return false
+        case (nil, nil): return lhs.0 < rhs.0
+        }
     }
 
     private func rebuildRows() {
@@ -308,9 +319,9 @@ public final class BrowserModel: ObservableObject {
                 sorted = cached
             } else {
                 let scored = children.map {
-                    ($0, metric == .allocated ? tree.valueAllocated(of: $0) ?? 0 : tree.valueLogical(of: $0))
+                    ($0, metric == .allocated ? tree.valueAllocated(of: $0) : tree.valueLogical(of: $0))
                 }
-                sorted = scored.sorted { $0.1 == $1.1 ? $0.0 < $1.0 : $0.1 > $1.1 }.map(\.0)
+                sorted = scored.sorted(by: Self.largerFirst).map(\.0)
                 sortedChildren[node] = sorted
             }
             let limit = limits[node] ?? Self.pageSize

@@ -7,11 +7,8 @@
 //! `src/apfs_fastindex/fallback_traversal.py` and is gated by EX-21 shape
 //! parity.
 //!
-//! Today's backend is `std::fs::read_dir` + `symlink_metadata` (an `lstat`
-//! per entry). That is correct on any Unix host but does one syscall per
-//! file. A future pass can swap in a macOS `getattrlistbulk` backend
-//! without changing the public contract; the module split here is
-//! deliberate so that swap is bounded.
+//! macOS uses `getattrlistbulk`, with descriptor-relative POSIX traversal
+//! on a bulk failure. Other Unix hosts use `read_dir` and `lstat`.
 //!
 //! Support-matrix cell covered today: locally mounted directory the
 //! current user can read. Not covered (still v1-excluded): live boot
@@ -34,6 +31,8 @@
 //!   the v1 namespace contract requires UTF-8 paths)
 //! - `read_error` (any other `io::Error` returned while reading the
 //!   directory or its entries — kept open for ENOMEM/EIO/etc.)
+//! - `directory_changed` (a queued path no longer names the observed
+//!   directory, or a changing directory iterator returned a name twice)
 //!
 //! ## Field semantics
 //!
@@ -95,33 +94,48 @@ type FirmlinkOverlaySet = HashSet<PathBuf>;
 ///
 /// File format (since macOS Catalina): one firmlink per line as
 /// `<source-path>\t<destination-rel>`. The underlying path on the
-/// Data volume is `/System/Volumes/Data` joined with the source's
-/// path components (stripping the leading `/`).
+/// Data volume is `/System/Volumes/Data` joined with the destination.
 fn read_firmlink_overlays(scan_root: &Path) -> FirmlinkOverlaySet {
-    let mut out = FirmlinkOverlaySet::new();
     // Only meaningful when the scan root is `/`; narrower scans
     // either don't reach `/System/Volumes/Data` or have the user
     // intentionally aimed at it.
     if scan_root != Path::new("/") {
-        return out;
+        return FirmlinkOverlaySet::new();
     }
     let path = Path::new("/usr/share/firmlinks");
     let Ok(contents) = std::fs::read_to_string(path) else {
-        return out;
+        return FirmlinkOverlaySet::new();
     };
+    firmlink_overlays_from_contents(&contents)
+}
+
+fn firmlink_overlays_from_contents(contents: &str) -> FirmlinkOverlaySet {
+    let mut out = FirmlinkOverlaySet::new();
     for line in contents.lines() {
-        let Some((source, _dest)) = line.split_once('\t') else {
+        let Some((source, destination)) = line.split_once('\t') else {
             continue;
         };
-        let trimmed = source.trim();
-        if trimmed.is_empty() {
+        let destination = Path::new(destination.trim());
+        if source.trim().is_empty()
+            || destination.as_os_str().is_empty()
+            || !destination
+                .components()
+                .all(|c| matches!(c, std::path::Component::Normal(_)))
+        {
             continue;
         }
-        let suffix = trimmed.trim_start_matches('/');
-        let underlying = Path::new("/System/Volumes/Data").join(suffix);
+        let underlying = Path::new("/System/Volumes/Data").join(destination);
         out.insert(underlying);
     }
     out
+}
+
+/// Bound untrusted CLI/FFI worker counts before allocating or spawning.
+/// Existing normal settings are unchanged, and zero still selects serial.
+const MAX_FALLBACK_THREADS: usize = 64;
+
+fn normalize_fallback_threads(requested: usize) -> usize {
+    requested.clamp(1, MAX_FALLBACK_THREADS)
 }
 
 /// Tracks `(dev_id, file_id)` pairs for every directory the walker has
@@ -295,6 +309,14 @@ pub struct FallbackScanOutput {
     pub not_claimed: Vec<String>,
 }
 
+/// Device identity belongs to traversal and aggregate construction, not the
+/// public wire schema. Moving this wrapper into NamespaceEntry does not clone
+/// names, targets, or entries, and needs no parallel path-to-device map.
+struct WalkEntry {
+    entry: NamespaceEntry,
+    dev_id: u64,
+}
+
 /// Walk `root` and produce a `FallbackScanOutput`.
 ///
 /// `root` must point at a directory the current user can read. Returns a
@@ -320,7 +342,7 @@ pub fn fallback_scan_path_with_options<P: AsRef<Path>>(
     let root_dev = root_meta.dev();
     let root_ino = root_meta.ino();
     let cross_mounts = options.cross_mounts;
-    let threads = options.threads.max(1);
+    let threads = normalize_fallback_threads(options.threads);
 
     // Seed the directory-inode dedup tracker with the root so any path
     // that loops back to it (rare but possible via symlink misuse or
@@ -338,7 +360,7 @@ pub fn fallback_scan_path_with_options<P: AsRef<Path>>(
     let (mut entries, mut walk_skips) = if threads <= 1 {
         scan_serial(
             &resolved,
-            root_dev,
+            (root_dev, root_ino),
             cross_mounts,
             options.progress,
             &visited_dirs,
@@ -348,7 +370,7 @@ pub fn fallback_scan_path_with_options<P: AsRef<Path>>(
     } else {
         scan_parallel(
             &resolved,
-            root_dev,
+            (root_dev, root_ino),
             cross_mounts,
             threads,
             options.progress,
@@ -366,7 +388,7 @@ pub fn fallback_scan_path_with_options<P: AsRef<Path>>(
     // order, so the post-walk sort is doing real work for it; serial
     // mode produces approximately-DFS order and the sort completes
     // quickly via the existing already-mostly-sorted optimisation.
-    entries.sort_unstable_by(|a, b| a.path.cmp(&b.path));
+    entries.sort_unstable_by(|a, b| a.entry.path.cmp(&b.entry.path));
     walk_skips.sort_unstable_by(|a, b| a.path.cmp(&b.path));
     let sort_done = Instant::now();
     let aggregates = if options.skip_aggregates {
@@ -375,6 +397,7 @@ pub fn fallback_scan_path_with_options<P: AsRef<Path>>(
         build_aggregates(&entries)
     };
     let aggregates_done = Instant::now();
+    let entries: Vec<NamespaceEntry> = entries.into_iter().map(|row| row.entry).collect();
 
     // Optional per-phase timing dump for the perf_probe ablation
     // runs. Off by default; gated on `APFS_PHASE_TIMINGS=1` so
@@ -427,10 +450,15 @@ pub fn fallback_scan_path_with_options<P: AsRef<Path>>(
     let thread_clause = if threads <= 1 {
         "single-threaded walk".to_string()
     } else {
-        format!("{}-thread parallel walk (EX-25 validated)", threads)
+        format!("up to {}-thread parallel walk (EX-25 validated)", threads)
+    };
+    let emitted_rows = if options.skip_aggregates {
+        "NamespaceEntry rows"
+    } else {
+        "NamespaceEntry + DirectoryAggregate rows"
     };
     let claim = format!(
-        "Rust path emits one mounted directory's NamespaceEntry + DirectoryAggregate rows via \
+        "Rust path emits one mounted directory's {emitted_rows} via \
          POSIX traversal ({thread_clause}); logical size is st_size for files and symlink target \
          length for symlinks; allocated size is st_blocks*512 for files and zero for \
          symlinks/directories (EX-22 oracle); per-entry permission/access errors are skipped and \
@@ -440,6 +468,7 @@ pub fn fallback_scan_path_with_options<P: AsRef<Path>>(
     let not_claimed = vec![
         "raw APFS-specific size sources (dstream / decmpfs precedence)".to_string(),
         "live mounted raw-scan correctness".to_string(),
+        "atomic snapshot of a changing mounted namespace".to_string(),
         "exclusive / shared / snapshot-retained byte accounting".to_string(),
         "incremental cache reuse".to_string(),
         "encryption decryption or keybag handling".to_string(),
@@ -467,19 +496,20 @@ pub fn fallback_scan_path_with_options<P: AsRef<Path>>(
 /// callback contract — the callback fires from this thread only).
 fn scan_serial(
     resolved: &Path,
-    root_dev: u64,
+    root_identity: (u64, u64),
     cross_mounts: bool,
     progress: Option<&mut (dyn FnMut(ProgressEvent) + Send)>,
     visited_dirs: &VisitedDirs,
     firmlink_overlays: &FirmlinkOverlaySet,
     scan_start: Instant,
-) -> (Vec<NamespaceEntry>, Vec<WalkSkip>) {
+) -> (Vec<WalkEntry>, Vec<WalkSkip>) {
     let mut progress = progress;
-    let mut entries: Vec<NamespaceEntry> = Vec::new();
+    let mut entries: Vec<WalkEntry> = Vec::new();
     let mut walk_skips: Vec<WalkSkip> = Vec::new();
     let mut stack: Vec<WalkFrame> = vec![WalkFrame {
         absolute: resolved.to_path_buf(),
         relative: PathBuf::new(),
+        expected_identity: root_identity,
     }];
     let mut bulk_reader = BulkReader::new();
     let mut bulk_children: Vec<BulkEntry> = Vec::new();
@@ -498,7 +528,7 @@ fn scan_serial(
             let now = Instant::now();
             if now >= next_progress_tick {
                 for e in &entries[bytes_cursor..] {
-                    bytes_total = bytes_total.saturating_add(e.logical_size);
+                    bytes_total = bytes_total.saturating_add(e.entry.logical_size);
                 }
                 bytes_cursor = entries.len();
                 cb(ProgressEvent {
@@ -514,7 +544,7 @@ fn scan_serial(
         new_frames.clear();
         walk_one_directory(
             &frame,
-            root_dev,
+            root_identity.0,
             cross_mounts,
             &mut bulk_reader,
             &mut bulk_children,
@@ -533,7 +563,7 @@ fn scan_serial(
 
     if let Some(cb) = progress.as_mut() {
         for e in &entries[bytes_cursor..] {
-            bytes_total = bytes_total.saturating_add(e.logical_size);
+            bytes_total = bytes_total.saturating_add(e.entry.logical_size);
         }
         cb(ProgressEvent {
             scanned: entries.len() as u64,
@@ -566,17 +596,18 @@ fn scan_serial(
 #[allow(clippy::too_many_arguments)]
 fn scan_parallel(
     resolved: &Path,
-    root_dev: u64,
+    root_identity: (u64, u64),
     cross_mounts: bool,
     threads: usize,
     progress: Option<&mut (dyn FnMut(ProgressEvent) + Send)>,
     visited_dirs: &Arc<VisitedDirs>,
     firmlink_overlays: &Arc<FirmlinkOverlaySet>,
     scan_start: Instant,
-) -> (Vec<NamespaceEntry>, Vec<WalkSkip>) {
+) -> (Vec<WalkEntry>, Vec<WalkSkip>) {
     let queue = Arc::new(WorkQueue::new(vec![WalkFrame {
         absolute: resolved.to_path_buf(),
         relative: PathBuf::new(),
+        expected_identity: root_identity,
     }]));
     // Atomic counters drive the progress thread. Workers bump
     // them as they accumulate per-thread entries / skips; the
@@ -588,120 +619,108 @@ fn scan_parallel(
     let skipped_count = Arc::new(AtomicU64::new(0));
     let bytes_count = Arc::new(AtomicU64::new(0));
     let progress_done = Arc::new(AtomicBool::new(false));
+    let progress = Mutex::new(progress);
 
-    std::thread::scope(|scope| -> (Vec<NamespaceEntry>, Vec<WalkSkip>) {
+    std::thread::scope(|scope| -> (Vec<WalkEntry>, Vec<WalkSkip>) {
+        // This guard must live inside the scope body. During unwinding it
+        // stops the progress loop before scope automatically joins threads.
+        let _finish_progress = FinishProgressOnDrop(&progress_done);
         // Optional progress thread. We move the &mut callback
         // (Send-bounded) into the spawned closure so it lives for
         // the whole scope. The callback fires roughly every 250 ms,
         // matching the serial walker's cadence so consumers
         // (SwiftUI status bar, terminal stderr) see the same shape.
-        let progress_handle = progress.map(|callback| {
+        let progress_handle = if progress.lock().unwrap().is_some() {
             let scanned = Arc::clone(&scanned_count);
             let skipped = Arc::clone(&skipped_count);
             let bytes = Arc::clone(&bytes_count);
             let done = Arc::clone(&progress_done);
-            scope.spawn(move || {
-                let interval = Duration::from_millis(250);
-                // Poll cadence is short so the done-flag latency is
-                // bounded; the callback itself only fires on the
-                // 250 ms tick.
-                let poll = Duration::from_millis(50);
-                let mut next_tick = scan_start + interval;
-                loop {
-                    if done.load(Ordering::Acquire) {
-                        break;
+            let callback = &progress;
+            std::thread::Builder::new()
+                .spawn_scoped(scope, move || {
+                    let interval = Duration::from_millis(250);
+                    // Poll cadence is short so the done-flag latency is
+                    // bounded; the callback itself only fires on the
+                    // 250 ms tick.
+                    let poll = Duration::from_millis(50);
+                    let mut next_tick = scan_start + interval;
+                    loop {
+                        if done.load(Ordering::Acquire) {
+                            break;
+                        }
+                        let now = Instant::now();
+                        if now >= next_tick {
+                            callback.lock().unwrap().as_mut().unwrap()(ProgressEvent {
+                                scanned: scanned.load(Ordering::Relaxed),
+                                skipped: skipped.load(Ordering::Relaxed),
+                                bytes: bytes.load(Ordering::Relaxed),
+                                elapsed: now.duration_since(scan_start),
+                                terminal: false,
+                            });
+                            next_tick = now + interval;
+                        }
+                        std::thread::sleep(poll);
                     }
-                    let now = Instant::now();
-                    if now >= next_tick {
-                        callback(ProgressEvent {
-                            scanned: scanned.load(Ordering::Relaxed),
-                            skipped: skipped.load(Ordering::Relaxed),
-                            bytes: bytes.load(Ordering::Relaxed),
-                            elapsed: now.duration_since(scan_start),
-                            terminal: false,
-                        });
-                        next_tick = now + interval;
-                    }
-                    std::thread::sleep(poll);
-                }
-                // Final terminal event with the most recent counts.
-                callback(ProgressEvent {
-                    scanned: scanned.load(Ordering::Relaxed),
-                    skipped: skipped.load(Ordering::Relaxed),
-                    bytes: bytes.load(Ordering::Relaxed),
-                    elapsed: scan_start.elapsed(),
-                    terminal: true,
-                });
-            })
-        });
+                })
+                .ok()
+        } else {
+            None
+        };
 
         // Spawn N worker threads. Each owns its own BulkReader +
         // per-worker entries / skips Vecs, and bumps the shared
         // atomic counters as it processes a frame.
-        let mut handles: Vec<
-            std::thread::ScopedJoinHandle<'_, (Vec<NamespaceEntry>, Vec<WalkSkip>)>,
-        > = Vec::with_capacity(threads);
-        for _ in 0..threads {
+        let mut handles: Vec<std::thread::ScopedJoinHandle<'_, (Vec<WalkEntry>, Vec<WalkSkip>)>> =
+            Vec::with_capacity(threads);
+        for index in 0..threads {
             let q = Arc::clone(&queue);
             let scanned = Arc::clone(&scanned_count);
             let skipped = Arc::clone(&skipped_count);
             let bytes = Arc::clone(&bytes_count);
             let visited = Arc::clone(visited_dirs);
             let overlays = Arc::clone(firmlink_overlays);
-            handles.push(scope.spawn(move || {
-                let mut bulk_reader = BulkReader::new();
-                let mut bulk_children: Vec<BulkEntry> = Vec::new();
-                let mut local_entries: Vec<NamespaceEntry> = Vec::new();
-                let mut local_skips: Vec<WalkSkip> = Vec::new();
-                let mut new_frames: Vec<WalkFrame> = Vec::new();
-                while let Some(frame) = q.pop() {
-                    let prev_entries = local_entries.len();
-                    let prev_skips = local_skips.len();
-                    new_frames.clear();
-                    walk_one_directory(
-                        &frame,
-                        root_dev,
-                        cross_mounts,
-                        &mut bulk_reader,
-                        &mut bulk_children,
-                        &visited,
-                        &overlays,
-                        &mut local_entries,
-                        &mut local_skips,
-                        &mut new_frames,
-                    );
-                    let added_entries = (local_entries.len() - prev_entries) as u64;
-                    let added_skips = (local_skips.len() - prev_skips) as u64;
-                    if added_entries > 0 {
-                        scanned.fetch_add(added_entries, Ordering::Relaxed);
-                        // Sum logical bytes for the newly-added
-                        // entries and roll into the shared atomic.
-                        // Bounded by per-frame entries (~1-100),
-                        // not by total scan size.
-                        let mut added_bytes: u64 = 0;
-                        for e in &local_entries[prev_entries..] {
-                            added_bytes = added_bytes.saturating_add(e.logical_size);
-                        }
-                        if added_bytes > 0 {
-                            bytes.fetch_add(added_bytes, Ordering::Relaxed);
-                        }
-                    }
-                    if added_skips > 0 {
-                        skipped.fetch_add(added_skips, Ordering::Relaxed);
-                    }
-                    let drained: Vec<WalkFrame> = std::mem::take(&mut new_frames);
-                    q.push_many(drained);
-                    q.complete();
-                }
-                (local_entries, local_skips)
-            }));
+            match spawn_worker(scope, index, move || {
+                scan_worker(
+                    &q,
+                    root_identity.0,
+                    cross_mounts,
+                    &visited,
+                    &overlays,
+                    &scanned,
+                    &skipped,
+                    &bytes,
+                )
+            }) {
+                Ok(handle) => handles.push(handle),
+                Err(_) => break, // Started workers can drain the entire queue.
+            }
         }
 
         // Join all worker threads first.
-        let mut entries: Vec<NamespaceEntry> = Vec::new();
+        let mut entries: Vec<WalkEntry> = Vec::new();
         let mut walk_skips: Vec<WalkSkip> = Vec::new();
+        if handles.is_empty() {
+            // No worker could start. The caller can perform the same work
+            // without needing another thread or discarding the scan.
+            (entries, walk_skips) = scan_worker(
+                &queue,
+                root_identity.0,
+                cross_mounts,
+                visited_dirs,
+                firmlink_overlays,
+                &scanned_count,
+                &skipped_count,
+                &bytes_count,
+            );
+        }
         for h in handles {
-            let (e, s) = h.join().expect("fallback worker thread panicked");
+            let (e, s) = match h.join() {
+                Ok(result) => result,
+                Err(payload) => {
+                    queue.cancel();
+                    std::panic::resume_unwind(payload);
+                }
+            };
             entries.extend(e);
             walk_skips.extend(s);
         }
@@ -711,30 +730,167 @@ fn scan_parallel(
         // caller.
         progress_done.store(true, Ordering::Release);
         if let Some(h) = progress_handle {
-            h.join().expect("progress thread panicked");
+            if let Err(payload) = h.join() {
+                std::panic::resume_unwind(payload);
+            }
+        }
+        // This still fires if the optional progress thread could not start.
+        if let Some(callback) = progress.lock().unwrap().as_mut() {
+            callback(ProgressEvent {
+                scanned: scanned_count.load(Ordering::Relaxed),
+                skipped: skipped_count.load(Ordering::Relaxed),
+                bytes: bytes_count.load(Ordering::Relaxed),
+                elapsed: scan_start.elapsed(),
+                terminal: true,
+            });
         }
         (entries, walk_skips)
     })
 }
 
-/// Shared FIFO work queue + outstanding-work counter for the parallel
+struct FinishProgressOnDrop<'a>(&'a AtomicBool);
+
+impl Drop for FinishProgressOnDrop<'_> {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Release);
+    }
+}
+
+struct CancelWorkOnPanic<'a>(&'a WorkQueue);
+
+impl Drop for CancelWorkOnPanic<'_> {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            // Cancellation recovers poisoned state rather than panicking
+            // again from a destructor while the original panic unwinds.
+            self.0.cancel();
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static WORKER_SPAWN_FAILURE_AFTER: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    static WORKER_PANIC_AFTER_POP: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+}
+
+fn spawn_worker<'scope, 'env, F>(
+    scope: &'scope std::thread::Scope<'scope, 'env>,
+    _index: usize,
+    worker: F,
+) -> io::Result<std::thread::ScopedJoinHandle<'scope, (Vec<WalkEntry>, Vec<WalkSkip>)>>
+where
+    F: FnOnce() -> (Vec<WalkEntry>, Vec<WalkSkip>) + Send + 'scope,
+{
+    #[cfg(test)]
+    if WORKER_SPAWN_FAILURE_AFTER.with(|limit| limit.get().is_some_and(|n| _index >= n)) {
+        return Err(io::Error::other("injected worker spawn failure"));
+    }
+    std::thread::Builder::new().spawn_scoped(scope, worker)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn scan_worker(
+    queue: &WorkQueue,
+    root_dev: u64,
+    cross_mounts: bool,
+    visited: &VisitedDirs,
+    overlays: &FirmlinkOverlaySet,
+    scanned: &AtomicU64,
+    skipped: &AtomicU64,
+    bytes: &AtomicU64,
+) -> (Vec<WalkEntry>, Vec<WalkSkip>) {
+    let _cancel_on_panic = CancelWorkOnPanic(queue);
+    let mut bulk_reader = BulkReader::new();
+    let mut bulk_children = Vec::new();
+    let mut entries = Vec::new();
+    let mut skips = Vec::new();
+    let mut new_frames = Vec::new();
+    while let Some(frame) = queue.pop() {
+        #[cfg(test)]
+        queue.inject_worker_panic();
+        let prev_entries = entries.len();
+        let prev_skips = skips.len();
+        new_frames.clear();
+        walk_one_directory(
+            &frame,
+            root_dev,
+            cross_mounts,
+            &mut bulk_reader,
+            &mut bulk_children,
+            visited,
+            overlays,
+            &mut entries,
+            &mut skips,
+            &mut new_frames,
+        );
+        let added_entries = (entries.len() - prev_entries) as u64;
+        let added_skips = (skips.len() - prev_skips) as u64;
+        if added_entries > 0 {
+            scanned.fetch_add(added_entries, Ordering::Relaxed);
+        }
+        if added_skips > 0 {
+            skipped.fetch_add(added_skips, Ordering::Relaxed);
+        }
+        let added_bytes = entries[prev_entries..].iter().fold(0u64, |total, row| {
+            total.saturating_add(row.entry.logical_size)
+        });
+        if added_bytes > 0 {
+            // Rust 1.89 compatibility. Newer toolchains call this try_update.
+            #[allow(deprecated)]
+            let _ = bytes.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |total| {
+                Some(total.saturating_add(added_bytes))
+            });
+        }
+        queue.push_many(std::mem::take(&mut new_frames));
+        queue.complete();
+    }
+    (entries, skips)
+}
+
+/// Shared depth-first work queue + outstanding-work counter for the parallel
 /// walker. `pop` returns `None` only when the queue is empty AND every
-/// previously-popped frame has been marked `complete()`.
+/// previously-popped frame has been marked `complete()`, or when a panic
+/// cancels the scan. Cancellation cannot produce a successful partial scan.
 struct WorkQueue {
-    queue: Mutex<Vec<WalkFrame>>,
-    outstanding: Mutex<u64>,
+    state: Mutex<WorkQueueState>,
     cond: Condvar,
-    done: AtomicBool,
+    #[cfg(test)]
+    panic_after_pop: Option<bool>,
+}
+
+struct WorkQueueState {
+    queue: Vec<WalkFrame>,
+    /// Queued and currently-processing frames. A producer stays counted
+    /// until it has published all children and calls complete.
+    outstanding: u64,
+    cancelled: bool,
+    #[cfg(test)]
+    waiters: usize,
+}
+
+impl WorkQueueState {
+    fn cancel(&mut self) {
+        self.cancelled = true;
+        self.queue.clear();
+        self.outstanding = 0;
+    }
 }
 
 impl WorkQueue {
     fn new(initial: Vec<WalkFrame>) -> Self {
         let initial_len = initial.len() as u64;
         Self {
-            queue: Mutex::new(initial),
-            outstanding: Mutex::new(initial_len),
+            state: Mutex::new(WorkQueueState {
+                queue: initial,
+                outstanding: initial_len,
+                cancelled: false,
+                #[cfg(test)]
+                waiters: 0,
+            }),
             cond: Condvar::new(),
-            done: AtomicBool::new(false),
+            #[cfg(test)]
+            panic_after_pop: WORKER_PANIC_AFTER_POP.with(|mode| mode.get()),
         }
     }
 
@@ -742,54 +898,103 @@ impl WorkQueue {
         if items.is_empty() {
             return;
         }
-        {
-            let mut outstanding = self.outstanding.lock().unwrap();
-            *outstanding += items.len() as u64;
+        let mut state = self.recover_lock(self.state.lock());
+        if state.cancelled {
+            return;
         }
-        {
-            let mut queue = self.queue.lock().unwrap();
-            queue.extend(items);
-        }
+        assert!(
+            state.outstanding > 0,
+            "cannot publish work after completion"
+        );
+        state.outstanding = state
+            .outstanding
+            .checked_add(items.len() as u64)
+            .expect("work count overflow");
+        state.queue.extend(items);
+        drop(state);
         self.cond.notify_all();
     }
 
     fn pop(&self) -> Option<WalkFrame> {
+        let mut state = self.recover_lock(self.state.lock());
         loop {
-            let mut queue = self.queue.lock().unwrap();
-            if let Some(frame) = queue.pop() {
-                return Some(frame);
-            }
-            if self.done.load(Ordering::Acquire) {
+            if state.cancelled {
                 return None;
             }
-            // Queue empty but work may still be outstanding.
-            // Re-check outstanding under its own lock; if zero, flip
-            // done and wake everyone.
-            drop(queue);
-            {
-                let outstanding = self.outstanding.lock().unwrap();
-                if *outstanding == 0 {
-                    self.done.store(true, Ordering::Release);
-                    self.cond.notify_all();
-                    return None;
-                }
+            if let Some(frame) = state.queue.pop() {
+                return Some(frame);
             }
-            // Wait for new work or for the done flag.
-            let queue = self.queue.lock().unwrap();
-            let _ = self
-                .cond
-                .wait_timeout(queue, Duration::from_millis(50))
-                .unwrap();
+            if state.outstanding == 0 {
+                return None;
+            }
+            // Predicate checking and wait use the same lock as publication
+            // and completion, so notifications cannot fall between them.
+            #[cfg(test)]
+            {
+                state.waiters += 1;
+                self.cond.notify_all();
+            }
+            state = self.recover_lock(self.cond.wait(state));
+            #[cfg(test)]
+            {
+                state.waiters -= 1;
+            }
         }
     }
 
     fn complete(&self) {
-        let mut outstanding = self.outstanding.lock().unwrap();
-        *outstanding = outstanding.saturating_sub(1);
-        if *outstanding == 0 {
-            drop(outstanding);
+        let mut state = self.recover_lock(self.state.lock());
+        if state.cancelled {
+            return;
+        }
+        state.outstanding = state
+            .outstanding
+            .checked_sub(1)
+            .expect("completed a frame more than once");
+        if state.outstanding == 0 {
+            debug_assert!(state.queue.is_empty());
+            drop(state);
             self.cond.notify_all();
         }
+    }
+
+    fn cancel(&self) {
+        let mut state = self.recover_lock(self.state.lock());
+        state.cancel();
+        drop(state);
+        self.cond.notify_all();
+    }
+
+    fn recover_lock<'a>(
+        &self,
+        result: std::sync::LockResult<std::sync::MutexGuard<'a, WorkQueueState>>,
+    ) -> std::sync::MutexGuard<'a, WorkQueueState> {
+        match result {
+            Ok(state) => state,
+            Err(poisoned) => {
+                let mut state = poisoned.into_inner();
+                state.cancel();
+                self.cond.notify_all();
+                state
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn inject_worker_panic(&self) {
+        let Some(poison_queue) = self.panic_after_pop else {
+            return;
+        };
+        let mut state = self.recover_lock(self.state.lock());
+        // Hold the first frame until another worker really is waiting.
+        // The production build has no waiter counter or injection branch.
+        while state.waiters == 0 {
+            state = self.recover_lock(self.cond.wait(state));
+        }
+        if !poison_queue {
+            drop(state);
+        }
+        std::panic::panic_any("original injected worker panic");
     }
 }
 
@@ -814,18 +1019,18 @@ fn walk_one_directory(
     bulk_children: &mut Vec<BulkEntry>,
     visited_dirs: &VisitedDirs,
     firmlink_overlays: &FirmlinkOverlaySet,
-    out_entries: &mut Vec<NamespaceEntry>,
+    out_entries: &mut Vec<WalkEntry>,
     out_skips: &mut Vec<WalkSkip>,
     out_new_frames: &mut Vec<WalkFrame>,
 ) {
-    let children =
-        match sorted_children(&frame.absolute, &frame.relative, bulk_reader, bulk_children) {
-            Ok(children) => children,
-            Err(skip) => {
-                out_skips.push(skip);
-                return;
-            }
-        };
+    let (directory, children) = match sorted_children(frame, bulk_reader, bulk_children, out_skips)
+    {
+        Ok(result) => result,
+        Err(skip) => {
+            out_skips.push(skip);
+            return;
+        }
+    };
 
     for child in &children {
         if frame.relative.as_os_str().is_empty()
@@ -850,48 +1055,35 @@ fn walk_one_directory(
             }
         };
 
-        let (kind, file_id, file_logical_size, file_allocated_bytes, dev_id) =
-            if let Some(bulk) = &child.bulk {
-                (
-                    bulk.kind,
-                    bulk.file_id,
-                    bulk.logical_size,
-                    bulk.allocated_bytes,
-                    bulk.dev_id as u64,
-                )
-            } else {
-                let meta = match fs::symlink_metadata(&absolute) {
-                    Ok(meta) => meta,
-                    Err(err) => {
-                        out_skips.push(WalkSkip {
-                            path: relative_str.clone(),
-                            reason: io_skip_reason(&err),
-                        });
-                        continue;
-                    }
-                };
-                let kind = entry_kind_from_meta(&meta);
-                let size = if matches!(kind, EntryKind::File) {
-                    meta.size()
-                } else {
-                    0
-                };
-                let allocated = if matches!(kind, EntryKind::File) {
-                    meta.blocks().saturating_mul(512)
-                } else {
-                    0
-                };
-                (kind, meta.ino(), size, allocated, meta.dev())
-            };
+        // Bulk metadata for mountpoints and firmlinks describes the
+        // underlying directory, not the mounted/firmlink target. Refresh
+        // before making any mount or visited-inode decision.
+        let meta = match child_metadata(&directory, &child.name, child.bulk.as_ref()) {
+            Ok(meta) => meta,
+            Err(err) => {
+                out_skips.push(WalkSkip {
+                    path: relative_str,
+                    reason: io_skip_reason(&err),
+                });
+                continue;
+            }
+        };
+        let BulkMeta {
+            kind,
+            file_id,
+            logical_size: file_logical_size,
+            allocated_bytes: file_allocated_bytes,
+            dev_id,
+            ..
+        } = meta;
 
         let (logical_size, symlink_target) = match kind {
-            EntryKind::Symlink => match fs::read_link(&absolute) {
-                Ok(target_path) => {
+            EntryKind::Symlink => match directory.read_link(&child.name) {
+                Ok(target) => {
                     // `Box<str>` (16B) instead of `String` (24B) —
                     // symlink_target is set once and never grown,
                     // so the spare capacity slot of `String` is
                     // dead weight in `NamespaceEntry`.
-                    let target: Box<str> = target_path.to_string_lossy().as_ref().into();
                     (target.len() as u64, Some(target))
                 }
                 Err(err) => {
@@ -955,26 +1147,33 @@ fn walk_one_directory(
                 reason: "mount_boundary".to_string(),
             });
         }
-        out_entries.push(NamespaceEntry {
-            // `into_boxed_str()` is a free conversion (no realloc)
-            // when the String has zero spare capacity — and our
-            // `relative_str` came from `s.to_string()` on a fresh
-            // `&str`, so its capacity equals its length.
-            path: relative_str.into_boxed_str(),
-            entry_kind: kind,
-            file_id,
-            logical_size,
-            symlink_target,
-            allocated_size,
-            // EX-27 honesty: the fallback walker has no refcount info
-            // from POSIX (`stat` does not surface clone-share data on
-            // macOS). We report `real_size == allocated_size` so the
-            // shape parity with raw mode holds and the metric is
-            // observably non-deduped on this backend.
-            real_size: allocated_size,
+        out_entries.push(WalkEntry {
+            dev_id,
+            entry: NamespaceEntry {
+                // `into_boxed_str()` is a free conversion (no realloc)
+                // when the String has zero spare capacity — and our
+                // `relative_str` came from `s.to_string()` on a fresh
+                // `&str`, so its capacity equals its length.
+                path: relative_str.into_boxed_str(),
+                entry_kind: kind,
+                file_id,
+                logical_size,
+                symlink_target,
+                allocated_size,
+                // EX-27 honesty: the fallback walker has no refcount info
+                // from POSIX (`stat` does not surface clone-share data on
+                // macOS). We report `real_size == allocated_size` so the
+                // shape parity with raw mode holds and the metric is
+                // observably non-deduped on this backend.
+                real_size: allocated_size,
+            },
         });
         if is_dir && !cross_mount_skip {
-            out_new_frames.push(WalkFrame { absolute, relative });
+            out_new_frames.push(WalkFrame {
+                absolute,
+                relative,
+                expected_identity: (dev_id, file_id),
+            });
         }
     }
 }
@@ -982,6 +1181,7 @@ fn walk_one_directory(
 struct WalkFrame {
     absolute: PathBuf,
     relative: PathBuf,
+    expected_identity: (u64, u64),
 }
 
 struct ChildEntry {
@@ -991,20 +1191,197 @@ struct ChildEntry {
     bulk: Option<BulkMeta>,
 }
 
+#[derive(Clone, Copy)]
 struct BulkMeta {
     kind: EntryKind,
     file_id: u64,
     logical_size: u64,
     allocated_bytes: u64,
-    dev_id: u32,
+    dev_id: u64,
+    directory_needs_refresh: bool,
+}
+
+/// Only active workers retain descriptors. Queued frames carry identity
+/// numbers, so a wide tree cannot exhaust FDs through queued parent handles.
+struct PinnedDirectory {
+    #[cfg(target_os = "macos")]
+    file: fs::File,
+    #[cfg(not(target_os = "macos"))]
+    path: PathBuf,
+}
+
+impl PinnedDirectory {
+    fn open(frame: &WalkFrame) -> Result<Self, WalkSkip> {
+        let fail = |err: io::Error| WalkSkip {
+            path: skip_path_for(&frame.relative),
+            reason: io_skip_reason(&err),
+        };
+        #[cfg(target_os = "macos")]
+        let (directory, meta) = {
+            use std::os::unix::fs::OpenOptionsExt;
+            // The root was canonicalized once. Descendant paths must not
+            // follow a symlink introduced in any component during the walk.
+            let file = fs::OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW_ANY | libc::O_CLOEXEC)
+                .open(&frame.absolute)
+                .map_err(fail)?;
+            let meta = file.metadata().map_err(fail)?;
+            (Self { file }, meta)
+        };
+        #[cfg(not(target_os = "macos"))]
+        let (directory, meta) = {
+            let meta = fs::symlink_metadata(&frame.absolute).map_err(fail)?;
+            (
+                Self {
+                    path: frame.absolute.clone(),
+                },
+                meta,
+            )
+        };
+        if !meta.is_dir() || (meta.dev(), meta.ino()) != frame.expected_identity {
+            return Err(WalkSkip {
+                path: skip_path_for(&frame.relative),
+                reason: "directory_changed".to_string(),
+            });
+        }
+        Ok(directory)
+    }
+
+    fn metadata(&self, name: &str) -> io::Result<BulkMeta> {
+        #[cfg(target_os = "macos")]
+        {
+            use std::os::fd::AsRawFd;
+            let name = std::ffi::CString::new(name)
+                .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
+            let mut stat: libc::stat = unsafe { std::mem::zeroed() };
+            // fstatat follows mounted/firmlink targets but never a symlink
+            // entry. The parent descriptor pins the enumerated directory.
+            let rc = unsafe {
+                libc::fstatat(
+                    self.file.as_raw_fd(),
+                    name.as_ptr(),
+                    &mut stat,
+                    libc::AT_SYMLINK_NOFOLLOW,
+                )
+            };
+            if rc < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            let kind = entry_kind_from_mode(stat.st_mode as u32);
+            let regular = matches!(kind, EntryKind::File);
+            let logical_size = if regular {
+                u64::try_from(stat.st_size)
+                    .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "negative file size"))?
+            } else {
+                0
+            };
+            let allocated_bytes = if regular {
+                u64::try_from(stat.st_blocks)
+                    .map_err(|_| {
+                        io::Error::new(io::ErrorKind::InvalidData, "negative block count")
+                    })?
+                    .saturating_mul(512)
+            } else {
+                0
+            };
+            Ok(BulkMeta {
+                kind,
+                file_id: stat.st_ino,
+                logical_size,
+                allocated_bytes,
+                dev_id: stat.st_dev as u64,
+                directory_needs_refresh: false,
+            })
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let meta = fs::symlink_metadata(self.path.join(name))?;
+            let kind = entry_kind_from_meta(&meta);
+            let regular = matches!(kind, EntryKind::File);
+            Ok(BulkMeta {
+                kind,
+                file_id: meta.ino(),
+                logical_size: if regular { meta.size() } else { 0 },
+                allocated_bytes: if regular {
+                    meta.blocks().saturating_mul(512)
+                } else {
+                    0
+                },
+                dev_id: meta.dev(),
+                directory_needs_refresh: false,
+            })
+        }
+    }
+
+    fn read_link(&self, name: &str) -> io::Result<Box<str>> {
+        #[cfg(target_os = "macos")]
+        {
+            use std::os::fd::AsRawFd;
+            let name = std::ffi::CString::new(name)
+                .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
+            let mut bytes = vec![0u8; 256];
+            loop {
+                let count = unsafe {
+                    libc::readlinkat(
+                        self.file.as_raw_fd(),
+                        name.as_ptr(),
+                        bytes.as_mut_ptr().cast(),
+                        bytes.len(),
+                    )
+                };
+                if count < 0 {
+                    return Err(io::Error::last_os_error());
+                }
+                if (count as usize) < bytes.len() {
+                    return Ok(String::from_utf8_lossy(&bytes[..count as usize])
+                        .into_owned()
+                        .into_boxed_str());
+                }
+                bytes.resize(
+                    bytes
+                        .len()
+                        .checked_mul(2)
+                        .ok_or_else(|| io::Error::other("symlink target length overflow"))?,
+                    0,
+                );
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            Ok(fs::read_link(self.path.join(name))?
+                .to_string_lossy()
+                .into_owned()
+                .into_boxed_str())
+        }
+    }
+}
+
+fn child_metadata(
+    directory: &PinnedDirectory,
+    name: &str,
+    bulk: Option<&BulkMeta>,
+) -> io::Result<BulkMeta> {
+    match bulk {
+        Some(meta) if !matches!(meta.kind, EntryKind::Dir) || !meta.directory_needs_refresh => {
+            Ok(*meta)
+        }
+        _ => directory.metadata(name),
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static FORCE_BULK_FAILURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 fn sorted_children(
-    dir: &Path,
-    relative: &Path,
+    frame: &WalkFrame,
     bulk_reader: &mut BulkReader,
     bulk_children: &mut Vec<BulkEntry>,
-) -> Result<Vec<ChildEntry>, WalkSkip> {
+    out_skips: &mut Vec<WalkSkip>,
+) -> Result<(PinnedDirectory, Vec<ChildEntry>), WalkSkip> {
+    let directory = PinnedDirectory::open(frame)?;
     // Try the macOS `getattrlistbulk` backend first. If it succeeds we
     // get name + kind + ino + size + dev_id per entry in one syscall
     // batch — no per-child `lstat` needed. On any failure we fall
@@ -1014,13 +1391,29 @@ fn sorted_children(
     //
     // `bulk_children` is borrowed scratch from the caller; the
     // `BulkReader` reuses its 64 KiB kernel-fill buffer across calls.
-    if bulk_reader.read_directory(dir, bulk_children).is_ok() {
+    #[cfg(target_os = "macos")]
+    let bulk_result = bulk_reader.read_directory_fd(&directory.file, bulk_children);
+    #[cfg(not(target_os = "macos"))]
+    let bulk_result = bulk_reader.read_directory(&frame.absolute, bulk_children);
+    #[cfg(test)]
+    let bulk_result = if FORCE_BULK_FAILURE.with(|enabled| enabled.get()) {
+        // Simulate a later-batch failure after the descriptor has advanced
+        // and the output contains a prefix that must not be committed.
+        if let Some(mut ghost) = bulk_children.first().cloned() {
+            ghost.name = "injected-ghost".to_string();
+            bulk_children.push(ghost);
+        }
+        Err(io::Error::other("injected bulk failure"))
+    } else {
+        bulk_result
+    };
+    if bulk_result.is_ok() {
         let mut out: Vec<ChildEntry> = Vec::with_capacity(bulk_children.len());
         // `drain(..)` empties the scratch Vec but retains its capacity
         // for the next call; that's the load-bearing reuse here.
         out.extend(bulk_children.drain(..).map(child_from_bulk));
-        out.sort_unstable_by(|a, b| a.name.cmp(&b.name));
-        return Ok(out);
+        sort_and_deduplicate_children(&mut out, &frame.relative, out_skips);
+        return Ok((directory, out));
     }
     // Bulk read failed for this directory; the scratch Vec may hold
     // partial output from the kernel. Clear it before falling through
@@ -1028,43 +1421,18 @@ fn sorted_children(
     bulk_children.clear();
     // Fall through to the std read_dir path on bulk failure.
 
-    let read = match fs::read_dir(dir) {
-        Ok(iter) => iter,
-        Err(err) => {
-            return Err(WalkSkip {
-                path: skip_path_for(relative),
-                reason: io_skip_reason(&err),
-            });
-        }
-    };
-    let mut out: Vec<ChildEntry> = Vec::new();
-    for child in read {
-        let child = match child {
-            Ok(c) => c,
-            Err(err) => {
-                return Err(WalkSkip {
-                    path: skip_path_for(relative),
-                    reason: io_skip_reason(&err),
-                });
-            }
-        };
-        let raw_name = child.file_name();
-        let name = match raw_name.to_str() {
-            Some(text) => text.to_string(),
-            None => {
-                // Record this entry as a skip and keep enumerating; we do
-                // not have a UTF-8 name to emit but the other siblings in
-                // this directory are still scannable.
-                return Err(WalkSkip {
-                    path: child.path().to_string_lossy().into_owned(),
-                    reason: "non_utf8_name".to_string(),
-                });
-            }
-        };
-        out.push(ChildEntry { name, bulk: None });
-    }
-    out.sort_unstable_by(|a, b| a.name.cmp(&b.name));
-    Ok(out)
+    #[cfg(target_os = "macos")]
+    let read = StdDirReader::open(&directory.file);
+    #[cfg(not(target_os = "macos"))]
+    let read = fs::read_dir(&frame.absolute)
+        .map(|entries| entries.map(|entry| entry.map(|e| e.file_name())));
+    let read = read.map_err(|err| WalkSkip {
+        path: skip_path_for(&frame.relative),
+        reason: io_skip_reason(&err),
+    })?;
+    let mut out = collect_std_children(read, &frame.relative, out_skips);
+    sort_and_deduplicate_children(&mut out, &frame.relative, out_skips);
+    Ok((directory, out))
 }
 
 fn child_from_bulk(entry: BulkEntry) -> ChildEntry {
@@ -1074,6 +1442,7 @@ fn child_from_bulk(entry: BulkEntry) -> ChildEntry {
         logical_size: entry.logical_size,
         allocated_bytes: entry.allocated_bytes,
         dev_id: entry.dev_id,
+        directory_needs_refresh: entry.directory_needs_refresh,
     };
     ChildEntry {
         name: entry.name,
@@ -1081,7 +1450,179 @@ fn child_from_bulk(entry: BulkEntry) -> ChildEntry {
     }
 }
 
+fn sort_and_deduplicate_children(
+    children: &mut Vec<ChildEntry>,
+    relative: &Path,
+    skips: &mut Vec<WalkSkip>,
+) {
+    // Stable sorting keeps the first observed metadata for a repeated name.
+    // A live iterator can repeat names during renames; public paths must
+    // still be unique. Only the exceptional duplicate path is copied here.
+    children.sort_by(|a, b| a.name.cmp(&b.name));
+    children.dedup_by(|later, earlier| {
+        if later.name != earlier.name {
+            return false;
+        }
+        skips.push(WalkSkip {
+            path: relative.join(&later.name).to_string_lossy().into_owned(),
+            reason: "directory_changed".to_string(),
+        });
+        true
+    });
+}
+
+fn collect_std_children(
+    entries: impl Iterator<Item = io::Result<std::ffi::OsString>>,
+    relative: &Path,
+    skips: &mut Vec<WalkSkip>,
+) -> Vec<ChildEntry> {
+    let mut out = Vec::new();
+    for entry in entries {
+        let raw_name = match entry {
+            Ok(name) => name,
+            Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+            Err(err) => {
+                skips.push(WalkSkip {
+                    path: skip_path_for(relative),
+                    reason: io_skip_reason(&err),
+                });
+                break; // Keep the valid prefix, but do not retry a failing stream indefinitely.
+            }
+        };
+        let bytes = raw_name.as_encoded_bytes();
+        if bytes.is_empty()
+            || bytes.contains(&0)
+            || bytes.contains(&b'/')
+            || bytes == b"."
+            || bytes == b".."
+        {
+            skips.push(WalkSkip {
+                path: skip_path_for(relative),
+                reason: io_skip_reason(&io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "invalid directory component",
+                )),
+            });
+            continue;
+        }
+        let Some(name) = raw_name.to_str() else {
+            skips.push(WalkSkip {
+                path: relative.join(&raw_name).to_string_lossy().into_owned(),
+                reason: "non_utf8_name".to_string(),
+            });
+            continue;
+        };
+        out.push(ChildEntry {
+            name: name.to_string(),
+            bulk: None,
+        });
+    }
+    out
+}
+
+#[cfg(target_os = "macos")]
+struct StdDirReader {
+    stream: *mut libc::DIR,
+    finished: bool,
+}
+
+#[cfg(target_os = "macos")]
+impl StdDirReader {
+    fn open(pinned: &fs::File) -> io::Result<Self> {
+        use std::os::fd::AsRawFd;
+        // getattrlistbulk and readdir must not share an open-file
+        // description. dup/try_clone would share that state too. Opening
+        // "." relative to the pinned directory gives an independent offset.
+        let fd = unsafe {
+            libc::openat(
+                pinned.as_raw_fd(),
+                c".".as_ptr(),
+                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            )
+        };
+        if fd < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let stream = unsafe { libc::fdopendir(fd) };
+        if stream.is_null() {
+            let err = io::Error::last_os_error();
+            unsafe {
+                libc::close(fd);
+            }
+            return Err(err);
+        }
+        Ok(Self {
+            stream,
+            finished: false,
+        })
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Iterator for StdDirReader {
+    type Item = io::Result<std::ffi::OsString>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        use std::os::unix::ffi::OsStringExt;
+        if self.finished {
+            return None;
+        }
+        loop {
+            // readdir returns NULL both at EOF and on error. Clear the
+            // thread-local errno immediately before the call to distinguish them.
+            unsafe {
+                *libc::__error() = 0;
+            }
+            let entry = unsafe { libc::readdir(self.stream) };
+            if entry.is_null() {
+                let errno = unsafe { *libc::__error() };
+                if errno == libc::EINTR {
+                    continue;
+                }
+                self.finished = true;
+                return if errno == 0 {
+                    None
+                } else {
+                    Some(Err(io::Error::from_raw_os_error(errno)))
+                };
+            }
+            // Copy the name before calling readdir again. Each reader belongs
+            // to one worker, and the returned record remains valid until then.
+            let record = unsafe { &*entry };
+            let length = usize::from(record.d_namlen);
+            if length == 0 || length >= record.d_name.len() || record.d_name[length] != 0 {
+                self.finished = true;
+                return Some(Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "invalid readdir name length",
+                )));
+            }
+            let name =
+                unsafe { std::slice::from_raw_parts(record.d_name.as_ptr().cast::<u8>(), length) };
+            if name == b"." || name == b".." {
+                continue;
+            }
+            return Some(Ok(std::ffi::OsString::from_vec(name.to_vec())));
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Drop for StdDirReader {
+    fn drop(&mut self) {
+        // fdopendir transferred ownership of its descriptor to this DIR.
+        unsafe {
+            libc::closedir(self.stream);
+        }
+    }
+}
+
 fn io_skip_reason(err: &io::Error) -> String {
+    // EPERM is not consistently classified as PermissionDenied on every
+    // platform/Rust version, but it is an access-policy skip for this API.
+    if matches!(err.raw_os_error(), Some(1 | 13)) {
+        return "permission_denied".to_string();
+    }
     use io::ErrorKind::*;
     match err.kind() {
         PermissionDenied => "permission_denied".to_string(),
@@ -1098,8 +1639,12 @@ fn skip_path_for(relative: &Path) -> String {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 fn entry_kind_from_meta(meta: &fs::Metadata) -> EntryKind {
-    let mode = meta.mode();
+    entry_kind_from_mode(meta.mode())
+}
+
+fn entry_kind_from_mode(mode: u32) -> EntryKind {
     let ifmt = mode & 0o170000;
     match ifmt {
         0o040000 => EntryKind::Dir,
@@ -1125,7 +1670,7 @@ fn entry_kind_from_meta(meta: &fs::Metadata) -> EntryKind {
 /// `BTreeMap<String, ...>` + `ancestor_directories() -> Vec<String>`
 /// shape which allocated ~25M intermediate Strings on a 5M-entry
 /// `/`-scan.
-fn build_aggregates(entries: &[NamespaceEntry]) -> Vec<DirectoryAggregate> {
+fn build_aggregates(entries: &[WalkEntry]) -> Vec<DirectoryAggregate> {
     use rustc_hash::FxBuildHasher;
     // Both maps swap to fxhash. The outer is probed once per
     // ancestor per file (~30M probes on a /-scale scan); the
@@ -1134,16 +1679,18 @@ fn build_aggregates(entries: &[NamespaceEntry]) -> Vec<DirectoryAggregate> {
     // the keys here are filesystem paths + inode numbers, both
     // non-adversarial.
     type OuterMap<'a> = HashMap<&'a str, InnerMap, FxBuildHasher>;
-    type InnerMap = HashMap<u64, (u64, Option<u64>), FxBuildHasher>;
+    type InnerMap = HashMap<(u64, u64), (u64, Option<u64>), FxBuildHasher>;
 
     let mut contributors: OuterMap = OuterMap::default();
     contributors.insert(".", InnerMap::default());
-    for entry in entries {
+    for row in entries {
+        let entry = &row.entry;
         if matches!(entry.entry_kind, EntryKind::Dir) {
             contributors.entry(&*entry.path).or_default();
         }
     }
-    for entry in entries {
+    for row in entries {
+        let entry = &row.entry;
         if !matches!(entry.entry_kind, EntryKind::File) {
             continue;
         }
@@ -1152,14 +1699,14 @@ fn build_aggregates(entries: &[NamespaceEntry]) -> Vec<DirectoryAggregate> {
         // a slice; no heap activity. We don't pre-build a Vec of
         // ancestors because the inner work is just a HashMap probe
         // that takes the `&str` directly.
-        let mut current: &str = &*entry.path;
+        let mut current: &str = &entry.path;
         loop {
             match current.rfind('/') {
                 Some(idx) => {
                     let parent = &current[..idx];
                     let key = if parent.is_empty() { "." } else { parent };
                     if let Some(map) = contributors.get_mut(key) {
-                        map.entry(entry.file_id)
+                        map.entry((row.dev_id, entry.file_id))
                             .or_insert((entry.logical_size, entry.allocated_size));
                     }
                     if parent.is_empty() {
@@ -1169,7 +1716,7 @@ fn build_aggregates(entries: &[NamespaceEntry]) -> Vec<DirectoryAggregate> {
                 }
                 None => {
                     if let Some(map) = contributors.get_mut(".") {
-                        map.entry(entry.file_id)
+                        map.entry((row.dev_id, entry.file_id))
                             .or_insert((entry.logical_size, entry.allocated_size));
                     }
                     break;
@@ -1188,12 +1735,16 @@ fn build_aggregates(entries: &[NamespaceEntry]) -> Vec<DirectoryAggregate> {
         let file_sizes = contributors
             .remove(path)
             .expect("path was just keys()d from the map");
-        let unique_inode_logical_total: u64 =
-            file_sizes.values().map(|(logical, _)| *logical).sum();
-        let unique_inode_allocated_total: Option<u64> = file_sizes
+        let unique_inode_logical_total: u64 = file_sizes
             .values()
-            .try_fold(0u64, |acc, (_, allocated)| allocated.map(|a| acc + a));
-        let mut contributing_file_ids: Vec<u64> = file_sizes.keys().copied().collect();
+            .fold(0u64, |acc, (logical, _)| acc.saturating_add(*logical));
+        let unique_inode_allocated_total: Option<u64> =
+            file_sizes.values().try_fold(0u64, |acc, (_, allocated)| {
+                allocated.map(|a| acc.saturating_add(a))
+            });
+        // This internal, serde-skipped field carries bare POSIX IDs for
+        // historical callers. IDs can repeat across distinct devices.
+        let mut contributing_file_ids: Vec<u64> = file_sizes.keys().map(|(_, ino)| *ino).collect();
         contributing_file_ids.sort_unstable();
         // EX-27: the fallback walker emits `real_size == allocated_size`
         // per entry (no refcount info from POSIX), so the per-directory
@@ -1217,6 +1768,495 @@ mod tests {
     use std::fs::File;
     use std::io::Write;
     use std::os::unix::fs::{symlink, PermissionsExt};
+
+    fn frame(path: &Path) -> WalkFrame {
+        let absolute = fs::canonicalize(path).unwrap();
+        let meta = fs::symlink_metadata(&absolute).unwrap();
+        WalkFrame {
+            absolute,
+            relative: PathBuf::new(),
+            expected_identity: (meta.dev(), meta.ino()),
+        }
+    }
+
+    fn sample_file(
+        path: &str,
+        file_id: u64,
+        logical_size: u64,
+        allocated_size: Option<u64>,
+    ) -> WalkEntry {
+        WalkEntry {
+            dev_id: 1,
+            entry: NamespaceEntry {
+                path: path.into(),
+                entry_kind: EntryKind::File,
+                file_id,
+                logical_size,
+                symlink_target: None,
+                allocated_size,
+                real_size: allocated_size,
+            },
+        }
+    }
+
+    #[test]
+    fn aggregate_totals_saturate_and_keep_none_collapse() {
+        let entries = vec![
+            sample_file("a", 1, i64::MAX as u64, Some(i64::MAX as u64)),
+            sample_file("b", 2, i64::MAX as u64, Some(i64::MAX as u64)),
+            sample_file("c", 3, 1024, Some(1024)),
+        ];
+        let total = &build_aggregates(&entries)[0];
+        assert_eq!(total.unique_inode_logical_total, u64::MAX);
+        assert_eq!(total.unique_inode_allocated_total, Some(u64::MAX));
+        assert_eq!(total.unique_inode_real_total, Some(u64::MAX));
+        let mut unknown = entries;
+        unknown.push(sample_file("d", 4, 0, None));
+        assert_eq!(
+            build_aggregates(&unknown)[0].unique_inode_allocated_total,
+            None
+        );
+    }
+
+    #[test]
+    fn aggregates_do_not_collapse_same_inode_on_different_devices() {
+        let first = sample_file("a", 7, 100, Some(10));
+        let mut second = sample_file("b", 7, 200, Some(20));
+        second.dev_id = 2;
+        let aggregates = build_aggregates(&[first, second]);
+        assert_eq!(aggregates[0].unique_inode_logical_total, 300);
+        assert_eq!(aggregates[0].unique_inode_allocated_total, Some(30));
+        assert_eq!(aggregates[0].contributing_file_ids, [7, 7]);
+    }
+
+    #[test]
+    fn same_device_hardlinks_keep_first_observed_sizes() {
+        let aggregates = build_aggregates(&[
+            sample_file("a", 7, 100, Some(10)),
+            sample_file("b", 7, 200, Some(20)),
+        ]);
+        assert_eq!(aggregates[0].unique_inode_logical_total, 100);
+        assert_eq!(aggregates[0].unique_inode_allocated_total, Some(10));
+        assert_eq!(aggregates[0].contributing_file_ids, [7]);
+    }
+
+    #[test]
+    fn walk_entry_conversion_moves_strings_without_cloning() {
+        let rows: Vec<_> = (0..1000)
+            .map(|i| sample_file(&format!("file-{i}"), i, i, Some(i)))
+            .collect();
+        let original_vec = rows.as_ptr().cast::<u8>();
+        let original_paths: Vec<_> = rows.iter().map(|row| row.entry.path.as_ptr()).collect();
+        let entries: Vec<NamespaceEntry> = rows.into_iter().map(|row| row.entry).collect();
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| entry.path.as_ptr())
+                .collect::<Vec<_>>(),
+            original_paths
+        );
+        eprintln!(
+            "walk wrapper {} bytes, namespace {} bytes, Vec allocation reused {}",
+            std::mem::size_of::<WalkEntry>(),
+            std::mem::size_of::<NamespaceEntry>(),
+            original_vec == entries.as_ptr().cast::<u8>()
+        );
+    }
+
+    #[test]
+    fn firmlink_overlay_uses_destination_and_rejects_escaping_paths() {
+        let overlays = firmlink_overlays_from_contents(
+            "visible\trelocated/target\nother\t../escape\nthird\t/absolute\ninvalid\n\tempty-source\nempty-destination\t\n");
+        assert_eq!(
+            overlays,
+            HashSet::from([PathBuf::from("/System/Volumes/Data/relocated/target")])
+        );
+        assert!(read_firmlink_overlays(Path::new("/not-root")).is_empty());
+    }
+
+    #[test]
+    fn std_invalid_name_does_not_discard_readable_siblings() {
+        use std::os::unix::ffi::OsStringExt;
+        let input = vec![
+            Ok("before".into()),
+            Ok(std::ffi::OsString::from_vec(b"bad-\xff".to_vec())),
+            Ok("after".into()),
+        ];
+        let mut skips = Vec::new();
+        let children = collect_std_children(input.into_iter(), Path::new("parent"), &mut skips);
+        assert_eq!(
+            children.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+            ["before", "after"]
+        );
+        assert_eq!(skips.len(), 1);
+        assert_eq!(skips[0].reason, "non_utf8_name");
+        assert!(skips[0].path.starts_with("parent/"));
+    }
+
+    #[test]
+    fn std_midstream_error_keeps_valid_prefix_and_records_actual_errno() {
+        let input = vec![
+            Ok("before".into()),
+            Err(io::Error::from_raw_os_error(5)),
+            Ok("after".into()),
+        ];
+        let mut skips = Vec::new();
+        let children = collect_std_children(input.into_iter(), Path::new("parent"), &mut skips);
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].name, "before");
+        assert_eq!(skips[0].path, "parent");
+        assert_eq!(
+            skips[0].reason,
+            io_skip_reason(&io::Error::from_raw_os_error(5))
+        );
+        assert_eq!(
+            io_skip_reason(&io::Error::from_raw_os_error(1)),
+            "permission_denied"
+        );
+        assert_eq!(
+            io_skip_reason(&io::Error::from_raw_os_error(13)),
+            "permission_denied"
+        );
+        assert_eq!(
+            io_skip_reason(&io::Error::from_raw_os_error(2)),
+            "not_found"
+        );
+    }
+
+    #[test]
+    fn std_interrupted_iteration_retries_without_losing_siblings() {
+        let input = vec![
+            Ok("before".into()),
+            Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "injected interruption",
+            )),
+            Ok("after".into()),
+        ];
+        let mut skips = Vec::new();
+        let children = collect_std_children(input.into_iter(), Path::new("parent"), &mut skips);
+        assert_eq!(
+            children
+                .iter()
+                .map(|child| child.name.as_str())
+                .collect::<Vec<_>>(),
+            ["before", "after"]
+        );
+        assert!(skips.is_empty());
+    }
+
+    #[test]
+    fn repeated_directory_names_keep_first_metadata_and_unique_paths() {
+        let child = |name: &str, file_id, logical_size| ChildEntry {
+            name: name.to_string(),
+            bulk: Some(BulkMeta {
+                kind: EntryKind::File,
+                file_id,
+                logical_size,
+                allocated_bytes: logical_size,
+                dev_id: 1,
+                directory_needs_refresh: false,
+            }),
+        };
+        let mut children = vec![
+            child("z", 9, 9),
+            child("a", 1, 100),
+            child("a", 2, 200),
+            child("b", 3, 300),
+        ];
+        let mut skips = Vec::new();
+        sort_and_deduplicate_children(&mut children, Path::new("parent"), &mut skips);
+        assert_eq!(
+            children.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+            ["a", "b", "z"]
+        );
+        let first = children[0].bulk.as_ref().unwrap();
+        assert_eq!((first.file_id, first.logical_size), (1, 100));
+        assert_eq!(
+            skips,
+            [WalkSkip {
+                path: "parent/a".to_string(),
+                reason: "directory_changed".to_string()
+            }]
+        );
+    }
+
+    #[test]
+    fn std_names_cannot_escape_the_pinned_parent() {
+        let mut skips = Vec::new();
+        let entries = ["", ".", "..", "../escape", "nul\0name", "valid"]
+            .into_iter()
+            .map(|name| Ok(name.into()));
+        let children = collect_std_children(entries, Path::new("parent"), &mut skips);
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].name, "valid");
+        assert_eq!(skips.len(), 5);
+        assert!(skips
+            .iter()
+            .all(|skip| skip.path == "parent" && skip.reason.starts_with("read_error:")));
+    }
+
+    #[test]
+    fn worker_counts_are_bounded_without_changing_normal_settings() {
+        assert_eq!(normalize_fallback_threads(0), 1);
+        for count in 1..=14 {
+            assert_eq!(normalize_fallback_threads(count), count);
+        }
+        assert_eq!(normalize_fallback_threads(usize::MAX), MAX_FALLBACK_THREADS);
+        assert_eq!(
+            normalize_fallback_threads(MAX_FALLBACK_THREADS + 1),
+            MAX_FALLBACK_THREADS
+        );
+    }
+
+    #[test]
+    fn worker_spawn_failures_retain_scan_results_and_terminal_progress() {
+        let tmp = TempDir::new();
+        fs::create_dir(tmp.path().join("dir")).unwrap();
+        fs::write(tmp.path().join("dir/file"), b"payload").unwrap();
+        let baseline = fallback_scan_path(tmp.path()).unwrap();
+        struct ResetSpawnLimit;
+        impl Drop for ResetSpawnLimit {
+            fn drop(&mut self) {
+                WORKER_SPAWN_FAILURE_AFTER.with(|limit| limit.set(None));
+            }
+        }
+        let _reset = ResetSpawnLimit;
+        for (threads, limit) in [(4, 0), (4, 1), (4, 2), (usize::MAX, 0)] {
+            WORKER_SPAWN_FAILURE_AFTER.with(|value| value.set(Some(limit)));
+            let mut events = Vec::new();
+            let mut callback = |event| events.push(event);
+            let output = fallback_scan_path_with_options(
+                tmp.path(),
+                FallbackOptions {
+                    threads,
+                    progress: Some(&mut callback),
+                    ..FallbackOptions::default()
+                },
+            )
+            .unwrap();
+            assert_eq!(output.parser_output.entries, baseline.parser_output.entries);
+            assert_eq!(
+                output.parser_output.aggregates,
+                baseline.parser_output.aggregates
+            );
+            assert_eq!(
+                output.parser_output.walk_skips,
+                baseline.parser_output.walk_skips
+            );
+            assert_eq!(events.iter().filter(|e| e.terminal).count(), 1);
+            let terminal = events.last().unwrap();
+            assert_eq!(
+                terminal.scanned,
+                baseline.parser_output.entries.len() as u64
+            );
+            assert_eq!(terminal.bytes, 7);
+        }
+    }
+
+    #[test]
+    fn worker_panic_wakes_waiters_stops_progress_and_preserves_the_original_panic() {
+        for poison_queue in [false, true] {
+            let tmp = TempDir::new();
+            let path = tmp.path().to_path_buf();
+            let (result_tx, result_rx) = std::sync::mpsc::channel();
+            // An unscoped driver and a bounded receive make a regression
+            // fail rather than hanging the entire unit-test process.
+            let driver = std::thread::spawn(move || {
+                WORKER_PANIC_AFTER_POP.with(|mode| mode.set(Some(poison_queue)));
+                let mut events = Vec::new();
+                let mut callback = |event| events.push(event);
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    fallback_scan_path_with_options(
+                        &path,
+                        FallbackOptions {
+                            threads: 2,
+                            progress: Some(&mut callback),
+                            ..FallbackOptions::default()
+                        },
+                    )
+                }));
+                WORKER_PANIC_AFTER_POP.with(|mode| mode.set(None));
+                result_tx.send((result, events)).unwrap();
+            });
+            let (result, events) = result_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("worker panic left scoped threads blocked");
+            let panic = result.expect_err("a worker panic cannot return partial success");
+            assert_eq!(
+                panic.downcast_ref::<&str>(),
+                Some(&"original injected worker panic")
+            );
+            assert!(events.iter().all(|event| !event.terminal));
+            driver.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn work_queue_rechecks_publication_and_completion_under_one_lock() {
+        let tmp = TempDir::new();
+        let queue = Arc::new(WorkQueue::new(vec![frame(tmp.path())]));
+        let producer = queue.pop().unwrap();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (result_tx, result_rx) = std::sync::mpsc::channel();
+        std::thread::scope(|scope| {
+            let q = Arc::clone(&queue);
+            scope.spawn(move || {
+                started_tx.send(()).unwrap();
+                let child = q.pop().unwrap();
+                q.complete();
+                assert!(q.pop().is_none());
+                result_tx.send(child.relative).unwrap();
+            });
+            started_rx.recv().unwrap();
+            queue.push_many(vec![WalkFrame {
+                relative: PathBuf::from("child"),
+                ..producer
+            }]);
+            queue.complete();
+            assert_eq!(
+                result_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+                PathBuf::from("child")
+            );
+        });
+        assert!(queue.pop().is_none());
+    }
+
+    #[test]
+    #[should_panic(expected = "completed a frame more than once")]
+    fn work_queue_does_not_hide_completion_underflow() {
+        WorkQueue::new(Vec::new()).complete();
+    }
+
+    #[test]
+    fn queued_directory_replacement_is_not_enumerated() {
+        let tmp = TempDir::new();
+        let original = tmp.path().join("directory");
+        fs::create_dir(&original).unwrap();
+        let queued = frame(&original);
+        fs::rename(&original, tmp.path().join("retired")).unwrap();
+        fs::create_dir(&original).unwrap();
+        fs::write(original.join("replacement-secret"), b"new").unwrap();
+        let skip = PinnedDirectory::open(&queued).err().unwrap();
+        assert_eq!(skip.reason, "directory_changed");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn queued_final_and_ancestor_symlink_replacements_are_not_followed() {
+        let tmp = TempDir::new();
+        let outside = tmp.path().join("outside");
+        fs::create_dir_all(outside.join("leaf")).unwrap();
+        fs::write(outside.join("leaf/secret"), b"outside").unwrap();
+        let original = tmp.path().join("directory");
+        fs::create_dir_all(original.join("leaf")).unwrap();
+        let final_frame = frame(&original);
+        let ancestor_frame = frame(&original.join("leaf"));
+        fs::rename(&original, tmp.path().join("retired")).unwrap();
+        symlink(&outside, &original).unwrap();
+        for queued in [final_frame, ancestor_frame] {
+            assert!(PinnedDirectory::open(&queued).is_err());
+            let mut entries = Vec::new();
+            let mut skips = Vec::new();
+            let mut frames = Vec::new();
+            walk_one_directory(
+                &queued,
+                queued.expected_identity.0,
+                true,
+                &mut BulkReader::new(),
+                &mut Vec::new(),
+                &VisitedDirs::new(),
+                &FirmlinkOverlaySet::new(),
+                &mut entries,
+                &mut skips,
+                &mut frames,
+            );
+            assert!(entries.is_empty());
+            assert!(frames.is_empty());
+            assert_eq!(skips.len(), 1);
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn metadata_refresh_uses_target_identity_and_never_follows_a_symlink_entry() {
+        let tmp = TempDir::new();
+        fs::create_dir(tmp.path().join("target")).unwrap();
+        symlink("target", tmp.path().join("link")).unwrap();
+        let directory = PinnedDirectory::open(&frame(tmp.path())).unwrap();
+        let fake_underlying = BulkMeta {
+            kind: EntryKind::Dir,
+            file_id: 999,
+            dev_id: 111,
+            logical_size: 0,
+            allocated_bytes: 0,
+            directory_needs_refresh: true,
+        };
+        let refreshed = child_metadata(&directory, "target", Some(&fake_underlying)).unwrap();
+        let actual = fs::symlink_metadata(tmp.path().join("target")).unwrap();
+        assert_eq!(
+            (refreshed.dev_id, refreshed.file_id),
+            (actual.dev(), actual.ino())
+        );
+        assert_eq!(refreshed.kind, EntryKind::Dir);
+        assert_eq!(
+            child_metadata(&directory, "link", Some(&fake_underlying))
+                .unwrap()
+                .kind,
+            EntryKind::Symlink
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn pinned_metadata_and_readlink_survive_parent_path_replacement() {
+        let tmp = TempDir::new();
+        let original = tmp.path().join("original");
+        let replacement = tmp.path().join("replacement");
+        fs::create_dir(&original).unwrap();
+        fs::create_dir(&replacement).unwrap();
+        fs::write(original.join("file"), b"old").unwrap();
+        symlink("old-target", original.join("link")).unwrap();
+        fs::write(replacement.join("file"), b"replacement").unwrap();
+        symlink("new-target", replacement.join("link")).unwrap();
+        let directory = PinnedDirectory::open(&frame(&original)).unwrap();
+        fs::rename(&original, tmp.path().join("retired")).unwrap();
+        symlink(&replacement, &original).unwrap();
+        assert_eq!(directory.metadata("file").unwrap().logical_size, 3);
+        assert_eq!(directory.read_link("link").unwrap().as_ref(), "old-target");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn bulk_failure_discards_partial_output_and_restarts_std_at_zero() {
+        let tmp = TempDir::new();
+        fs::write(tmp.path().join("a"), b"a").unwrap();
+        fs::write(tmp.path().join("b"), b"b").unwrap();
+        struct ResetBulkFailure;
+        impl Drop for ResetBulkFailure {
+            fn drop(&mut self) {
+                FORCE_BULK_FAILURE.with(|enabled| enabled.set(false));
+            }
+        }
+        let _reset = ResetBulkFailure;
+        FORCE_BULK_FAILURE.with(|enabled| enabled.set(true));
+        let mut scratch = Vec::new();
+        let mut skips = Vec::new();
+        let (_, children) = sorted_children(
+            &frame(tmp.path()),
+            &mut BulkReader::new(),
+            &mut scratch,
+            &mut skips,
+        )
+        .unwrap();
+        assert!(scratch.is_empty());
+        assert!(skips.is_empty());
+        assert_eq!(
+            children.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+            ["a", "b"]
+        );
+        assert!(children.iter().all(|child| child.bulk.is_none()));
+    }
 
     #[test]
     fn fallback_emits_namespace_shape_on_synthetic_tree() {
@@ -1488,30 +2528,21 @@ mod tests {
         );
     }
 
-    /// Minimal in-tree temp-directory helper so the crate stays dep-free.
+    /// Atomic fixture creation avoids reusing a pre-existing directory or
+    /// following a predictable test-path symlink.
     struct TempDir {
-        path: PathBuf,
+        directory: tempfile::TempDir,
     }
 
     impl TempDir {
         fn new() -> Self {
-            use std::sync::atomic::{AtomicU64, Ordering};
-            static COUNTER: AtomicU64 = AtomicU64::new(0);
-            let pid = std::process::id();
-            let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
-            let path = std::env::temp_dir().join(format!("apfsfi-fallback-test-{pid}-{seq}"));
-            std::fs::create_dir_all(&path).expect("create temp dir");
-            Self { path }
+            Self {
+                directory: tempfile::tempdir().expect("create temp dir"),
+            }
         }
 
         fn path(&self) -> &Path {
-            &self.path
-        }
-    }
-
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.path);
+            self.directory.path()
         }
     }
 }

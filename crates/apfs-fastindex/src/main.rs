@@ -412,6 +412,7 @@ fn run_raw(
     }
 }
 
+#[allow(clippy::too_many_arguments)] // Existing CLI argument boundary.
 fn run_fallback(
     path: &str,
     summary_only: bool,
@@ -436,7 +437,8 @@ fn run_fallback(
     // sees no benefit because most callers using it are
     // dev/debug). The cache_emit_msgpack helper below validates
     // both preconditions before serving from cache.
-    let cache_state = if cache_enabled {
+    let cache_enabled = cache_enabled && cache_options_supported(cross_mounts, slim, summary_only);
+    let mut cache_state = if cache_enabled {
         match cache_check(std::path::Path::new(path), cache_force_refresh) {
             Ok(state) => state,
             Err(err) => {
@@ -449,18 +451,25 @@ fn run_fallback(
     } else {
         CacheState::Disabled
     };
-    if let CacheState::Hit { ref scan_blob_path, ref manifest } = cache_state {
-        if let Some(exit) = cache_emit_msgpack(
-            scan_blob_path,
-            manifest,
-            summary_only,
-            format,
-        ) {
+    if let CacheState::Hit {
+        ref scan_blob_path,
+        ref manifest,
+        ..
+    } = cache_state
+    {
+        if let Some(exit) = cache_emit_msgpack(scan_blob_path, manifest, format) {
             return exit;
         }
         // Format wasn't msgpack-stream-compatible, or the blob
         // failed to read. Fall through to the fresh walk.
     }
+    // A blob can be replaced after lookup by another writer. If the
+    // actual emission bytes fail validation, retain the probe so the
+    // fresh scan also repairs the cache rather than repeatedly missing.
+    cache_state = match cache_state {
+        CacheState::Hit { probe, .. } => CacheState::Miss(Some(probe)),
+        state => state,
+    };
 
     let mut progress_writer = |event: ProgressEvent| {
         let mut stderr = std::io::stderr().lock();
@@ -510,7 +519,12 @@ fn run_fallback(
             let entry_count = output.parser_output.entries.len();
             let agg_count = output.parser_output.aggregates.len();
             let exit = emit_fallback_output(&output, pretty, slim, format);
-            if cache_enabled && exit == ExitCode::SUCCESS {
+            // Failed per-entry reads must be retried on the next request.
+            // A metadata signature cannot certify that a partial scan is complete.
+            if cache_enabled
+                && exit == ExitCode::SUCCESS
+                && output.parser_output.walk_skips.is_empty()
+            {
                 if let Some((key, sig)) = cache_key_sig {
                     if let Err(err) =
                         cache_write_msgpack(&key, sig, entry_count, agg_count, &output)
@@ -528,6 +542,12 @@ fn run_fallback(
     }
 }
 
+fn cache_options_supported(cross_mounts: bool, slim: bool, summary_only: bool) -> bool {
+    // The validator uses default mount boundaries, and persisted envelopes
+    // contain full entries/aggregates rather than slim or summary schemas.
+    !cross_mounts && !slim && !summary_only
+}
+
 enum CacheState {
     Disabled,
     /// No usable cache entry. The `Option` carries the computed
@@ -537,13 +557,14 @@ enum CacheState {
     Hit {
         scan_blob_path: std::path::PathBuf,
         manifest: apfs_fastindex::cache::CacheManifest,
+        probe: (apfs_fastindex::cache::CacheKey, u64),
     },
 }
 
 /// Compute the cache identity, probe the directory signature,
 /// and look up the cache. Returns the resulting state.
 ///
-/// **Known v1 cost.** The probe (dir-only walk of the scan
+/// **Known cost.** The probe (metadata walk of the scan
 /// root) is naive `read_dir` + `symlink_metadata`. On stable
 /// trees up to ~10k dirs it's effectively free (< 50 ms); on
 /// the 172k-dir `/Users/kai` tree it's ~37 s — slower than
@@ -554,13 +575,9 @@ enum CacheState {
 /// tree. Net effect on `/Users/kai`-class scans: the cache
 /// makes things slower.
 ///
-/// The fix is a follow-up: have the walker emit its own
-/// per-directory signature inline (cheap getattrlistbulk
-/// already knows the dir mtime/ctime), then store per-subtree
-/// signatures in the manifest so a partial change invalidates
-/// only one subtree. That's a meaningful refactor — out of
-/// scope for the v1 commit. Documented in
-/// `docs/research/experiments/EX-30-perf-baseline/README.md`.
+/// Directory-only signatures cannot validate file resizes. Faster reuse
+/// needs a journal-backed invalidation design, not speculative directory
+/// timestamp checks.
 ///
 /// `force_refresh` skips the lookup step (treats every hit as
 /// stale) but still probes so the recomputed signature lands
@@ -574,13 +591,10 @@ fn cache_check(
     let (sig, _) = cache::compute_directory_signature(path)?;
     if !force_refresh {
         if let Some((manifest, blob)) = cache::cache_lookup(&key, sig)? {
-            eprintln!(
-                "apfs-fastindex-scan: cache: hit ({} entries, {} dir aggregates, msgpack {} bytes)",
-                manifest.entry_count, manifest.aggregate_count, manifest.scan_msgpack_bytes
-            );
             return Ok(CacheState::Hit {
                 scan_blob_path: blob,
                 manifest,
+                probe: (key, sig),
             });
         }
     }
@@ -596,23 +610,8 @@ fn cache_check(
 fn cache_emit_msgpack(
     scan_blob_path: &std::path::Path,
     manifest: &apfs_fastindex::cache::CacheManifest,
-    summary_only: bool,
     format: OutputFormat,
 ) -> Option<ExitCode> {
-    if summary_only {
-        // Synthesize a summary from the manifest — entries +
-        // aggregates are recorded there, the correctness_claim
-        // is fixed-text. Cheaper than reading the msgpack.
-        print_summary_with_skips(
-            "fallback",
-            "(cache hit; correctness_claim deferred to next refresh)",
-            manifest.entry_count,
-            manifest.aggregate_count,
-            0,
-            &[],
-        );
-        return Some(ExitCode::SUCCESS);
-    }
     if format != OutputFormat::Msgpack {
         return None;
     }
@@ -625,6 +624,16 @@ fn cache_emit_msgpack(
             return None;
         }
     };
+    if !manifest.matches_scan_msgpack(&bytes) {
+        eprintln!(
+            "apfs-fastindex-scan: cache: integrity mismatch for {scan_blob_path:?}; refreshing"
+        );
+        return None;
+    }
+    eprintln!(
+        "apfs-fastindex-scan: cache: hit ({} entries, {} dir aggregates, msgpack {} bytes)",
+        manifest.entry_count, manifest.aggregate_count, manifest.scan_msgpack_bytes
+    );
     let mut stdout = std::io::stdout().lock();
     if stdout.write_all(&bytes).is_err() {
         return Some(ExitCode::from(1));
@@ -758,7 +767,7 @@ fn emit_msgpack_stream(output: &FallbackScanOutput, slim: bool) -> ExitCode {
         // of an explicit flush at this cadence is in the noise
         // (~µs each), but the responsiveness win is real on a
         // /-scale scan.
-        if emitted % 4096 == 0 {
+        if emitted.is_multiple_of(4096) {
             let _ = stdout.flush();
         }
     }
@@ -1063,10 +1072,7 @@ enum HelperReply<'a> {
     },
     /// Scan succeeded. `out_path` is helper-chosen and mode
     /// 0600, owned by the requesting GUI.
-    Ok {
-        out_path: &'a str,
-        exit_code: i32,
-    },
+    Ok { out_path: &'a str, exit_code: i32 },
     /// Scan failed; message goes to the parent's status UI.
     Err { message: String },
     /// Quit acknowledged. Helper exits immediately after
@@ -1074,19 +1080,18 @@ enum HelperReply<'a> {
     Bye,
 }
 
-fn write_reply<W: std::io::Write>(out: &mut W, reply: &HelperReply<'_>) {
+fn write_reply<W: std::io::Write>(out: &mut W, reply: &HelperReply<'_>) -> std::io::Result<()> {
     // One JSON object per line. The helper writes to the
     // parent's socketpair (via AuthorizationExecuteWithPrivileges);
     // the framing is newline-delimited to keep the parent's
     // line-reader straightforward.
-    let _ = serde_json::to_writer(&mut *out as &mut dyn std::io::Write, reply);
-    let _ = out.write_all(b"\n");
-    let _ = out.flush();
+    serde_json::to_writer(&mut *out as &mut dyn std::io::Write, reply)
+        .map_err(std::io::Error::other)?;
+    out.write_all(b"\n")?;
+    out.flush()
 }
 
 fn run_server_mode() -> ExitCode {
-    use std::io::{BufRead, BufReader, Write};
-
     // Audit M4: tear down the helper if the parent goes
     // away. The OS already closes the parent's end of our
     // socketpair on parent exit, which makes our next
@@ -1101,16 +1106,33 @@ fn run_server_mode() -> ExitCode {
     // syscall + one wait.
     spawn_parent_death_watcher();
 
-    let default_threads = default_fallback_threads();
-
     // Track every tempfile we hand out. On quit or a matching
     // `release` command we unlink it. The list is bounded by the
     // helper lifetime, normally the GUI process lifetime.
     let mut owned_paths: Vec<std::path::PathBuf> = Vec::new();
+    let result = run_server_loop(&mut owned_paths);
+    // One cleanup path also covers startup/progress/terminal reply
+    // failures. A broken connection cannot receive another command.
+    cleanup_owned_paths(&owned_paths);
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            let _ = writeln!(
+                std::io::stderr().lock(),
+                "apfs-fastindex-scan: server: I/O error: {err}"
+            );
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn run_server_loop(owned_paths: &mut Vec<std::path::PathBuf>) -> std::io::Result<()> {
+    use std::io::{BufReader, Write};
+    let default_threads = default_fallback_threads();
 
     {
         let mut out = std::io::stdout().lock();
-        write_reply(&mut out, &HelperReply::Ready { version: 2 });
+        write_reply(&mut out, &HelperReply::Ready { version: 2 })?;
     }
 
     let stdin = std::io::stdin();
@@ -1118,25 +1140,13 @@ fn run_server_mode() -> ExitCode {
     let mut line = String::new();
     loop {
         line.clear();
-        let n = match reader.read_line(&mut line) {
+        match read_helper_line(&mut reader, &mut line) {
             Ok(0) => {
-                // Parent closed stdin (likely exited or
-                // shutdown). Drain owned tempfiles before
-                // returning so they don't accumulate in /tmp.
-                cleanup_owned_paths(&owned_paths);
-                return ExitCode::SUCCESS;
+                return Ok(());
             }
-            Ok(n) => n,
-            Err(err) => {
-                let _ = writeln!(
-                    std::io::stderr().lock(),
-                    "apfs-fastindex-scan: server: stdin read error: {err}"
-                );
-                cleanup_owned_paths(&owned_paths);
-                return ExitCode::from(1);
-            }
+            Ok(_) => {}
+            Err(err) => return Err(err),
         };
-        let _ = n;
         let trimmed = line.trim_end_matches(['\r', '\n']);
         if trimmed.is_empty() {
             continue;
@@ -1150,7 +1160,7 @@ fn run_server_mode() -> ExitCode {
                     &HelperReply::Err {
                         message: format!("invalid JSON command: {err}"),
                     },
-                );
+                )?;
                 continue;
             }
         };
@@ -1160,11 +1170,8 @@ fn run_server_mode() -> ExitCode {
                 owner_uid,
                 threads,
             } => {
-                // Defence-in-depth: refuse control bytes in
-                // path. `serde_json` already accepts them
-                // (JSON strings can carry any UTF-8) but our
-                // downstream consumers shouldn't have to
-                // worry about embedded TAB/LF/NUL.
+                // JSON framing preserves tabs and newlines in paths.
+                // NUL cannot occur in a filesystem path.
                 if path.contains('\0') {
                     let mut out = std::io::stdout().lock();
                     write_reply(
@@ -1172,7 +1179,7 @@ fn run_server_mode() -> ExitCode {
                         &HelperReply::Err {
                             message: "path contains a NUL byte".to_string(),
                         },
-                    );
+                    )?;
                     continue;
                 }
                 let threads = threads
@@ -1188,11 +1195,11 @@ fn run_server_mode() -> ExitCode {
                                 out_path: out_path.to_string_lossy().as_ref(),
                                 exit_code,
                             },
-                        );
+                        )?;
                     }
                     Err(message) => {
                         let mut out = std::io::stdout().lock();
-                        write_reply(&mut out, &HelperReply::Err { message });
+                        write_reply(&mut out, &HelperReply::Err { message })?;
                     }
                 }
             }
@@ -1204,12 +1211,13 @@ fn run_server_mode() -> ExitCode {
                 for p in paths {
                     let pb = std::path::PathBuf::from(&p);
                     if owned_paths.iter().any(|own| own == &pb) {
-                        let _ = std::fs::remove_file(&pb);
-                        owned_paths.retain(|own| own != &pb);
+                        if remove_owned_path(&pb) {
+                            owned_paths.retain(|own| own != &pb);
+                        }
                     } else {
                         let _ = writeln!(
                             std::io::stderr().lock(),
-                            "apfs-fastindex-scan: server: release refused for non-owned path {p}"
+                            "apfs-fastindex-scan: server: release refused for non-owned path {p:?}"
                         );
                     }
                 }
@@ -1224,13 +1232,12 @@ fn run_server_mode() -> ExitCode {
                         out_path: "",
                         exit_code: 0,
                     },
-                );
+                )?;
             }
             HelperCommand::Quit => {
-                cleanup_owned_paths(&owned_paths);
                 let mut out = std::io::stdout().lock();
-                write_reply(&mut out, &HelperReply::Bye);
-                return ExitCode::SUCCESS;
+                write_reply(&mut out, &HelperReply::Bye)?;
+                return Ok(());
             }
             HelperCommand::Unknown => {
                 let mut out = std::io::stdout().lock();
@@ -1239,15 +1246,50 @@ fn run_server_mode() -> ExitCode {
                     &HelperReply::Err {
                         message: "unknown command".to_string(),
                     },
-                );
+                )?;
             }
         }
     }
 }
 
+// This is a private GUI protocol. A bounded frame prevents malformed
+// input from growing a privileged helper's command buffer without limit.
+const MAX_HELPER_COMMAND_BYTES: usize = 1024 * 1024;
+
+fn read_helper_line<R: std::io::BufRead>(
+    reader: &mut R,
+    line: &mut String,
+) -> std::io::Result<usize> {
+    use std::io::{BufRead, Read};
+    let count = reader
+        .take((MAX_HELPER_COMMAND_BYTES + 1) as u64)
+        .read_line(line)?;
+    if line.len() > MAX_HELPER_COMMAND_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "helper command exceeds the maximum frame size",
+        ));
+    }
+    Ok(count)
+}
+
 fn cleanup_owned_paths(paths: &[std::path::PathBuf]) {
     for p in paths {
-        let _ = std::fs::remove_file(p);
+        remove_owned_path(p);
+    }
+}
+
+fn remove_owned_path(path: &std::path::Path) -> bool {
+    match std::fs::remove_file(path) {
+        Ok(()) => true,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => true,
+        Err(err) => {
+            let _ = writeln!(
+                std::io::stderr().lock(),
+                "apfs-fastindex-scan: server: remove {path:?} failed: {err}"
+            );
+            false
+        }
     }
 }
 
@@ -1273,43 +1315,58 @@ fn spawn_parent_death_watcher() {
         // PID 1 (launchd) or unknown — refuse to watch.
         return;
     }
-    thread::spawn(move || unsafe {
-        let kq = libc::kqueue();
-        if kq < 0 {
-            return;
-        }
-        // Register interest in NOTE_EXIT on the parent PID.
-        let mut sub: libc::kevent = std::mem::zeroed();
-        sub.ident = parent_pid as libc::uintptr_t;
-        sub.filter = libc::EVFILT_PROC;
-        sub.flags = libc::EV_ADD | libc::EV_ENABLE | libc::EV_ONESHOT;
-        sub.fflags = libc::NOTE_EXIT;
-        let n = libc::kevent(kq, &sub, 1, std::ptr::null_mut(), 0, std::ptr::null());
-        if n < 0 {
-            libc::close(kq);
-            return;
-        }
-        // Block until the parent exits. `kevent` with a NULL
-        // timeout waits indefinitely; the one-shot
-        // registration auto-removes after firing.
-        let mut out: libc::kevent = std::mem::zeroed();
-        let _ = libc::kevent(
-            kq,
-            std::ptr::null(),
-            0,
-            &mut out,
-            1,
-            std::ptr::null(),
-        );
-        // Parent went away. Exit immediately — we don't have
-        // a useful action to take on a parentless root
-        // helper. Skip cleanup of `owned_paths` because we
-        // can't reach the main thread's state; the OS will
-        // unlink-on-reboot for sticky-tmp files anyway, and
-        // the parent's `quit` path is the normal cleanup
-        // route.
-        libc::_exit(0);
-    });
+    let _ = thread::Builder::new()
+        .name("helper-parent-watch".into())
+        .spawn(move || unsafe {
+            let kq = libc::kqueue();
+            if kq < 0 {
+                return;
+            }
+            // Register interest in NOTE_EXIT on the parent PID.
+            let mut sub: libc::kevent = std::mem::zeroed();
+            sub.ident = parent_pid as libc::uintptr_t;
+            sub.filter = libc::EVFILT_PROC;
+            sub.flags = libc::EV_ADD | libc::EV_ENABLE | libc::EV_ONESHOT;
+            sub.fflags = libc::NOTE_EXIT;
+            let n = libc::kevent(kq, &sub, 1, std::ptr::null_mut(), 0, std::ptr::null());
+            if n < 0 {
+                libc::close(kq);
+                return;
+            }
+            // Block until the parent exits. `kevent` with a NULL
+            // timeout waits indefinitely; the one-shot
+            // registration auto-removes after firing.
+            let mut out: libc::kevent = std::mem::zeroed();
+            loop {
+                let count = libc::kevent(kq, std::ptr::null(), 0, &mut out, 1, std::ptr::null());
+                if count < 0
+                    && std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted
+                {
+                    continue;
+                }
+                if count != 1 || !parent_exit_event(&out, parent_pid) {
+                    libc::close(kq);
+                    return;
+                }
+                break;
+            }
+            // Parent went away. Exit immediately — we don't have
+            // a useful action to take on a parentless root
+            // helper. Skip cleanup of `owned_paths` because we
+            // can't reach the main thread's state; the OS will
+            // unlink-on-reboot for sticky-tmp files anyway, and
+            // the parent's `quit` path is the normal cleanup
+            // route.
+            libc::_exit(0);
+        });
+}
+
+#[cfg(target_os = "macos")]
+fn parent_exit_event(event: &libc::kevent, parent_pid: i32) -> bool {
+    event.ident == parent_pid as libc::uintptr_t
+        && event.filter == libc::EVFILT_PROC
+        && event.flags & libc::EV_ERROR == 0
+        && event.fflags & libc::NOTE_EXIT != 0
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -1333,8 +1390,13 @@ fn run_server_scan(
     threads: usize,
     owner_uid: u32,
 ) -> Result<(std::path::PathBuf, i32), String> {
-    use std::io::Write;
     use std::os::fd::AsRawFd;
+
+    // uid_t's all-ones value means "leave ownership unchanged" to
+    // fchown, rather than a UID to which the result can be transferred.
+    if owner_uid == u32::MAX {
+        return Err("invalid output owner UID".to_string());
+    }
 
     // mkstemp-style: prefix + suffix in /tmp, mode 0600,
     // O_EXCL. `NamedTempFile` owns the file's lifetime; we
@@ -1358,7 +1420,11 @@ fn run_server_scan(
     // callback from a dedicated progress thread (one event
     // ≈ every 250 ms), so contention with the main thread's
     // final Ok write is negligible.
+    let mut progress_error = None;
     let mut progress_writer = |event: ProgressEvent| {
+        if progress_error.is_some() {
+            return;
+        }
         let mut out = std::io::stdout().lock();
         let reply = HelperReply::Progress {
             scanned: event.scanned,
@@ -1367,15 +1433,18 @@ fn run_server_scan(
             elapsed_ms: event.elapsed.as_millis(),
             terminal: event.terminal,
         };
-        let _ = serde_json::to_writer(&mut out, &reply);
-        let _ = out.write_all(b"\n");
-        let _ = out.flush();
+        if let Err(err) = write_reply(&mut out, &reply) {
+            progress_error = Some(err);
+        }
     };
     let options = FallbackOptions {
         cross_mounts: false,
         progress: Some(&mut progress_writer as &mut (dyn FnMut(ProgressEvent) + Send)),
         threads,
-        skip_aggregates: false,
+        // Only this private GUI transport omits legacy aggregates.
+        // The GUI builds its tree from entries, just like direct FFI
+        // scans. Public CLI output keeps its aggregate contract.
+        skip_aggregates: true,
     };
 
     let scan = match fallback_scan_path_with_options(path, options) {
@@ -1384,20 +1453,13 @@ fn run_server_scan(
             return Err(format!("scan {path} failed: {err}"));
         }
     };
-
-    let bytes = match rmp_serde::to_vec_named(&scan) {
-        Ok(b) => b,
-        Err(err) => return Err(format!("msgpack serialise failed: {err}")),
-    };
+    if let Some(err) = progress_error {
+        return Err(format!("write progress reply failed: {err}"));
+    }
     // Write through NamedTempFile's original mkstemp descriptor.
     // Re-opening the pathname here would let a watcher replace
     // the directory entry before a root process opened it.
-    if let Err(err) = tmp_out.as_file_mut().write_all(&bytes) {
-        return Err(format!("write output file failed: {err}"));
-    }
-    if let Err(err) = tmp_out.as_file_mut().flush() {
-        return Err(format!("flush output file failed: {err}"));
-    }
+    write_helper_scan_output(tmp_out.as_file_mut(), &scan)?;
 
     // The helper runs as root in production, while the GUI that
     // consumes this file does not. Keep the mkstemp permissions
@@ -1429,6 +1491,23 @@ fn run_server_scan(
             ));
         }
     }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let metadata = tmp_out
+            .as_file()
+            .metadata()
+            .map_err(|err| format!("verify output file failed: {err}"))?;
+        if !metadata.is_file()
+            || metadata.uid() != owner_uid
+            || metadata.nlink() != 1
+            || metadata.mode() & 0o777 != 0o600
+        {
+            return Err(
+                "output file failed ownership, type, link count, or mode check".to_string(),
+            );
+        }
+    }
 
     // Detach the tempfile from RAII so the path survives
     // past this function. The dispatcher tracks the path in
@@ -1441,9 +1520,223 @@ fn run_server_scan(
     Ok((out_path, 0))
 }
 
+fn write_helper_scan_output<W: std::io::Write>(
+    file: W,
+    scan: &FallbackScanOutput,
+) -> Result<(), String> {
+    // Borrow the original mkstemp descriptor. Never reopen the output
+    // pathname, and flush before ownership transfer or success reply.
+    let mut writer = std::io::BufWriter::with_capacity(1024 * 1024, file);
+    rmp_serde::encode::write_named(&mut writer, scan)
+        .map_err(|err| format!("msgpack serialise/write failed: {err}"))?;
+    writer
+        .flush()
+        .map_err(|err| format!("flush output file failed: {err}"))
+}
+
 #[cfg(test)]
 mod helper_protocol_tests {
-    use super::HelperCommand;
+    use super::*;
+    use std::io::{self, Cursor, Write};
+
+    struct FailingWriter {
+        fail_write: bool,
+        fail_flush: bool,
+    }
+
+    impl Write for FailingWriter {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            if self.fail_write {
+                Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "synthetic write failure",
+                ))
+            } else {
+                Ok(bytes.len())
+            }
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            if self.fail_flush {
+                Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "synthetic flush failure",
+                ))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    #[test]
+    fn replies_preserve_json_framing_and_report_write_or_flush_failures() {
+        let mut bytes = Vec::new();
+        write_reply(
+            &mut bytes,
+            &HelperReply::Err {
+                message: "tab\tnewline\n".into(),
+            },
+        )
+        .unwrap();
+        assert_eq!(bytes.iter().filter(|&&b| b == b'\n').count(), 1);
+        let reply: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(reply["message"], "tab\tnewline\n");
+        for writer in [
+            FailingWriter {
+                fail_write: true,
+                fail_flush: false,
+            },
+            FailingWriter {
+                fail_write: false,
+                fail_flush: true,
+            },
+        ] {
+            assert!(write_reply(&mut { writer }, &HelperReply::Bye).is_err());
+        }
+    }
+
+    #[test]
+    fn helper_frames_are_bounded_and_do_not_consume_the_next_command() {
+        let mut reader = Cursor::new(b"{\"op\":\"quit\"}\n{\"op\":\"quit\"}\n");
+        let mut line = String::new();
+        assert!(read_helper_line(&mut reader, &mut line).unwrap() > 0);
+        assert_eq!(line, "{\"op\":\"quit\"}\n");
+        line.clear();
+        assert!(read_helper_line(&mut reader, &mut line).unwrap() > 0);
+        line.clear();
+        assert_eq!(read_helper_line(&mut reader, &mut line).unwrap(), 0);
+        let mut reader = Cursor::new(vec![b'x'; MAX_HELPER_COMMAND_BYTES + 20]);
+        assert_eq!(
+            read_helper_line(&mut reader, &mut line).unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+        assert_eq!(line.len(), MAX_HELPER_COMMAND_BYTES + 1);
+    }
+
+    #[test]
+    fn buffered_helper_serialization_is_byte_exact_and_flush_errors_are_fatal() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("file"), b"content").unwrap();
+        let output = fallback_scan_path_with_options(
+            dir.path(),
+            FallbackOptions {
+                skip_aggregates: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let mut bytes = Vec::new();
+        write_helper_scan_output(&mut bytes, &output).unwrap();
+        assert_eq!(bytes, rmp_serde::to_vec_named(&output).unwrap());
+        for writer in [
+            FailingWriter {
+                fail_write: true,
+                fail_flush: false,
+            },
+            FailingWriter {
+                fail_write: false,
+                fail_flush: true,
+            },
+        ] {
+            assert!(write_helper_scan_output(writer, &output).is_err());
+        }
+    }
+
+    #[test]
+    fn helper_serialization_keeps_using_the_original_descriptor() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut file = tempfile::NamedTempFile::new_in(dir.path()).unwrap();
+        let path = file.path().to_owned();
+        let moved = dir.path().join("original-descriptor");
+        std::fs::rename(&path, &moved).unwrap();
+        std::fs::write(&path, b"replacement must remain unchanged").unwrap();
+        let scan_root = tempfile::tempdir().unwrap();
+        let output = fallback_scan_path_with_options(
+            scan_root.path(),
+            FallbackOptions {
+                skip_aggregates: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        write_helper_scan_output(file.as_file_mut(), &output).unwrap();
+        assert_eq!(
+            std::fs::read(&moved).unwrap(),
+            rmp_serde::to_vec_named(&output).unwrap()
+        );
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            b"replacement must remain unchanged"
+        );
+    }
+
+    #[test]
+    fn private_helper_omits_aggregates_and_preserves_every_other_field() {
+        use std::os::unix::fs::{symlink, MetadataExt};
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        std::fs::write(dir.path().join("sub/α\t\n"), b"content").unwrap();
+        std::fs::hard_link(dir.path().join("sub/α\t\n"), dir.path().join("alias")).unwrap();
+        symlink("sub/α\t\n", dir.path().join("link")).unwrap();
+        let expected = fallback_scan_path_with_options(
+            dir.path(),
+            FallbackOptions {
+                skip_aggregates: true,
+                threads: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let (path, exit) =
+            run_server_scan(dir.path().to_str().unwrap(), 1, unsafe { libc::geteuid() }).unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        let actual: FallbackScanOutput = rmp_serde::from_slice(&bytes).unwrap();
+        let metadata = std::fs::symlink_metadata(&path).unwrap();
+        assert!(remove_owned_path(&path));
+        assert_eq!(exit, 0);
+        assert_eq!(actual, expected);
+        assert!(actual.parser_output.aggregates.is_empty());
+        assert!(metadata.is_file());
+        assert_eq!(metadata.uid(), unsafe { libc::geteuid() });
+        assert_eq!(metadata.nlink(), 1);
+        assert_eq!(metadata.mode() & 0o777, 0o600);
+        let public = apfs_fastindex::fallback_scan_path(dir.path()).unwrap();
+        assert!(!public.parser_output.aggregates.is_empty());
+    }
+
+    #[test]
+    fn helper_refuses_the_fchown_no_change_uid_sentinel() {
+        let err = run_server_scan("not-a-directory", 1, u32::MAX).unwrap_err();
+        assert_eq!(err, "invalid output owner UID");
+    }
+
+    #[test]
+    fn failed_unlink_remains_retryable() {
+        let dir = tempfile::tempdir().unwrap();
+        // remove_file must not remove directories or forget the failed
+        // release, so shutdown can retry it. The test never elevates.
+        assert!(!remove_owned_path(dir.path()));
+        assert!(dir.path().is_dir());
+        assert!(remove_owned_path(&dir.path().join("already-gone")));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn only_a_successful_parent_exit_event_triggers_shutdown() {
+        let mut event: libc::kevent = unsafe { std::mem::zeroed() };
+        event.ident = 123;
+        event.filter = libc::EVFILT_PROC;
+        event.fflags = libc::NOTE_EXIT;
+        assert!(parent_exit_event(&event, 123));
+        assert!(!parent_exit_event(&event, 124));
+        event.flags = libc::EV_ERROR;
+        assert!(!parent_exit_event(&event, 123));
+        event.flags = 0;
+        event.fflags = 0;
+        assert!(!parent_exit_event(&event, 123));
+        event.fflags = libc::NOTE_EXIT;
+        event.filter = libc::EVFILT_READ;
+        assert!(!parent_exit_event(&event, 123));
+    }
 
     #[test]
     fn scan_command_preserves_worker_preferences_and_legacy_default() {
@@ -1471,4 +1764,11 @@ mod helper_protocol_tests {
         });
         assert!(serde_json::from_value::<HelperCommand>(command).is_err());
     }
+}
+#[test]
+fn cache_does_not_reuse_incompatible_mount_or_output_options() {
+    assert!(cache_options_supported(false, false, false));
+    assert!(!cache_options_supported(true, false, false));
+    assert!(!cache_options_supported(false, true, false));
+    assert!(!cache_options_supported(false, false, true));
 }

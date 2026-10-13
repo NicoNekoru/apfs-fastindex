@@ -5,61 +5,44 @@ import Foundation
 /// callers can depend on it without entangling SwiftUI / AppKit.
 public enum PathContainment {
 
-    /// Resolve `relative` against `scanRoot` and return the
-    /// canonical absolute path **iff** the result stays
-    /// contained inside `scanRoot`. Returns nil for paths that
-    /// escape via `..` segments or absolute-path relative
-    /// entries — those would otherwise direct context-menu
-    /// actions (Reveal in Finder, Move to Trash, etc.) at
-    /// arbitrary filesystem locations.
-    ///
-    /// Containment is verified by path-component prefix match
-    /// after both sides are `.standardizedFileURL`-normalised
-    /// AND Unicode-normalised (NFC) + case-folded on
-    /// case-insensitive volumes. `standardizedFileURL` resolves
-    /// `.` and `..` segments but does *not* follow symlinks —
-    /// matches Finder semantics where Trash/Reveal operate on
-    /// the symlink itself.
-    ///
-    /// Round-2 audit #N2: the previous straight `==` compare
-    /// rejected real files when the scan root and an entry's
-    /// path differed in Unicode normalisation (NFC vs NFD) or
-    /// letter case. Most user volumes on macOS are
-    /// case-insensitive, and APFS preserves the on-disk
-    /// normalisation form — so a scan root captured NFC + an
-    /// entry stored NFD would lose containment for paths that
-    /// are in fact contained. Component-by-component comparison
-    /// (not string prefix) still prevents `/Users/kai` from
-    /// accidentally accepting `/Users/kaiserwilhelm/...` as
-    /// contained.
+    /// Resolve a relative entry path without letting file actions escape
+    /// the scan root. Compare components under NFC and the volume's case
+    /// rules, then check resolved ancestor symlinks. The final component
+    /// remains unresolved so a symlink itself can be revealed or trashed.
+    /// This is a point-in-time check. Callers must recheck before acting.
     public static func resolveContained(
         scanRoot: String,
         relative: String
     ) -> String? {
-        guard !scanRoot.isEmpty else { return nil }
+        guard !scanRoot.isEmpty, !scanRoot.utf8.contains(0),
+            !relative.hasPrefix("/"), !relative.utf8.contains(0)
+        else { return nil }
         let joinedRaw = relative.isEmpty
             ? scanRoot
             : (scanRoot as NSString).appendingPathComponent(relative)
         let rootURL = URL(fileURLWithPath: scanRoot).standardizedFileURL
         let candidateURL = URL(fileURLWithPath: joinedRaw).standardizedFileURL
-        let rootComponents = rootURL.pathComponents
-        let candidateComponents = candidateURL.pathComponents
-
-        // Detect case sensitivity once per call (cheap — a
-        // file-attribute lookup). On case-insensitive volumes
-        // we lower-case before comparing; otherwise we only
-        // NFC-normalise.
         let caseInsensitive = volumeIsCaseInsensitive(at: rootURL)
-
-        guard candidateComponents.count >= rootComponents.count else {
+        guard contains(root: rootURL, candidate: candidateURL, caseInsensitive: caseInsensitive) else {
             return nil
         }
-        for (rootC, candC) in zip(rootComponents, candidateComponents.prefix(rootComponents.count)) {
-            if !equalForContainment(rootC, candC, caseInsensitive: caseInsensitive) {
+        if candidateURL.pathComponents.count > rootURL.pathComponents.count {
+            let resolvedRoot = rootURL.resolvingSymlinksInPath()
+            let resolvedParent = candidateURL.deletingLastPathComponent().resolvingSymlinksInPath()
+            guard contains(root: resolvedRoot, candidate: resolvedParent, caseInsensitive: caseInsensitive) else {
                 return nil
             }
         }
         return candidateURL.path
+    }
+
+    private static func contains(root: URL, candidate: URL, caseInsensitive: Bool) -> Bool {
+        let rootComponents = root.pathComponents
+        let candidateComponents = candidate.pathComponents
+        guard candidateComponents.count >= rootComponents.count else { return false }
+        return zip(rootComponents, candidateComponents).allSatisfy {
+            equalForContainment($0.0, $0.1, caseInsensitive: caseInsensitive)
+        }
     }
 
     /// Compare two single path components under NFC + optional
@@ -88,19 +71,14 @@ public enum PathContainment {
     /// created case-sensitive volumes (APFS Case-Sensitive,
     /// HFS+ Case-Sensitive) return false.
     ///
-    /// Defaults to `true` on lookup failure — most user volumes
-    /// are case-insensitive, so the default matches the common
-    /// case. A false positive here only changes containment
-    /// from "fail-closed on case mismatch" to "accept case
-    /// mismatch"; it doesn't open a new escape route because
-    /// `..` normalisation happens earlier in
-    /// `resolveContained`.
+    /// On lookup failure, require exact case rather than accepting a
+    /// differently-cased sibling on an unknown volume.
     public static func volumeIsCaseInsensitive(at url: URL) -> Bool {
         let keys: Set<URLResourceKey> = [.volumeSupportsCaseSensitiveNamesKey]
         if let values = try? url.resourceValues(forKeys: keys),
            let supportsCaseSensitive = values.volumeSupportsCaseSensitiveNames {
             return !supportsCaseSensitive
         }
-        return true
+        return false
     }
 }
